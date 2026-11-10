@@ -11,11 +11,10 @@ Ingress'ам. Пути плагинов `/webhook` и `/pluginpage` обязан
 тот же «login POST → index.html», который чинили в #331. Prod wildcard (:443,
 catch-all) остаётся последним (50).
 
-Второй блок — GitOps (acceptance №13, риск «Argo selfHeal вернул replicas: 0»
-в §10): Deployment плагина декларируется с `replicas: 0`, Plugin Gateway будит
-его патчем `deployments/scale`. `automated.selfHeal` без `ignoreDifferences`
-мгновенно вернул бы 0 и 0 -> 1 никогда не успел бы отработать. Проверяем, что
-исключение на месте, и что в манифест НЕ просочились kinds новых control plane
+Второй блок — GitOps: runtime-created Deployment плагинов вне Application, поэтому
+широкий ignore /spec/replicas не должен подавлять Git масштабы always-on workloads.
+Один runtime-owned /data state — единственный защищённый дрейф. Также проверяем,
+что в манифест НЕ просочились kinds новых control plane
 (KEDA / Knative / cert-manager / HPA), которых нет в whitelist 00-project.yaml.
 
 Тесты читают YAML как текст/данные и НЕ запускают kubectl/argocd/кластер.
@@ -221,7 +220,7 @@ def test_plugins_gateway_sync_wave_matches_plugin_platform() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 4. GitOps: ignoreDifferences /spec/replicas и запрет новых CRD
+# 4. GitOps: runtime objects вне Argo, runtime state и запрет новых CRD
 # ---------------------------------------------------------------------------
 
 
@@ -229,38 +228,35 @@ def _plugin_platform_docs() -> list[dict]:
     return [d for d in yaml.safe_load_all(_text(PLUGIN_PLATFORM)) if d]
 
 
-def test_plugin_platform_ignores_replicas_for_deployments() -> None:
-    """Иначе selfHeal вернёт `replicas: 0` и activator не сможет будить backend."""
+def test_plugin_platform_does_not_ignore_replicas_and_protects_only_state() -> None:
+    """Runtime Deployment вне Argo; always-on масштабы остаются Git-owned."""
     docs = _plugin_platform_docs()
     assert len(docs) == 1, "plugin-platform.yaml — ровно один Application"
     app = docs[0]
     assert app["kind"] == "Application"
     assert app["spec"]["project"] == "agentscale"
 
-    ignore = app["spec"].get("ignoreDifferences")
-    assert ignore, "ignoreDifferences отсутствует — selfHeal убьёт wake-up"
+    ignore = app["spec"].get("ignoreDifferences") or []
+    for rule in ignore:
+        if rule.get("kind") != "Deployment":
+            continue
+        pointers = rule.get("jsonPointers") or []
+        jq_paths = rule.get("jqPathExpressions") or []
+        assert "/spec/replicas" not in pointers
+        assert ".spec.replicas" not in jq_paths
 
-    replicas_rules = [
-        rule
-        for rule in ignore
-        if rule.get("group") == "apps"
-        and rule.get("kind") == "Deployment"
-        and "/spec/replicas" in (rule.get("jsonPointers") or [])
+    assert ignore == [
+        {
+            "group": "",
+            "kind": "ConfigMap",
+            "name": "plugin-activation-state",
+            "jsonPointers": ["/data"],
+        }
     ]
-    assert replicas_rules, (
-        "нужна запись {group: apps, kind: Deployment, "
-        "jsonPointers: [/spec/replicas]} (Argo CD 2.13 Diff Customization)"
-    )
-    # Рабочий вариант зафиксирован точечно; jq-путь — эквивалентный дубль.
-    assert any(
-        ".spec.replicas" in (rule.get("jqPathExpressions") or [])
-        for rule in replicas_rules
-    ), "jqPathExpressions должен дублировать тот же путь .spec.replicas"
-
     policy = app["spec"]["syncPolicy"]
     assert policy["automated"]["selfHeal"] is True
     assert "RespectIgnoreDifferences=true" in (policy.get("syncOptions") or []), (
-        "без RespectIgnoreDifferences игнор не защищает от apply при синке"
+        "без RespectIgnoreDifferences узкий /data ignore не защищает activation CAS"
     )
 
 

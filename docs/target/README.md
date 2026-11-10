@@ -1,7 +1,11 @@
 # Target architecture — LEGACY
 
-> **LEGACY.** Этот каталог — AI-generated «канон», **не** источник правды по продукту.  
-> **Продукт:** [docs/PRODUCT.md](../PRODUCT.md) · **As-built код:** [12-layer-docs/](12-layer-docs/) · **Политика:** [LEGACY.md](../LEGACY.md)
+> **LEGACY / HISTORY.** Этот каталог — исторический AI-generated «канон», **не**
+> источник правды по продукту. [12-layer-docs/](12-layer-docs/) внутри него —
+> отдельный устаревший snapshot до перерасчёта, не текущая as-built карта.
+> **Продукт:** [docs/PRODUCT.md](../PRODUCT.md) · **Current state:**
+> [migration/plugin-migration-status.md](../migration/plugin-migration-status.md) ·
+> **Политика:** [LEGACY.md](../LEGACY.md)
 
 Не блокировать разработку gap map'ом. Не добавлять новые модули `01…15` без явной задачи.
 
@@ -27,7 +31,7 @@ Admin (KC) → Company (KC, **локальный Admin**: employees / containers
 3. [Cabinets](05-cabinets/) · [Projects](06-projects-runtime/) · [**Containers / Pods**](14-project-containers/) · [**Content storage**](15-content-storage/)  
 4. [Identity](10-identity-keycloak/) · [Admin](01-platform-admin/) · [AI Keys](02-ai-provider-keys/)  
 5. [UI](07-ui-mobile-core/) · [Agents](08-agent-providers/) · [Infra](13-platform-infra/)  
-6. [Gap](09-gap-map.md) · [As-built](12-layer-docs/) · [Plan](11-implementation-plan/)
+6. [Gap](09-gap-map.md) · [Historical snapshot](12-layer-docs/) · [Plan](11-implementation-plan/)
 
 ## Карта модулей
 
@@ -46,7 +50,7 @@ Admin (KC) → Company (KC, **локальный Admin**: employees / containers
 | 08 | Agent providers | SDK adapters |
 | 09 | Gap map | канон ↔ код |
 | 11 | Implementation plan | Слои / DoD |
-| 12 | Layer docs | As-built |
+| 12 | Layer docs | Historical snapshot до перерасчёта |
 | 13 | Platform infra | Kafka, MinIO, Celery, Redis |
 | 14 | Project Containers | **Isolated Pod** per Project |
 | 15 | Content storage | File Service + assets/aliases/ACL |

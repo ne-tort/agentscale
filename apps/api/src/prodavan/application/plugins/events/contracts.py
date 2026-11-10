@@ -59,11 +59,18 @@ __all__ = [
     "AUDIT_PLUGIN_EVENT_DLQ",
     "AUDIT_PLUGIN_EVENT_RECEIVED",
     "DeliveryAttempt",
+    "DeliveryClaim",
+    "DeliveryClaimError",
+    "ConsumerAssignment",
     "DeliveryOutcome",
+    "DeliveryOutcomeUncertainError",
     "DlqRecord",
     "IdempotencyKey",
     "PluginEvent",
+    "RawDlqRecord",
+    "RawRecordIdempotencyKey",
     "Subscription",
+    "backend_idempotency_key",
     "canonical_digest",
     "consumer_config",
     "delivery_outcome_for_attempt",
@@ -145,6 +152,15 @@ def _require_aware_datetime(value: Any, name: str) -> datetime:
         raise PluginEventError(
             PluginEventErrorCode.INVALID_CONTRACT,
             f"{name} обязано быть timezone-aware datetime (UTC)",
+        )
+    return value
+
+
+def _require_nonnegative_int(value: Any, name: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise PluginEventError(
+            PluginEventErrorCode.INVALID_CONTRACT,
+            f"{name} обязано быть неотрицательным целым",
         )
     return value
 
@@ -417,6 +433,138 @@ class IdempotencyKey:
 
 
 @dataclass(frozen=True, slots=True)
+class RawRecordIdempotencyKey:
+    """Ключ raw DLQ: координаты записи + consumer group.
+
+    У malformed record нет доверенных event_id/source_event_id. Поэтому обычный
+    IdempotencyKey здесь не используется: подстановка технических значений в
+    него подменила бы identity и смешала два разных контракта.
+    """
+
+    topic: str
+    partition: int
+    offset: int
+    consumer_group: str
+
+    def __post_init__(self) -> None:
+        _require_text(self.topic, "topic")
+        _require_nonnegative_int(self.partition, "partition")
+        _require_nonnegative_int(self.offset, "offset")
+        _require_text(self.consumer_group, "consumer_group")
+
+    def as_tuple(self) -> tuple[str, int, int, str]:
+        return (self.topic, self.partition, self.offset, self.consumer_group)
+
+
+class DeliveryClaimError(PluginEventError):
+    """Typed, retryable claim failure without any backend delivery side effect."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(PluginEventErrorCode.CONSUME_FAILED, reason)
+        self.retryable = True
+        self.side_effects_uncertain = False
+
+
+class DeliveryOutcomeUncertainError(PluginEventError):
+    """Typed failure after a possible backend side effect; never auto-succeeds."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(PluginEventErrorCode.CONSUME_FAILED, reason)
+        self.retryable = False
+        self.side_effects_uncertain = True
+
+
+@dataclass(frozen=True, slots=True)
+class DeliveryClaim:
+    """Typed ownership for one durable per-event delivery lease."""
+
+    key: IdempotencyKey
+    owner_token: str
+    generation: int
+    lease_seconds: float
+    completed: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.key, IdempotencyKey):
+            raise PluginEventError(
+                PluginEventErrorCode.INVALID_CONTRACT,
+                "delivery claim key must be IdempotencyKey",
+            )
+        _require_text(self.owner_token, "owner_token")
+        if (
+            not isinstance(self.generation, int)
+            or isinstance(self.generation, bool)
+            or self.generation <= 0
+        ):
+            raise PluginEventError(
+                PluginEventErrorCode.INVALID_CONTRACT,
+                "delivery claim generation must be positive",
+            )
+        if (
+            not isinstance(self.lease_seconds, (int, float))
+            or isinstance(self.lease_seconds, bool)
+            or self.lease_seconds <= 0
+        ):
+            raise PluginEventError(
+                PluginEventErrorCode.INVALID_CONTRACT,
+                "delivery claim lease_seconds must be positive",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class ConsumerAssignment:
+    """Public consumer-group assignment metadata, without private generation APIs."""
+
+    topic: str
+    partition: int
+    owned: bool
+    offset: int | None = None
+    generation: int | None = None
+
+    def __post_init__(self) -> None:
+        _require_text(self.topic, "topic")
+        _require_nonnegative_int(self.partition, "partition")
+        if not isinstance(self.owned, bool):
+            raise PluginEventError(
+                PluginEventErrorCode.INVALID_CONTRACT,
+                "consumer assignment owned must be bool",
+            )
+        if self.offset is not None:
+            _require_nonnegative_int(self.offset, "offset")
+        if self.generation is not None and (
+            not isinstance(self.generation, int)
+            or isinstance(self.generation, bool)
+            or self.generation <= 0
+        ):
+            raise PluginEventError(
+                PluginEventErrorCode.INVALID_CONTRACT,
+                "consumer generation must be positive when provided",
+            )
+
+
+def backend_idempotency_key(key: IdempotencyKey) -> str:
+    """Server-derived stable backend key; never accepted from a client."""
+
+    if not isinstance(key, IdempotencyKey):
+        raise PluginEventError(
+            PluginEventErrorCode.INVALID_CONTRACT,
+            "backend idempotency key requires IdempotencyKey",
+        )
+    encoded = json.dumps(
+        {
+            "domain": "agentscale.plugin.event.delivery.v1",
+            "source_event_id": key.source_event_id,
+            "subscription_id": key.subscription_id,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = hashlib.sha256(encoded).hexdigest()
+    return f"agentscale-plugin-event:{digest}"
+
+
+@dataclass(frozen=True, slots=True)
 class DlqRecord:
     """Запись DLQ. Сохраняет ``event_id`` и ``run_id`` исходного события.
 
@@ -464,6 +612,58 @@ class DlqRecord:
             "topic": self.topic,
             "dlq_topic": self.dlq_topic,
             "attempts": self.attempts,
+            "error_kind": self.error_kind,
+            "failed_at": self.failed_at.astimezone(UTC).isoformat(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class RawDlqRecord:
+    """DLQ-запись для raw record, не прошедшей decode/validation.
+
+    Содержит только координаты источника, digest и имя класса ошибки. Здесь
+    намеренно нет PluginEvent, event_id, source_event_id, company_id или run_id:
+    до успешного from_wire эти identity недоверенны и не должны выдумываться.
+    Сырой payload в объект и в to_wire не передаётся.
+    """
+
+    topic: str
+    partition: int
+    offset: int
+    consumer_group: str
+    payload_digest: str
+    error_kind: str
+    failed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+    def __post_init__(self) -> None:
+        _require_text(self.topic, "topic")
+        _require_nonnegative_int(self.partition, "partition")
+        _require_nonnegative_int(self.offset, "offset")
+        _require_text(self.consumer_group, "consumer_group")
+        _require_digest(self.payload_digest, "payload_digest")
+        _require_text(self.error_kind, "error_kind")
+        _require_aware_datetime(self.failed_at, "failed_at")
+
+    @property
+    def idempotency_key(self) -> RawRecordIdempotencyKey:
+        """Стабильный ключ дедупликации повторной записи после retry."""
+
+        return RawRecordIdempotencyKey(
+            topic=self.topic,
+            partition=self.partition,
+            offset=self.offset,
+            consumer_group=self.consumer_group,
+        )
+
+    def to_wire(self) -> dict[str, Any]:
+        """Безопасное представление для RawDlqPort, без сырого payload."""
+
+        return {
+            "topic": self.topic,
+            "partition": self.partition,
+            "offset": self.offset,
+            "consumer_group": self.consumer_group,
+            "payload_digest": self.payload_digest,
             "error_kind": self.error_kind,
             "failed_at": self.failed_at.astimezone(UTC).isoformat(),
         }

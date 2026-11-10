@@ -1,5 +1,11 @@
 # Выравнивание plugin-manifest и CompatibilityGate (аудит F11, блокер №5)
 
+> **HISTORICAL REPORT / NOT CURRENT ACCEPTANCE.** Содержимое относится к ранней
+> волне и не переподтверждено на audited HEAD `6ee720dd`. Любые «реализовано»,
+> `[x]`, `acceptance ✓`, «эталон» и прошлые test counts — только historical
+> claims. Актуальный статус: [STOP-SHIP](plugin-migration-status.md) и
+> [live-only acceptance map](plugin-acceptance-map.md). Написанный код ≠ live.
+
 **Решение: Вариант A.** CompatibilityGate НЕ читает запрещённые поля из
 подписанного manifest. Закрытый whitelist `validate_manifest` (задача 01)
 сохранён без ослаблений; доверие к сканеру и CSP перенесено туда, где оно и

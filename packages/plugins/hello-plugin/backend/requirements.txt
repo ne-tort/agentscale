@@ -1,6 +1,9 @@
-# Зависимости backend-контейнера пилота. Версии фиксированы по минору:
-# образ пинится по digest задачей 16, запрет :latest (§5.1).
+# Только direct dependency manifest; Docker НЕ устанавливает этот файл.
+# Нужен reviewed requirements.lock с полным direct+transitive graph и SHA256
+# каждого artifact; pip вызывается с --require-hashes --no-deps. Полного lock
+# в доступных repo lockfiles нет, поэтому фиктивный requirements.lock не создан.
 # psycopg не нужен — asyncpg работает с PostgreSQL по прямому DSN (§2).
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 asyncpg==0.30.0
+httpx==0.28.1

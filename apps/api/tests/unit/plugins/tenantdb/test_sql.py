@@ -116,6 +116,21 @@ def test_database_exists_is_parameterized() -> None:
     assert "co_123" not in stmt.text  # значение НЕ в тексте SQL
 
 
+def test_post_state_probes_use_exact_bind_values() -> None:
+    login = sql.role_login_enabled(ROLE)
+    assert login.text == "SELECT 1 FROM pg_roles WHERE rolname = :rolname AND rolcanlogin"
+    assert login.params == {"rolname": ROLE}
+
+    connect = sql.database_connect_granted(DB, ROLE)
+    assert "aclexplode" in connect.text
+    assert "JOIN pg_roles AS grantee" in connect.text
+    assert "acl.privilege_type = 'CONNECT'" in connect.text
+    assert connect.params == {"name": DB, "role": ROLE}
+    assert DB not in connect.text and ROLE not in connect.text
+    # PUBLIC is deliberately not treated as an explicit per-role GRANT.
+    assert "grantee.oid = acl.grantee" in connect.text
+
+
 def test_create_database_is_quoted_and_no_if_not_exists() -> None:
     stmt = sql.create_database(DB)
     assert stmt.text == 'CREATE DATABASE "tenant_co_123"'
@@ -133,6 +148,9 @@ def test_ddl_rejects_unvalidated_identifiers() -> None:
     payload = 'co_123"; DROP DATABASE prodavan; --'
     for fn in (
         lambda: sql.database_exists(payload),
+        lambda: sql.role_login_enabled(payload),
+        lambda: sql.database_connect_granted(payload, ROLE),
+        lambda: sql.database_connect_granted(DB, payload),
         lambda: sql.create_database(payload),
         lambda: sql.create_role(payload, password="x"),
         lambda: sql.drop_database(payload),

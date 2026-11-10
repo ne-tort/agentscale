@@ -22,18 +22,19 @@ from typing import Literal, Protocol, runtime_checkable
 
 from prodavan.application.plugins.objects.errors import InvalidTtl, PluginObjectError
 
-# Диапазон TTL presigned/STS. Минимум 60 с (иначе URL бесполезен / гонка часов),
-# максимум 3600 с (short-lived, §5.4). Проверяется и в портах-адаптерах, и в
-# сервисе: константы единые, чтобы расхождение было невозможно.
+# Presigned URL: 60..3600. STS имеет ОТДЕЛЬНЫЙ контракт 900..3600,
+# подтверждённый real MinIO matrix (TTL=60 → 400, TTL=900 → 200).
 MIN_TTL_SECONDS = 60
 MAX_TTL_SECONDS = 3600
+MIN_STS_TTL_SECONDS = 900
+MAX_STS_TTL_SECONDS = MAX_TTL_SECONDS
 DEFAULT_TTL_SECONDS = 900
 
 ObjectMethod = Literal["get", "put"]
 
 
 def validate_ttl(ttl_seconds: int) -> int:
-    """Единая проверка TTL для STS и presigned.
+    """Проверка TTL ТОЛЬКО для presigned URL (60..3600).
 
     As-built ``minio_store.presign_*`` делает только ``max(60, ...)`` — верхней
     границы нет, значит ``ExpiresIn`` может уйти в «почти бессрочный» URL.
@@ -49,6 +50,18 @@ def validate_ttl(ttl_seconds: int) -> int:
             f"TTL={ttl} вне диапазона [{MIN_TTL_SECONDS}, {MAX_TTL_SECONDS}]"
         )
     return ttl
+
+
+def validate_sts_ttl(ttl_seconds: int) -> int:
+    """Validate MinIO STS DurationSeconds (900..3600), without clamping."""
+    if not isinstance(ttl_seconds, int) or isinstance(ttl_seconds, bool):
+        raise InvalidTtl("STS DurationSeconds must be an integer")
+    if not MIN_STS_TTL_SECONDS <= ttl_seconds <= MAX_STS_TTL_SECONDS:
+        raise InvalidTtl(
+            f"STS TTL={ttl_seconds} вне диапазона "
+            f"[{MIN_STS_TTL_SECONDS}, {MAX_STS_TTL_SECONDS}]"
+        )
+    return ttl_seconds
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +174,10 @@ class PresignPort(Protocol):
         ...
 
     async def presign_put(self, *, bucket: str, key: str, ttl_seconds: int) -> str:
+        ...
+
+    async def presign_head(self, *, bucket: str, key: str, ttl_seconds: int) -> str:
+        """HEAD uses the same GetObject IAM permission, never ListBucket."""
         ...
 
 

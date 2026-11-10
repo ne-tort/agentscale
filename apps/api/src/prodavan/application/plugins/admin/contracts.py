@@ -23,7 +23,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+import re
 from typing import Final
+
+from prodavan.domain.plugins.types import SEMVER_PATTERN
 
 
 # --------------------------------------------------------------------------- реестры
@@ -92,10 +95,18 @@ class GrantStatus(StrEnum):
     REVOKED = "revoked"
 
 
+class EffectiveQuotasStatus(StrEnum):
+    """Доступность фактических effective quotas для read-only evidence."""
+
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+
+
 class AdminOperation(StrEnum):
     """Имена audit-событий (§4.4, §4.5)."""
 
     GRANT = "plugin_grant"
+    APPROVE_PUBLICATION = "plugin_publication_approved"
     REVOKE = "plugin_revoke"
     UNINSTALL = "plugin_uninstall"
     WAKE = "plugin_wake_up"
@@ -114,6 +125,13 @@ class PluginRuntimeStatus(StrEnum):
     IDLE = "idle"
     SUSPENDED = "suspended"
     ABSENT = "absent"
+
+
+#: Public recovery error. Durably represented by PluginInstanceStatus.QUARANTINED
+#: because the existing DB check constraint is intentionally not changed by this saga.
+UPDATE_INCONSISTENT_CODE: Final[str] = "UPDATE_INCONSISTENT"
+#: Re-grant must allocate a fresh PK; reusing the revoked PK is a typed conflict.
+REGRANT_ID_CONFLICT_CODE: Final[str] = "REGRANT_ID_CONFLICT"
 
 
 # --------------------------------------------------------------------------- политики
@@ -169,8 +187,8 @@ class QuotaSet:
 class CapabilitySet:
     """Типизированный набор capability + egress-политика + квоты.
 
-    Передаётся одним аргументом ``capabilities`` в ``PluginAdminService.grant``:
-    grant обязан быть долгоживущим и содержать и egress, и квоты (§4.2, §5.5).
+    Передаётся одним аргументом ``capabilities`` в pre-approval и ``grant``:
+    durable approval/grant обязаны содержать и egress, и квоты (§4.2, §5.5).
     """
 
     capabilities: tuple[str, ...]
@@ -186,6 +204,76 @@ class CapabilitySet:
         if unknown:
             # Fail-closed: неизвестное capability не «тихо игнорируется», а отклоняется.
             raise ValueError(f"неизвестные capability (§4.4): {', '.join(unknown)}")
+
+
+@dataclass(frozen=True, slots=True)
+class PluginPublicationApproval:
+    """Durable administrative pre-approval, не CapabilityGrant и не ACTIVE-статус.
+
+    Approval создаётся до публикации и связывает решение администратора с точными
+    company/plugin/SemVer/bundle-digest и полной capability/egress/quota политикой.
+    ``consumed_at`` — только отметка успешной grant saga; отдельного lifecycle-
+    статуса у approval намеренно нет.
+    """
+
+    approval_id: str
+    company_id: str
+    plugin_id: str
+    manifest_version: str
+    artifact_digest: str
+    capabilities: tuple[str, ...]
+    egress_policy: EgressPolicy
+    quotas: QuotaSet
+    created_by: str
+    created_at: datetime
+    consumed_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        for name in (
+            "approval_id", "company_id", "plugin_id", "manifest_version",
+            "artifact_digest", "created_by",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value or value != value.strip():
+                raise ValueError(f"{name} approval должен быть непустой stripped-строкой")
+        if SEMVER_PATTERN.fullmatch(self.manifest_version) is None:
+            raise ValueError("manifest_version approval обязан быть SemVer 2.0.0")
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", self.artifact_digest) is None:
+            raise ValueError("artifact_digest approval должен быть sha256:<64 hex>")
+        if not isinstance(self.capabilities, tuple):
+            raise TypeError("capabilities approval должен быть tuple[str, ...]")
+        if not isinstance(self.egress_policy, EgressPolicy):
+            raise TypeError("egress_policy approval должен быть EgressPolicy")
+        if not isinstance(self.quotas, QuotaSet):
+            raise TypeError("quotas approval должен быть QuotaSet")
+        # Повторное построение централизованно проверяет allowlist и дубликаты.
+        CapabilitySet(
+            capabilities=self.capabilities,
+            egress_policy=self.egress_policy,
+            quotas=self.quotas,
+        )
+        if (
+            not isinstance(self.created_at, datetime)
+            or self.created_at.tzinfo is None
+            or self.created_at.utcoffset() is None
+        ):
+            raise ValueError("created_at approval должен быть timezone-aware")
+        if self.consumed_at is not None and (
+            not isinstance(self.consumed_at, datetime)
+            or self.consumed_at.tzinfo is None
+            or self.consumed_at.utcoffset() is None
+        ):
+            raise ValueError("consumed_at approval должен быть timezone-aware")
+        if self.consumed_at is not None and self.consumed_at < self.created_at:
+            raise ValueError("consumed_at approval не может предшествовать created_at")
+
+    @property
+    def capability_set(self) -> CapabilitySet:
+        return CapabilitySet(
+            capabilities=self.capabilities,
+            egress_policy=self.egress_policy,
+            quotas=self.quotas,
+        )
 
 
 # --------------------------------------------------------------------------- реестр артефактов
@@ -271,7 +359,87 @@ class WakeResult:
     waited_ms: int
 
 
-# --------------------------------------------------------------------------- grant и токен
+# --------------------------------------------------------------------------- instance / grant и токен
+
+
+class PluginInstanceStatus(StrEnum):
+    """Durable-состояние установки; значения совпадают с ``PluginInstanceRow``."""
+
+    INSTALLED = "installed"
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    REVOKED = "revoked"
+    QUARANTINED = "quarantined"
+
+
+@dataclass(frozen=True, slots=True)
+class PluginInstanceRecord:
+    """Persistent saga record, создаваемый ДО внешней инфраструктуры и grant.
+
+    Секреты и plaintext DSN здесь не хранятся: только имена БД/bucket и pin версии.
+    """
+
+    plugin_instance_id: str
+    company_id: str
+    plugin_id: str
+    manifest_version: str
+    artifact_digest: str
+    status: PluginInstanceStatus
+    tenant_db_name: str
+    bucket_name: str
+    created_at: datetime
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        if not all(
+            value.strip()
+            for value in (
+                self.plugin_instance_id,
+                self.company_id,
+                self.plugin_id,
+                self.manifest_version,
+                self.artifact_digest,
+                self.tenant_db_name,
+                self.bucket_name,
+            )
+        ):
+            raise ValueError("поля plugin instance не должны быть пустыми")
+        for value in (self.created_at, self.updated_at):
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError("instance timestamps должны быть timezone-aware")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SecretPreDeliveryRequest:
+    """Control-plane delivery phase bound to a persisted installation and artifact pin.
+
+    No CapabilityEnvelope, grant_id, subject, or plugin token exists at this phase.
+    A different target pin is allowed only for the approved deployment-update saga.
+    """
+
+    request_id: str
+    installation: PluginInstanceRecord
+    manifest_version: str
+    artifact_digest: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.request_id, str)
+            or not self.request_id.strip()
+            or any(char in self.request_id for char in ("\x00", "\n", "\r"))
+        ):
+            raise ValueError("secret pre-delivery request_id is invalid")
+        if not isinstance(self.installation, PluginInstanceRecord):
+            raise TypeError("secret pre-delivery requires PluginInstanceRecord")
+        if SEMVER_PATTERN.fullmatch(self.manifest_version) is None:
+            raise ValueError("secret pre-delivery manifest_version is invalid")
+        if (
+            not isinstance(self.artifact_digest, str)
+            or len(self.artifact_digest) != 71
+            or not self.artifact_digest.startswith("sha256:")
+            or any(char not in "0123456789abcdef" for char in self.artifact_digest[7:])
+        ):
+            raise ValueError("secret pre-delivery artifact_digest is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,6 +462,9 @@ class CapabilityGrantRecord:
     status: GrantStatus
     created_at: datetime
     revoked_at: datetime | None = None
+    #: Opaque per-instance SecretStore reference pinned beside the artifact digest.
+    #: Plaintext webhook material is never part of this record or its repr contract.
+    webhook_secret_ref: str | None = None
 
     def __post_init__(self) -> None:
         if not all(
@@ -312,10 +483,75 @@ class CapabilityGrantRecord:
             raise ValueError("artifact_digest должен быть sha256:<64 hex>")
         if self.created_at.tzinfo is None or self.created_at.utcoffset() is None:
             raise ValueError("created_at должен быть timezone-aware")
+        ref = self.webhook_secret_ref
+        if ref is not None and (
+            not isinstance(ref, str)
+            or not ref
+            or ref != ref.strip()
+            or len(ref) > 2048
+            or any(char.isspace() or char == "\0" for char in ref)
+            or not ref.startswith(("file://", "vault://"))
+        ):
+            raise ValueError("webhook_secret_ref должен быть opaque file:// или vault:// ссылкой")
 
     @property
     def is_active(self) -> bool:
         return self.status is GrantStatus.ACTIVE
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactPinUpdateResult:
+    """Post-state одной атомарной транзакции instance + grant artifact CAS."""
+
+    instance: PluginInstanceRecord
+    grant: CapabilityGrantRecord
+
+
+@dataclass(frozen=True, slots=True)
+class PluginUpdateLockLease:
+    """Owned distributed-update lease bound to one durable pre-update state."""
+
+    company_id: str
+    plugin_id: str
+    plugin_instance_id: str
+    expected_manifest_version: str
+    expected_artifact_digest: str
+    owner_token: str
+
+    def __post_init__(self) -> None:
+        values = (
+            self.company_id,
+            self.plugin_id,
+            self.plugin_instance_id,
+            self.expected_manifest_version,
+            self.expected_artifact_digest,
+            self.owner_token,
+        )
+        if any(not isinstance(value, str) or not value.strip() for value in values):
+            raise ValueError("update lease identity, expected pin and owner are required")
+        if len(self.owner_token) > 256 or any(
+            char.isspace() or char == "\0" for char in self.owner_token
+        ):
+            raise ValueError("update lease owner token is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class PluginRuntimeBinding:
+    """Live Deployment artifact and update-owner annotations, read as one fence."""
+
+    plugin_instance_id: str
+    artifact_digest: str
+    update_owner_token: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.plugin_instance_id.strip() or not self.artifact_digest.strip():
+            raise ValueError("runtime binding instance and artifact digest are required")
+        if self.update_owner_token is not None and (
+            not self.update_owner_token
+            or len(self.update_owner_token) > 256
+            or any(char.isspace() or char == "\0" for char in self.update_owner_token)
+        ):
+            raise ValueError("runtime update owner token is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -404,6 +640,13 @@ class AdminAuditEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class PublicationApprovalReceipt:
+    approval: PluginPublicationApproval
+    created: bool
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
 class GrantReceipt:
     company_id: str
     plugin_id: str
@@ -475,7 +718,12 @@ class WakeReceipt:
 
 @dataclass(frozen=True, slots=True)
 class InstalledPlugin:
-    """Одна строка ``GET /admin/plugins`` (установленные плагины + статусы)."""
+    """Одна строка ``GET /admin/plugins`` (установленные плагины + статусы).
+
+    ``quotas`` содержит только фактические limits активного, корректно связанного
+    grant. Для revoked/expired grant значение ``None`` + ``UNAVAILABLE`` явно
+    запрещает acceptance-клиенту считать старые persisted limits effective.
+    """
 
     plugin_id: str
     plugin_instance_id: str
@@ -487,6 +735,19 @@ class InstalledPlugin:
     enabled: bool
     capabilities: tuple[str, ...]
     egress_mode: EgressMode
+    quotas: QuotaSet | None
+    quotas_status: EffectiveQuotasStatus
+
+    def __post_init__(self) -> None:
+        if self.quotas_status is EffectiveQuotasStatus.AVAILABLE:
+            if not isinstance(self.quotas, QuotaSet):
+                raise ValueError("quotas_status=available требует фактический QuotaSet")
+            for name in QUOTA_KEYS:
+                value = getattr(self.quotas, name, None)
+                if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                    raise ValueError(f"effective quota {name} должна быть целым числом >= 1")
+        elif self.quotas is not None:
+            raise ValueError("quotas_status=unavailable не допускает effective quotas")
 
 
 @dataclass(frozen=True, slots=True)
@@ -518,6 +779,7 @@ __all__ = [
     "CapabilitySet",
     "EgressMode",
     "EgressPolicy",
+    "EffectiveQuotasStatus",
     "EnabledModulesReceipt",
     "GrantReceipt",
     "GrantStatus",
@@ -528,13 +790,21 @@ __all__ = [
     "PLUGIN_CLAIMS_TTL_SECONDS",
     "PLUGIN_OBJECT_PREFIX",
     "PLUGIN_SCHEMA_PREFIX",
+    "PluginInstanceRecord",
+    "PluginInstanceStatus",
     "PluginListSnapshot",
+    "PluginPublicationApproval",
+    "PluginRuntimeBinding",
     "PluginRuntimeStatus",
     "PluginSchema",
+    "PluginUpdateLockLease",
+    "PublicationApprovalReceipt",
     "QUOTA_KEYS",
+    "REGRANT_ID_CONFLICT_CODE",
     "QuotaSet",
     "RevokeReceipt",
     "RouteRegistration",
+    "SecretPreDeliveryRequest",
     "TENANT_BUCKET_PREFIX",
     "TENANT_DATABASE_PREFIX",
     "TenantDatabase",

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 from collections.abc import AsyncIterator
@@ -50,14 +51,60 @@ class FakeRedis:
         self.counters: dict[str, int] = {}
         self.fail = fail
         self.set_calls: list[dict[str, Any]] = []
+        self.now_ms = 1_000_000_000
 
-    async def eval(self, script: str, keys_count: int, key: str, ttl_ms: Any) -> int:
+    async def eval(self, script: str, keys_count: int, key: str, *args: Any) -> Any:
         if self.fail:
             raise RuntimeError("redis down")
-        self.counters[key] = self.counters.get(key, 0) + 1
-        if self.counters[key] == 1:
-            self.ttl[key] = int(ttl_ms)
-        return self.counters[key]
+        if "redis.call('INCR'" in script:
+            ttl_ms = args[0]
+            self.counters[key] = self.counters.get(key, 0) + 1
+            if self.counters[key] == 1:
+                self.ttl[key] = int(ttl_ms)
+            return self.counters[key]
+
+        current = self.store.get(key)
+        token = str(args[0])
+        if "local lease_ms = tonumber(ARGV[2])" in script:
+            lease_ms = int(args[1])
+            if current is None:
+                self.store[key] = f"processing:{self.now_ms + lease_ms}:{token}"
+                self.ttl[key] = lease_ms // 1000
+                return ["first", "", 0]
+            if current.startswith("done:"):
+                return ["duplicate", current.removeprefix("done:"), 0]
+            if current.startswith("processing:"):
+                expiry_raw, previous = current.removeprefix("processing:").split(":", 1)
+                expiry = int(expiry_raw)
+                if expiry <= self.now_ms:
+                    self.store[key] = f"processing:{self.now_ms + lease_ms}:{token}"
+                    self.ttl[key] = lease_ms // 1000
+                    return ["first", previous, 0]
+                return ["in_progress", previous, max(1, (expiry - self.now_ms + 999) // 1000)]
+            return ["duplicate", current, 0]
+
+        if "'done:' .. token" in script:
+            ttl_seconds = int(args[1])
+            if current == f"done:{token}":
+                self.ttl[key] = ttl_seconds
+                return 1
+            if current and current.startswith("processing:"):
+                _, previous = current.removeprefix("processing:").split(":", 1)
+                if previous == token:
+                    self.store[key] = f"done:{token}"
+                    self.ttl[key] = ttl_seconds
+                    return 1
+            return 0
+
+        if "redis.call('DEL'" in script:
+            if current and current.startswith("processing:"):
+                _, previous = current.removeprefix("processing:").split(":", 1)
+                if previous == token:
+                    self.store.pop(key, None)
+                    self.ttl.pop(key, None)
+                    return 1
+            return 0
+        raise AssertionError("unknown Redis Lua script in test double")
 
     async def set(self, key: str, value: str, *, nx: bool = False, ex: int | None = None) -> bool:
         self.set_calls.append({"key": key, "value": value, "nx": nx, "ex": ex})
@@ -156,22 +203,74 @@ class FakeCookieSessions:
 class FakeWakeResult:
     token: str
     jti: str = "jti-1"
+    plugin_instance_id: str | None = None
+    claims: dict[str, Any] = field(
+        default_factory=lambda: {
+            "artifact_digest": TEST_DIGEST, "grant_id": "grant-1"
+        }
+    )
     expires_at: datetime = field(
         default_factory=lambda: datetime.now(UTC) + timedelta(seconds=300)
     )
 
 
 class FakeActivator:
-    def __init__(self, *, token: str = "fresh-wake-token", fail: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        token: str = "fresh-wake-token",
+        fail: bool = False,
+        claims: dict[str, Any] | None = None,
+        plugin_id: str = "mod_equipment",
+        company_id: str = "co-123",
+        grant_id: str = "grant-1",
+        artifact_digest: str = TEST_DIGEST,
+        result_instance_id: str | None = None,
+        omit_result_instance: bool = False,
+    ) -> None:
         self.token = token
         self.fail = fail
+        self.claims = claims
+        self.plugin_id = plugin_id
+        self.company_id = company_id
+        self.grant_id = grant_id
+        self.artifact_digest = artifact_digest
+        self.result_instance_id = result_instance_id
+        self.omit_result_instance = omit_result_instance
         self.wake_calls: list[tuple[str, float | None]] = []
 
     async def wake(self, instance_id: str, *, timeout: float | None = None) -> FakeWakeResult:
         self.wake_calls.append((instance_id, timeout))
         if self.fail:
             raise RuntimeError("scale unavailable")
-        return FakeWakeResult(token=self.token)
+        claims = (
+            dict(self.claims)
+            if self.claims is not None
+            else {
+                "plugin_instance_id": instance_id,
+                "plugin_id": self.plugin_id,
+                "company_id": self.company_id,
+                "grant_id": self.grant_id,
+                "artifact_digest": self.artifact_digest,
+                "sub": (
+                    f"plugin:{self.plugin_id}:{self.company_id}:{instance_id}"
+                ),
+            }
+        )
+        result_instance = (
+            None
+            if self.omit_result_instance
+            else (
+                self.result_instance_id
+                if self.result_instance_id is not None
+                else instance_id
+            )
+        )
+        return FakeWakeResult(
+            token=self.token,
+            plugin_instance_id=result_instance,
+            claims=claims,
+        )
 
 
 class ReadyProbe:
@@ -204,10 +303,15 @@ class FakeHttpxResponse:
         self._body = body
         self.closed = False
         self.read_calls = 0
+        self.iteration_calls = 0
 
     async def aiter_bytes(self) -> AsyncIterator[bytes]:
         # Генератор: чанки отдаются по одному, НЕ собираются в bytes целиком.
-        for chunk in (self._chunks or []):
+        self.iteration_calls += 1
+        if self._chunks is None:
+            yield self._body
+            return
+        for chunk in self._chunks:
             yield chunk
 
     async def aread(self) -> bytes:
@@ -291,27 +395,65 @@ class FakeConsumerRecord:
     key: bytes | None = b"co_42"
 
 
+@dataclass(frozen=True, slots=True)
+class FakeTopicPartition:
+    topic: str
+    partition: int
+
+
 class FakeKafkaConsumer:
-    def __init__(self, records: list[FakeConsumerRecord] | None = None, *, fail_commit: bool = False) -> None:
+    def __init__(
+        self,
+        records: list[FakeConsumerRecord] | None = None,
+        *,
+        fail_commit: bool = False,
+        block_poll: bool = False,
+    ) -> None:
         self._records = list(records or [])
         self.fail_commit = fail_commit
+        self.block_poll = block_poll
         self.commits: list[dict[Any, Any]] = []
         self.seeks: list[tuple[Any, int]] = []
         self.polls: int = 0
+        self.getone_calls: int = 0
+        self.getone_cancellations: int = 0
         self.started = True
         self.stopped = False
+        self.assigned = True
+        self._assignment = FakeTopicPartition("agentscale.plugin.events", 0)
+        self._poll_gate = asyncio.Event()
 
     async def start(self) -> None:
         self.started = True
 
-    async def getone(self, *, timeout_ms: int = 1000) -> FakeConsumerRecord | None:
+    # Match the supported aiokafka 0.11/0.12 API: no timeout_ms keyword.
+    async def getone(self) -> FakeConsumerRecord | None:
         self.polls += 1
+        self.getone_calls += 1
+        if not self._records and self.block_poll:
+            try:
+                await self._poll_gate.wait()
+            except asyncio.CancelledError:
+                self.getone_cancellations += 1
+                raise
         if not self._records:
             return None
-        return self._records.pop(0)
+        record = self._records.pop(0)
+        self._assignment = FakeTopicPartition(record.topic, record.partition)
+        return record
 
-    def assignment(self) -> list[Any]:
-        return [("agentscale.plugin.events", 0)]
+    def release_poll(self, record: FakeConsumerRecord | None = None) -> None:
+        if record is not None:
+            self._records.append(record)
+        self._poll_gate.set()
+
+    def assignment(self) -> list[FakeTopicPartition]:
+        if not self.assigned:
+            return []
+        return [self._assignment]
+
+    def revoke_assignment(self) -> None:
+        self.assigned = False
 
     async def commit(self, assignment: dict[Any, Any]) -> None:
         if self.fail_commit:
@@ -417,10 +559,14 @@ def make_backend_request(**kwargs: Any) -> BackendRequest:
     defaults: dict[str, Any] = dict(
         path="/events/handler",
         method="POST",
+        plugin_instance_id="inst_abc",
         headers={
             "X-Plugin-ID": "mod_equipment",
+            "X-Plugin-Instance-ID": "inst_abc",
             "X-Company-ID": "co-123",
             "X-Plugin-Capability-Token": "fresh-wake-token",
+            "X-Plugin-Artifact-Digest": TEST_DIGEST,
+            "X-Plugin-Grant-ID": "grant-1",
             # Клиентские значения: адаптер ОБЯЗАН их выкинуть/перезаписать.
             "Authorization": "Bearer client-forged",
             "Cookie": "session=client",

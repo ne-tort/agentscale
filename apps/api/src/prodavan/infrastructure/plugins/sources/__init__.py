@@ -1,0 +1,67 @@
+"""GitHub App provisioning/authoring adapter; use-case wiring is separate."""
+
+from .errors import (
+    GitHubAPIError,
+    GitHubAuthenticationError,
+    GitHubClientClosed,
+    GitHubConfigurationError,
+    GitHubConflictError,
+    GitHubOrganizationNotAllowed,
+    GitHubResponseError,
+    GitHubResponseTooLarge,
+    GitHubSourceError,
+    GitHubTransportError,
+    GitHubValidationError,
+)
+from .github_app import GitHubAppClient
+from .models import (
+    ApplyPatchRequest,
+    BranchProtectionPolicy,
+    CommitMetadata,
+    CreatePrivateRepositoryRequest,
+    CreatePullRequestRequest,
+    CreatedRepository,
+    GitHubInstallationTokenProfile,
+    ManagedOrganization,
+    PatchFile,
+    PullRequestMetadata,
+    RepositoryMetadata,
+    RepositoryTemplate,
+)
+from .ports import (
+    GitHubAppSecretProvider,
+    GitHubPatchPort,
+    GitHubPullRequestPort,
+    GitHubRepositorySourcePort,
+)
+
+__all__ = [
+    "ApplyPatchRequest",
+    "BranchProtectionPolicy",
+    "CommitMetadata",
+    "CreatePrivateRepositoryRequest",
+    "CreatePullRequestRequest",
+    "CreatedRepository",
+    "GitHubAPIError",
+    "GitHubAppClient",
+    "GitHubAppSecretProvider",
+    "GitHubAuthenticationError",
+    "GitHubClientClosed",
+    "GitHubConfigurationError",
+    "GitHubConflictError",
+    "GitHubInstallationTokenProfile",
+    "GitHubOrganizationNotAllowed",
+    "GitHubPatchPort",
+    "GitHubPullRequestPort",
+    "GitHubRepositorySourcePort",
+    "GitHubResponseError",
+    "GitHubResponseTooLarge",
+    "GitHubSourceError",
+    "GitHubTransportError",
+    "GitHubValidationError",
+    "ManagedOrganization",
+    "PatchFile",
+    "PullRequestMetadata",
+    "RepositoryMetadata",
+    "RepositoryTemplate",
+]

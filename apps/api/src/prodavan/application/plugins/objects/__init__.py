@@ -4,8 +4,8 @@
   * ``policy``   — генератор IAM/session-политик, явный префикс без policy
                    variables (``${aws:username}`` / ``${jwt:*}`` — опция MinIO,
                    требующая подтверждения официальной документацией);
-  * ``ports``    — typed Protocol-порты (BucketAdmin / Sts / Presign / Audit)
-                   и валидатор TTL 60..3600;
+  * ``ports``    — typed Protocol-порты (BucketAdmin / Sts / Presign / Audit),
+                   presign TTL 60..3600 и отдельный STS TTL 900..3600;
   * ``service``  — ``PluginObjectStore``: grant / short-lived scoped creds /
                    scoped presigned / list / revoke / uninstall + аудит
                    ``plugin_object_access``;
@@ -41,6 +41,8 @@ from prodavan.application.plugins.objects.ports import (
     DEFAULT_TTL_SECONDS,
     MAX_TTL_SECONDS,
     MIN_TTL_SECONDS,
+    MIN_STS_TTL_SECONDS,
+    MAX_STS_TTL_SECONDS,
     AuditPort,
     BucketAdminPort,
     InvalidTtl,
@@ -49,6 +51,7 @@ from prodavan.application.plugins.objects.ports import (
     PresignPort,
     ScopedCredentials,
     StsPort,
+    validate_sts_ttl,
     validate_ttl,
 )
 from prodavan.application.plugins.objects.service import (
@@ -67,8 +70,11 @@ __all__ = [
     # ports / типы
     "MIN_TTL_SECONDS",
     "MAX_TTL_SECONDS",
+    "MIN_STS_TTL_SECONDS",
+    "MAX_STS_TTL_SECONDS",
     "DEFAULT_TTL_SECONDS",
     "validate_ttl",
+    "validate_sts_ttl",
     "InvalidTtl",
     "ObjectMethod",
     "ScopedCredentials",

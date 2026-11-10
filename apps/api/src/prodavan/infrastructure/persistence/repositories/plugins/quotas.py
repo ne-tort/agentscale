@@ -11,6 +11,8 @@ company-only варианта — acceptance №21).
   ``ZADD`` + ``PEXPIRE`` в одном вызове (нет гонки «прочитали → записали»).
 * остальные ``QuotaOp`` — ЖЁСТКИЕ накопительные счётчики (``INCRBY`` +
   ``PEXPIRE`` при первом инкременте), лимит из ``PluginQuota.limit_for(op)``.
+* ``limits`` — обязательный аргумент каждого ``enforce`` из конкретного
+  ``invocation.grant.quotas``; singleton Redis policy/defaults отсутствует.
 
 FAIL-CLOSED (главное требование ТЗ)
 -----------------------------------
@@ -22,18 +24,16 @@ FAIL-CLOSED (главное требование ТЗ)
 ``QuotaDecision.http_status``); ``QUOTA_UNAVAILABLE`` можно включить явно.
 
 Клиент Redis может быть:
-* ``redis.asyncio.Redis`` (синхронный вызов ``enforce`` требует готового
-  event loop → используем :meth:`enforce_async`);
-* объект с синхронным ``eval``/``zadd``/... (например ``redis.Redis`` или
-  тестовый фейк) — тогда работает sync :meth:`enforce`;
+* ``redis.asyncio.Redis`` — canonical ``await enforce(...)`` in the current loop;
+* async test double with the same ``eval``/``zcard``/``get`` contract;
 * ``RedisManager`` (``core.infra.redis_manager``) — берём ``.client``.
 """
 
 from __future__ import annotations
 
-import inspect
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 from prodavan.application.plugins.capabilities.quotas import (
     PluginQuota,
@@ -100,7 +100,6 @@ class RedisPluginQuota:
         self,
         redis: Any,
         *,
-        quota: PluginQuota | None = None,
         unavailable_reason: QuotaReason = QuotaReason.QUOTA_EXCEEDED,
         clock: Any = None,
         key_prefix: str = "",
@@ -110,14 +109,9 @@ class RedisPluginQuota:
         if unavailable_reason in (QuotaReason.ALLOWED, QuotaReason.QUOTA_KEY_INVALID):
             raise ValueError("unavailable_reason обязан быть отказным кодом")
         self._redis = redis
-        self._quota = quota or PluginQuota()
         self._unavailable_reason = unavailable_reason
         self._clock = clock or (lambda: datetime.now(UTC))
         self._key_prefix = key_prefix
-
-    @property
-    def quota(self) -> PluginQuota:
-        return self._quota
 
     # ------------------------------------------------------------------
     # Внутреннее: клиент, ключи, решения
@@ -204,16 +198,13 @@ class RedisPluginQuota:
         return None
 
     # ------------------------------------------------------------------
-    # QuotaPort (синхронный)
+    # QuotaPort (canonical async over redis.asyncio)
     # ------------------------------------------------------------------
 
-    def enforce(self, key: PluginQuotaKey, op: QuotaOp, amount: int) -> QuotaDecision:
-        """Проверить И зарезервировать ``amount``; любая ошибка Redis → deny.
-
-        Если передан async-клиент, попытка выполнить его из sync-контекста
-        также трактуется как недоступность (deny) — использовать
-        :meth:`enforce_async`. Никакого «разрешить на всякий случай».
-        """
+    async def enforce(
+        self, key: PluginQuotaKey, op: QuotaOp, amount: int, limits: PluginQuota
+    ) -> QuotaDecision:
+        """Reserve по лимитам exact durable grant, без глобального defaults."""
         invalid = self._validate(key, op, amount)
         if invalid is not None:
             return self._deny(
@@ -225,71 +216,13 @@ class RedisPluginQuota:
                 0,
                 invalid,
             )
-        try:
-            limit = self._quota.limit_for(op)
-        except Exception as exc:  # noqa: BLE001 — неизвестная операция = отказ
-            return self._deny(key, op, amount, QuotaReason.QUOTA_KEY_INVALID, 0, 0, str(exc))
-
-        try:
-            client = self._client()
-            now_ms = self._now_ms()
-            redis_key = self._cache_key(key, op)
-            if op is QuotaOp.OPS:
-                member = f"{now_ms}-{id(object())}"
-                raw = client.eval(
-                    _OPS_WINDOW_LUA,
-                    1,
-                    redis_key,
-                    now_ms,
-                    WINDOW_SECONDS * 1000,
-                    amount,
-                    limit,
-                    member,
-                )
-                used, allowed, retry_ms = _parse_triple(raw)
-                if not allowed:
-                    return self._deny(
-                        key, op, amount, QuotaReason.QUOTA_EXCEEDED, limit, used,
-                        "ops_per_minute exceeded", max(1, int(retry_ms / 1000)),
-                    )
-                return self._allow(key, op, amount, limit, used)
-
-            raw = client.eval(
-                _HARD_COUNTER_LUA,
-                1,
-                redis_key,
-                amount,
-                limit,
-                WINDOW_SECONDS * 1000,
-            )
-            used, allowed = _parse_pair(raw)
-            if not allowed:
-                return self._deny(
-                    key, op, amount, QuotaReason.QUOTA_EXCEEDED, limit, used,
-                    f"{op.value} limit exceeded",
-                )
-            return self._allow(key, op, amount, limit, used)
-        except Exception as exc:  # noqa: BLE001 — ЛЮБАЯ недоступность = deny
+        if not isinstance(limits, PluginQuota):
             return self._deny(
-                key, op, amount, self._unavailable_reason, limit, 0,
-                f"quota storage unavailable: {type(exc).__name__}",
-            )
-
-    async def enforce_async(self, key: PluginQuotaKey, op: QuotaOp, amount: int) -> QuotaDecision:
-        """Async-вариант для ``redis.asyncio.Redis``; та же fail-closed семантика."""
-        invalid = self._validate(key, op, amount)
-        if invalid is not None:
-            return self._deny(
-                key if isinstance(key, PluginQuotaKey) else _dummy_key(),
-                op if isinstance(op, QuotaOp) else QuotaOp.OPS,
-                amount if isinstance(amount, int) and not isinstance(amount, bool) and amount >= 0 else 0,
-                QuotaReason.QUOTA_KEY_INVALID,
-                0,
-                0,
-                invalid,
+                key, op, amount, QuotaReason.QUOTA_KEY_INVALID, 0, 0,
+                "exact grant limits are required",
             )
         try:
-            limit = self._quota.limit_for(op)
+            limit = limits.limit_for(op)
         except Exception as exc:  # noqa: BLE001
             return self._deny(key, op, amount, QuotaReason.QUOTA_KEY_INVALID, 0, 0, str(exc))
 
@@ -298,11 +231,11 @@ class RedisPluginQuota:
             now_ms = self._now_ms()
             redis_key = self._cache_key(key, op)
             if op is QuotaOp.OPS:
-                member = f"{now_ms}-{id(object())}"
-                raw = await _maybe_await(client.eval(
+                member = f"{now_ms}-{uuid4()}"
+                raw = await client.eval(
                     _OPS_WINDOW_LUA, 1, redis_key, now_ms,
                     WINDOW_SECONDS * 1000, amount, limit, member,
-                ))
+                )
                 used, allowed, retry_ms = _parse_triple(raw)
                 if not allowed:
                     return self._deny(
@@ -310,9 +243,9 @@ class RedisPluginQuota:
                         "ops_per_minute exceeded", max(1, int(retry_ms / 1000)),
                     )
                 return self._allow(key, op, amount, limit, used)
-            raw = await _maybe_await(client.eval(
+            raw = await client.eval(
                 _HARD_COUNTER_LUA, 1, redis_key, amount, limit, WINDOW_SECONDS * 1000
-            ))
+            )
             used, allowed = _parse_pair(raw)
             if not allowed:
                 return self._deny(
@@ -326,24 +259,17 @@ class RedisPluginQuota:
                 f"quota storage unavailable: {type(exc).__name__}",
             )
 
-    def usage(self, key: PluginQuotaKey, op: QuotaOp) -> int:
+    async def usage(self, key: PluginQuotaKey, op: QuotaOp) -> int:
         """Диагностика: текущее использование (ошибка Redis → 0, НЕ allow)."""
         try:
             client = self._client()
             redis_key = self._cache_key(key, op)
             if op is QuotaOp.OPS:
-                return int(client.zcard(redis_key))
-            raw = client.get(redis_key)
+                return int(await client.zcard(redis_key))
+            raw = await client.get(redis_key)
             return int(raw or 0)
         except Exception:  # noqa: BLE001
             return 0
-
-
-async def _maybe_await(value: Any) -> Any:
-    """Поддержать и sync-, и async-клиент Redis."""
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 def _parse_pair(raw: Any) -> tuple[int, int]:

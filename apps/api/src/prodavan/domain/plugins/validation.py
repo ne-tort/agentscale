@@ -7,6 +7,8 @@ Fail-closed: любая отсутствующая интеграция / неи
 При наличии ``jsonschema`` проверка идёт по draft 2020-12 схеме из
 ``packages/schemas/plugin-manifest/v1/schema.json``; при отсутствии библиотеки
 выполняется эквивалентная ручная валидация с теми же кодами ошибок.
+Схема разрешается через абсолютный ``PLUGIN_SCHEMA_ROOT``, структурный repo
+layout либо container layout ``/app/src`` → ``/packages/schemas``, но не cwd.
 Семантические проверки (semver, allowlist capability, запрет самореференции,
 нормализация plugin_id) выполняются всегда, независимо от бэкенда схемы.
 """
@@ -16,6 +18,8 @@ from __future__ import annotations
 from enum import StrEnum
 from functools import lru_cache
 import json
+import os
+import re
 from pathlib import Path
 from typing import Any, Mapping, NoReturn
 
@@ -23,23 +27,44 @@ from prodavan.domain.plugins.types import (
     CAPABILITY_ALLOWLIST,
     EGRESS_REF_PATTERN,
     EMBEDDED_EGRESS_FIELDS,
+    MCP_MAX_SERVERS,
+    MCP_MAX_TOOLS_PER_SERVER,
     PATH_PATTERN,
+    PUBLIC_PAGE_PATTERN,
+    POD_MAX_ALLOWLIST,
+    PLUGIN_CAPABILITY_ID_PATTERN,
+    PLUGIN_CAPABILITY_VERSION_PATTERN,
     PLUGIN_ID_PATTERN,
+    PLUGIN_OPERATION_PATTERN,
+    PLUGIN_RPC_METHODS,
     PROTOCOL_VERSION,
     RELATIVE_PATH_PATTERN,
+    SECRET_DELIVERY_MAX_ALLOWLIST,
     SEMVER_PATTERN,
     SELF_REFERENCE_FIELDS,
     ArtifactDigest,
     BackendEntrypoint,
     Capability,
     FrontendEntrypoint,
+    McpServerDeclaration,
+    McpToolDeclaration,
     MigrationEngine,
     MigrationsDeclaration,
     PluginManifest,
+    PluginRpcOperations,
+    PodAllowlistEntry,
+    PodsDeclaration,
+    RpcOperationDeclaration,
+    SecretDeliveryDeclaration,
 )
 
 SCHEMA_RELATIVE_PATH = Path("packages/schemas/plugin-manifest/v1/schema.json")
 PROTOCOL_RELATIVE_PATH = Path("packages/schemas/plugin-manifest/v1/protocol.json")
+SCHEMA_ROOT_ENV = "PLUGIN_SCHEMA_ROOT"
+CONTAINER_SOURCE_ROOT = Path("/app/src")
+CONTAINER_SCHEMA_PATH = Path("/packages/schemas/plugin-manifest/v1/schema.json")
+_SCHEMAS_RELATIVE_PATH = Path("plugin-manifest/v1/schema.json")
+_REPO_SOURCE_RELATIVE_PATH = Path("apps/api/src")
 MANIFEST_REQUIRED_FIELDS: tuple[str, ...] = (
     "plugin_id",
     "version",
@@ -53,7 +78,9 @@ MANIFEST_REQUIRED_FIELDS: tuple[str, ...] = (
     "webhooks",
     "min_platform_version",
 )
-MANIFEST_ALLOWED_FIELDS: frozenset[str] = frozenset(MANIFEST_REQUIRED_FIELDS)
+MANIFEST_ALLOWED_FIELDS: frozenset[str] = frozenset(MANIFEST_REQUIRED_FIELDS) | {
+    "rpc_operations", "mcp_servers", "pods", "secret_delivery",
+}
 
 
 class ManifestValidationErrorCode(StrEnum):
@@ -77,6 +104,10 @@ class ManifestValidationErrorCode(StrEnum):
     MIGRATIONS_INVALID = "migrations_invalid"
     PUBLIC_PAGES_INVALID = "public_pages_invalid"
     WEBHOOKS_INVALID = "webhooks_invalid"
+    RPC_OPERATIONS_INVALID = "rpc_operations_invalid"
+    MCP_SERVERS_INVALID = "mcp_servers_invalid"
+    PODS_INVALID = "pods_invalid"
+    SECRET_DELIVERY_INVALID = "secret_delivery_invalid"
     UNKNOWN_FIELD = "unknown_field"
     MISSING_FIELD = "missing_field"
 
@@ -90,25 +121,114 @@ class PluginValidationError(ValueError):
         super().__init__(f"{code.value}: {message}")
 
 
-def _repo_root() -> Path:
-    """Корень репозитория по расположению этого модуля (без обращения к git)."""
-    # validation.py -> plugins(0), domain(1), prodavan(2), src(3), api(4), apps(5), root(6)
-    return Path(__file__).resolve().parents[6]
+def _first_existing_schema(candidates: tuple[Path, ...]) -> Path | None:
+    """Вернуть первый существующий файл, не пробрасывая ошибки FS наружу."""
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+            if resolved.is_file():
+                return resolved
+        except (OSError, RuntimeError):
+            # Недоступный путь не является разрешением схемы; итог всегда fail-closed.
+            continue
+    return None
 
 
-@lru_cache(maxsize=1)
+def _resolve_schema_path() -> Path:
+    """Найти схему только в явно разрешённых repo/container layout.
+
+    ``PLUGIN_SCHEMA_ROOT`` принимает либо корень репозитория, либо каталог
+    ``packages/schemas``. Явная настройка имеет приоритет и не скрывает ошибку
+    fallback'ом. Текущий рабочий каталог намеренно не участвует в поиске.
+    """
+    configured = os.environ.get(SCHEMA_ROOT_ENV, "").strip()
+    if configured:
+        try:
+            root = Path(configured).expanduser()
+        except (OSError, RuntimeError) as exc:
+            raise PluginValidationError(
+                ManifestValidationErrorCode.SCHEMA_UNAVAILABLE,
+                f"invalid {SCHEMA_ROOT_ENV}: {exc}",
+            ) from exc
+        if not root.is_absolute():
+            raise PluginValidationError(
+                ManifestValidationErrorCode.SCHEMA_UNAVAILABLE,
+                f"{SCHEMA_ROOT_ENV} must be an absolute path, got {configured!r}",
+            )
+        candidates = (root / SCHEMA_RELATIVE_PATH, root / _SCHEMAS_RELATIVE_PATH)
+        target = _first_existing_schema(candidates)
+        if target is not None:
+            return target
+        raise PluginValidationError(
+            ManifestValidationErrorCode.SCHEMA_UNAVAILABLE,
+            f"schema file not found via {SCHEMA_ROOT_ENV}; tried: {candidates}",
+        )
+
+    try:
+        module_path = Path(__file__).resolve()
+    except (OSError, RuntimeError) as exc:
+        raise PluginValidationError(
+            ManifestValidationErrorCode.SCHEMA_UNAVAILABLE,
+            f"cannot resolve validation module path: {exc}",
+        ) from exc
+
+    # Repo layout: идём по реальным предкам без фиксированного индекса. После
+    # ближайшего apps/api/src не поднимаемся в потенциально чужой внешний repo.
+    for parent in module_path.parents:
+        try:
+            is_repo_root = (parent / _REPO_SOURCE_RELATIVE_PATH).is_dir()
+        except OSError:
+            is_repo_root = False
+        if not is_repo_root:
+            continue
+        target = _first_existing_schema((parent / SCHEMA_RELATIVE_PATH,))
+        if target is not None:
+            return target
+        break
+
+    # Container layout из apps/api/Dockerfile: PYTHONPATH=/app/src и схемы
+    # смонтированы отдельно в /packages/schemas. Фиксированный allowlist вместо cwd.
+    try:
+        container_source = CONTAINER_SOURCE_ROOT.resolve()
+    except (OSError, RuntimeError):
+        container_source = CONTAINER_SOURCE_ROOT
+    if module_path.is_relative_to(container_source):
+        target = _first_existing_schema((CONTAINER_SCHEMA_PATH,))
+        if target is not None:
+            return target
+
+    raise PluginValidationError(
+        ManifestValidationErrorCode.SCHEMA_UNAVAILABLE,
+        f"schema file not found in allowed repo/container layouts; set {SCHEMA_ROOT_ENV}",
+    )
+
+
 def load_schema(path: Path | None = None) -> dict[str, Any]:
     """Загрузить JSON Schema манифеста как данные (без импортов из apps/web).
 
     Отсутствие файла — fail-closed ошибка, а не «пропустить проверку».
     """
-    target = (path if path is not None else _repo_root() / SCHEMA_RELATIVE_PATH).resolve()
-    if not target.is_file():
-        raise PluginValidationError(
-            ManifestValidationErrorCode.SCHEMA_UNAVAILABLE,
-            f"schema file not found: {target}",
-        )
+    if path is None:
+        target = _resolve_schema_path()
+    else:
+        try:
+            target = path.resolve()
+        except (OSError, RuntimeError) as exc:
+            raise PluginValidationError(
+                ManifestValidationErrorCode.SCHEMA_UNAVAILABLE,
+                f"schema path cannot be resolved: {exc}",
+            ) from exc
+    return _load_schema_file(target)
+
+
+@lru_cache(maxsize=8)
+def _load_schema_file(target: Path) -> dict[str, Any]:
     try:
+        if not target.is_file():
+            raise PluginValidationError(
+                ManifestValidationErrorCode.SCHEMA_UNAVAILABLE,
+                f"schema file not found: {target}",
+            )
         payload = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise PluginValidationError(
@@ -166,14 +286,21 @@ def _check_absolute_path(value: Any, *, field_name: str, code: ManifestValidatio
         _fail(code, f"{field_name} must be an absolute path without '..'")
 
 
-def _check_path_array(value: Any, *, field_name: str, code: ManifestValidationErrorCode) -> tuple[str, ...]:
+def _check_path_array(
+    value: Any,
+    *,
+    field_name: str,
+    code: ManifestValidationErrorCode,
+    pattern: re.Pattern[str] = PATH_PATTERN,
+) -> tuple[str, ...]:
     """Массив уникальных абсолютных путей (public_pages / webhooks)."""
     if not isinstance(value, list):
         _fail(code, f"{field_name} must be an array")
     for item in value:
         # Валидация до set(): нехешируемые элементы не должны давать TypeError
         # вместо типизированной PluginValidationError.
-        _check_absolute_path(item, field_name=field_name, code=code)
+        if not isinstance(item, str) or not pattern.fullmatch(item) or ".." in item:
+            _fail(code, f"{field_name} must be an absolute path without '..'")
     if len(set(value)) != len(value):
         _fail(code, f"{field_name} must not contain duplicates")
     return tuple(value)
@@ -237,6 +364,192 @@ def _validate_capabilities(value: Any) -> tuple[Capability, ...]:
     if len(set(value)) != len(value):
         _fail(ManifestValidationErrorCode.CAPABILITY_DUPLICATE, "capabilities must not contain duplicates")
     return tuple(Capability(item) for item in value)
+
+
+def _validate_rpc_operations(value: Any) -> PluginRpcOperations:
+    """Закрытый manifest allowlist RPC-операций для broker."""
+    if not isinstance(value, list) or len(value) > 64:
+        _fail(
+            ManifestValidationErrorCode.RPC_OPERATIONS_INVALID,
+            "rpc_operations must be an array of at most 64 items",
+        )
+    operations: list[RpcOperationDeclaration] = []
+    for raw in value:
+        obj = _check_closed_object(
+            raw,
+            field_name="rpc_operations",
+            required=frozenset({"capability", "operation", "http_method", "backend_path"}),
+            allowed=frozenset({"capability", "operation", "http_method", "backend_path", "public"}),
+            code=ManifestValidationErrorCode.RPC_OPERATIONS_INVALID,
+        )
+        capability = _check_closed_object(
+            obj["capability"],
+            field_name="rpc_operations.capability",
+            required=frozenset({"id", "version"}),
+            allowed=frozenset({"id", "version"}),
+            code=ManifestValidationErrorCode.RPC_OPERATIONS_INVALID,
+        )
+        if not isinstance(capability["id"], str) or not PLUGIN_CAPABILITY_ID_PATTERN.fullmatch(
+            capability["id"]
+        ):
+            _fail(
+                ManifestValidationErrorCode.RPC_OPERATIONS_INVALID,
+                "rpc operation capability.id must be lowercase 'module.operation'",
+            )
+        if not isinstance(capability["version"], str) or not PLUGIN_CAPABILITY_VERSION_PATTERN.fullmatch(
+            capability["version"]
+        ):
+            _fail(
+                ManifestValidationErrorCode.RPC_OPERATIONS_INVALID,
+                "rpc operation capability.version must be '<major>.<minor>'",
+            )
+        if not isinstance(obj["operation"], str) or not PLUGIN_OPERATION_PATTERN.fullmatch(obj["operation"]):
+            _fail(ManifestValidationErrorCode.RPC_OPERATIONS_INVALID, "invalid RPC operation name")
+        if not isinstance(obj["http_method"], str) or obj["http_method"] not in PLUGIN_RPC_METHODS:
+            _fail(ManifestValidationErrorCode.RPC_OPERATIONS_INVALID, "http_method must be GET or POST")
+        _check_absolute_path(
+            obj["backend_path"],
+            field_name="rpc_operations.backend_path",
+            code=ManifestValidationErrorCode.RPC_OPERATIONS_INVALID,
+        )
+        if not obj["backend_path"].startswith("/api/"):
+            _fail(
+                ManifestValidationErrorCode.RPC_OPERATIONS_INVALID,
+                "backend_path must stay under /api/ and cannot be an absolute URL",
+            )
+        public = obj.get("public", False)
+        if not isinstance(public, bool):
+            _fail(ManifestValidationErrorCode.RPC_OPERATIONS_INVALID, "public must be a boolean")
+        operations.append(
+            RpcOperationDeclaration(
+                capability_id=capability["id"],
+                capability_version=capability["version"],
+                operation=obj["operation"],
+                http_method=obj["http_method"],
+                backend_path=obj["backend_path"],
+                public=public,
+            )
+        )
+    return PluginRpcOperations(tuple(operations))
+
+
+def _validate_pods(value: Any) -> PodsDeclaration:
+    """Validate the executor's exact instance/project/job scope tuples."""
+    code = ManifestValidationErrorCode.PODS_INVALID
+    obj = _check_closed_object(
+        value,
+        field_name="pods",
+        required=frozenset({"allowlist"}),
+        allowed=frozenset({"allowlist"}),
+        code=code,
+    )
+    raw_entries = obj["allowlist"]
+    if not isinstance(raw_entries, list) or not 1 <= len(raw_entries) <= POD_MAX_ALLOWLIST:
+        _fail(code, "pods.allowlist must contain 1..256 entries")
+    entries: list[PodAllowlistEntry] = []
+    seen: set[tuple[str, str, str]] = set()
+    try:
+        for raw_entry in raw_entries:
+            entry_obj = _check_closed_object(
+                raw_entry,
+                field_name="pods.allowlist",
+                required=frozenset({"plugin_instance_id", "project_id", "job_id"}),
+                allowed=frozenset({"plugin_instance_id", "project_id", "job_id"}),
+                code=code,
+            )
+            entry = PodAllowlistEntry(
+                plugin_instance_id=entry_obj["plugin_instance_id"],
+                project_id=entry_obj["project_id"],
+                job_id=entry_obj["job_id"],
+            )
+            key = (entry.plugin_instance_id, entry.project_id, entry.job_id)
+            if key in seen:
+                _fail(code, "pods.allowlist must not contain duplicate entries")
+            seen.add(key)
+            entries.append(entry)
+        return PodsDeclaration(allowlist=tuple(entries))
+    except PluginValidationError:
+        raise
+    except (TypeError, ValueError) as exc:
+        _fail(code, f"invalid pods declaration: {exc}")
+
+
+def _validate_secret_delivery(value: Any) -> SecretDeliveryDeclaration:
+    """Validate a reference-only delivery declaration; never accept secret data."""
+    code = ManifestValidationErrorCode.SECRET_DELIVERY_INVALID
+    obj = _check_closed_object(
+        value,
+        field_name="secret_delivery",
+        required=frozenset({"mode", "allowlist"}),
+        allowed=frozenset({"mode", "allowlist"}),
+        code=code,
+    )
+    raw_refs = obj["allowlist"]
+    if (
+        not isinstance(raw_refs, list)
+        or not 1 <= len(raw_refs) <= SECRET_DELIVERY_MAX_ALLOWLIST
+    ):
+        _fail(code, "secret_delivery.allowlist must contain 1..256 secret refs")
+    try:
+        return SecretDeliveryDeclaration(
+            mode=obj["mode"],
+            allowlist=tuple(raw_refs),
+        )
+    except (TypeError, ValueError) as exc:
+        _fail(code, f"invalid secret_delivery declaration: {exc}")
+
+
+def _validate_mcp_servers(value: Any) -> tuple[McpServerDeclaration, ...]:
+    """Проверить data-only MCP declarations и property-based uniqueness."""
+    code = ManifestValidationErrorCode.MCP_SERVERS_INVALID
+    if not isinstance(value, list) or len(value) > MCP_MAX_SERVERS:
+        _fail(code, "mcp_servers must be an array of at most 256 items")
+    servers: list[McpServerDeclaration] = []
+    server_ids: set[str] = set()
+    try:
+        for raw_server in value:
+            server = _check_closed_object(
+                raw_server,
+                field_name="mcp_servers",
+                required=frozenset({"server_id", "tools"}),
+                allowed=frozenset({"server_id", "tools"}),
+                code=code,
+            )
+            raw_tools = server["tools"]
+            if not isinstance(raw_tools, list) or not 1 <= len(raw_tools) <= MCP_MAX_TOOLS_PER_SERVER:
+                _fail(code, "mcp server tools must contain 1..64 declarations")
+            tools: list[McpToolDeclaration] = []
+            tool_names: set[str] = set()
+            for raw_tool in raw_tools:
+                tool = _check_closed_object(
+                    raw_tool,
+                    field_name="mcp_servers.tools",
+                    required=frozenset({"name", "description", "version", "input_schema"}),
+                    allowed=frozenset({"name", "description", "version", "input_schema"}),
+                    code=code,
+                )
+                declaration = McpToolDeclaration(
+                    name=tool["name"],
+                    description=tool["description"],
+                    version=tool["version"],
+                    input_schema=tool["input_schema"],
+                )
+                if declaration.name in tool_names:
+                    _fail(code, "mcp tool names must be unique per server")
+                tool_names.add(declaration.name)
+                tools.append(declaration)
+            declaration_server = McpServerDeclaration(
+                server_id=server["server_id"], tools=tuple(tools),
+            )
+            if declaration_server.server_id in server_ids:
+                _fail(code, "mcp server_id values must be unique")
+            server_ids.add(declaration_server.server_id)
+            servers.append(declaration_server)
+    except PluginValidationError:
+        raise
+    except (TypeError, ValueError) as exc:
+        _fail(code, f"invalid mcp_servers declaration: {exc}")
+    return tuple(servers)
 
 
 def _validate_with_jsonschema(data: Mapping[str, Any]) -> None:
@@ -335,6 +648,7 @@ def validate_manifest(data: dict) -> PluginManifest:
                 payload["public_pages"],
                 field_name="public_pages",
                 code=ManifestValidationErrorCode.PUBLIC_PAGES_INVALID,
+                pattern=PUBLIC_PAGE_PATTERN,
             ),
             webhooks=_check_path_array(
                 payload["webhooks"],
@@ -342,6 +656,14 @@ def validate_manifest(data: dict) -> PluginManifest:
                 code=ManifestValidationErrorCode.WEBHOOKS_INVALID,
             ),
             min_platform_version=payload["min_platform_version"],
+            rpc_operations=_validate_rpc_operations(payload.get("rpc_operations", [])),
+            mcp_servers=_validate_mcp_servers(payload.get("mcp_servers", [])),
+            pods=_validate_pods(payload["pods"]) if "pods" in payload else None,
+            secret_delivery=(
+                _validate_secret_delivery(payload["secret_delivery"])
+                if "secret_delivery" in payload
+                else None
+            ),
         )
     except ValueError as exc:
         # __post_init__ доменных типов мог выбросить ValueError без кода —
@@ -375,10 +697,17 @@ def _validate_manual(payload: Mapping[str, Any]) -> None:
     _validate_backend(payload["backend"])
     _validate_capabilities(payload["capabilities"])
     _validate_migrations(payload["migrations"])
+    _validate_rpc_operations(payload.get("rpc_operations", []))
+    _validate_mcp_servers(payload.get("mcp_servers", []))
+    if "pods" in payload:
+        _validate_pods(payload["pods"])
+    if "secret_delivery" in payload:
+        _validate_secret_delivery(payload["secret_delivery"])
     _check_path_array(
         payload["public_pages"],
         field_name="public_pages",
         code=ManifestValidationErrorCode.PUBLIC_PAGES_INVALID,
+        pattern=PUBLIC_PAGE_PATTERN,
     )
     _check_path_array(
         payload["webhooks"],
@@ -400,6 +729,7 @@ __all__ = [
     "MANIFEST_REQUIRED_FIELDS",
     "PROTOCOL_RELATIVE_PATH",
     "SCHEMA_RELATIVE_PATH",
+    "SCHEMA_ROOT_ENV",
     "ManifestValidationErrorCode",
     "PluginValidationError",
     "load_schema",

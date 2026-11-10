@@ -23,6 +23,7 @@ from prodavan.application.plugins.artifacts import (
     CompatibilityGate,
     VerificationResult,
 )
+from prodavan.application.plugins.artifacts.verification import _semver_key
 from .conftest import (
     DIGEST_A,
     DIGEST_B,
@@ -315,6 +316,65 @@ def test_min_platform_version_at_or_below_platform_is_ok(
         **VERIFIED,
     )
     assert outcome.outcome is RegistryOutcome.APPLIED
+
+
+@pytest.mark.parametrize(
+    ("lower", "higher"),
+    [
+        ("1.2.0", "1.10.0"),
+        ("1.0.0-alpha", "1.0.0-alpha.1"),
+        ("1.0.0-alpha.2", "1.0.0-alpha.10"),
+        ("1.0.0-2", "1.0.0-alpha"),
+        ("1.0.0-alpha.beta", "1.0.0-beta"),
+        ("1.0.0-beta.2", "1.0.0-beta.11"),
+        ("1.0.0-beta.11", "1.0.0-rc.1"),
+        ("1.0.0-rc.1", "1.0.0"),
+    ],
+)
+def test_semver_key_uses_full_prerelease_precedence(lower: str, higher: str) -> None:
+    assert _semver_key(lower) < _semver_key(higher)
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [
+        ("1.0.0+build.1", "1.0.0+build.2"),
+        ("1.0.0-rc.1+build.1", "1.0.0-rc.1+build.2"),
+    ],
+)
+def test_semver_key_ignores_build_metadata(left: str, right: str) -> None:
+    assert _semver_key(left) == _semver_key(right)
+
+
+@pytest.mark.parametrize(
+    ("minimum", "platform", "expected"),
+    [
+        ("4.0.0-alpha.2", "4.0.0-alpha.10", True),
+        ("4.0.0-alpha.10", "4.0.0-alpha.2", False),
+        ("4.0.0-2", "4.0.0-alpha", True),
+        ("4.0.0-alpha", "4.0.0", True),
+        ("4.0.0+minimum", "4.0.0+platform", True),
+    ],
+)
+def test_gate_uses_semver_precedence_not_prerelease_lexicography(
+    minimum: str, platform: str, expected: bool
+) -> None:
+    gate = CompatibilityGate(platform_version=platform)
+    verdict = gate.check(
+        valid_manifest(min_platform_version=minimum),
+        grant=full_grant(),
+        **VERIFIED,
+    )
+    assert verdict.ok is expected
+
+
+@pytest.mark.parametrize(
+    "version",
+    ["1.0.0-01", "1.0.0-alpha.01", "1.0.0-1..2", "1.0.0+build..1"],
+)
+def test_semver_key_rejects_non_semver_20_identifiers(version: str) -> None:
+    with pytest.raises(ValueError):
+        _semver_key(version)
 
 
 def test_broken_frontend_structure_is_incompatible(verifier: ArtifactVerifier) -> None:

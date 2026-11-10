@@ -1,0 +1,15 @@
+{
+  "runId": "kpa-mwa8vha6-ae192c8ebb57",
+  "cleanedAt": "2026-11-10T05:50:27.917Z",
+  "containersRemoved": [
+    "kpa-mwa8vha6-ae192c8ebb57-redpanda",
+    "kpa-mwa8vha6-ae192c8ebb57-postgres",
+    "kpa-mwa8vha6-ae192c8ebb57-redis"
+  ],
+  "networkRemoved": "kpa-mwa8vha6-ae192c8ebb57-network",
+  "dockerResourcesRemaining": 0,
+  "externalFixtureRootRemoved": true,
+  "secretsRemoved": true,
+  "verification": "Exact container names, ownership label and image verified before removal; network ownership label verified before removal.",
+  "artifactsRetained": "C:\\Users\\qwerty\\git\\agentscale\\wt-migration\\.agents\\worktrees\\audit-plugin-modules\\apps\\api\\artifacts\\kafka_plugin_acceptance\\kpa-mwa8vha6-ae192c8ebb57"
+}

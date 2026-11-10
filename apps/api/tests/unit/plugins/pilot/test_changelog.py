@@ -185,13 +185,17 @@ def test_entrypoint_applies_changelog_and_disables_execute_command() -> None:
     assert "НЕ является" in raw or "контейнерный" in raw.lower()
 
 
-def test_dockerfile_pins_liquibase_version_not_latest() -> None:
+def test_dockerfile_requires_base_digest_and_liquibase_checksum() -> None:
     raw = read_text(DOCKERFILE_PATH)
-    assert re.search(r"LIQUIBASE_VERSION=\d+\.\d+\.\d+", raw)
+    assert re.search(r"^ARG PYTHON_BASE_IMAGE$", raw, re.MULTILINE)
+    assert "FROM ${PYTHON_BASE_IMAGE} AS python-base" in raw
+    assert not re.search(r"^FROM python:", raw, re.MULTILINE)
+    assert re.search(r"^ARG LIQUIBASE_VERSION=4\.24\.0$", raw, re.MULTILINE)
+    assert re.search(r"^ARG LIQUIBASE_SHA256$", raw, re.MULTILINE)
+    assert "sha256sum -c -" in raw
     # Тег образа как таковой запрещён; упоминание в комментарии-ЗАПРЕТЕ — нет.
     assert not re.search(r"(?:FROM|ARG|image:)\s+\S*:latest\b", raw)
     assert "USER 10001:10001" in raw
-    assert "python:3.13-slim" in raw
     assert "HEALTHCHECK" in raw
     # imagePullPolicy задаётся в k8s Deployment, не директивой Dockerfile.
     assert not re.search(r"^\s*(?:ENV|LABEL)\s+imagePullPolicy", raw, re.MULTILINE)

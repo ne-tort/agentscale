@@ -197,7 +197,9 @@ async def test_kafka_ensure_topics_creates_missing(monkeypatch: pytest.MonkeyPat
     assert created == [
         "trig",
         "prodavan.auth.commands",
+        "prodavan.auth.commands.dlq",
         "prodavan.auth.events",
+        "prodavan.auth.events.dlq",
         "prodavan.relation.events",
         "prodavan.metrics.events",
         "prodavan.document.events",

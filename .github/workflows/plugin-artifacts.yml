@@ -1,610 +1,604 @@
-# CI OCI-артефактов плагинов (§5.1 дизайна v4, F4, критерий 18).
+# Plugin source -> dry-run -> quarantine -> verify -> digest promotion -> release verify -> platform publication.
 #
-# ОТДЕЛЬНЫЙ workflow: НЕ является частью ci-images.yml. Платформенные образы
-# (apps/api, apps/web, searchnet) ведёт родитель — там сейчас provenance: false,
-# sbom: false, cosign отсутствует, теги ':latest' + ':sha12'. Здесь, для плагинов,
-# наоборот: provenance + SBOM + cosign keyless + ТОЛЬКО pin по digest.
+# No action tags are used: this repository currently has no reviewed full-SHA
+# action pins. Source checkout uses an immutable commit and does not persist
+# credentials. Cosign/ORAS are installed only after release trust validation,
+# with an exact version and mandatory protected SHA256 variable.
 #
-# Риск self-hosted runners (ОБЯЗАТЕЛЬНО проверить до первого боевого прогона):
-#   1. Keyless OIDC: cosign получает Fulcio-сертификат через ACTIONS_ID_TOKEN_*
-#      и требует permissions: id-token: write. На GitHub-hosted это работает
-#      «из коробки», на self-hosted — нужно убедиться, что runner получает
-#      OIDC-токен (не отключён org/repo policy) и что cert identity совпадает
-#      с COSIGN_CERTIFICATE_IDENTITY ниже. Без этого cosign sign/verify упадёт
-#      и verify-before-publish честно уведёт артефакт в QUARANTINED.
-#   2. Приватный GHCR: push по secrets.GHCR_PUSH_TOKEN || GITHUB_TOKEN; у токена
-#      должен быть scope write:packages. cosign sign/verify и oras используют
-#      те же креденшелы из docker/login-action.
-#   3. Fallback, если keyless OIDC недоступен на self-hosted: перейти на
-#      cosign с ЗАФИКСИРОВАННЫМ KMS-ключом (например, GCP KMS / HashiCorp Vault
-#      / AWS KMS), передать --key <kms-uri> и в verify заменить
-#      --certificate-identity/--certificate-oidc-issuer на --key <pub|kms>.
-#      Запрещено «временно отключить проверку подписи» — это ломает критерий 18.
-#
-# Fail-closed: при отсутствии digest из output сборки job падает; ':latest'
-# запрещён явной проверкой; любая ошибка cosign verify -> QUARANTINED, а не
-# публикация. Тесты/сборки/cosign/docker/git в этой сессии НЕ запускались.
+# Direct push/dispatch release uses only the exact protected default-branch
+# identity. Reusable workflow_call callers must reference this workflow by a full
+# 40-character commit SHA. Platform publication requires protected source
+# provisioning plus independent release scan/CSP evidence. Dry-run remains useful
+# without those inputs and receives no write/OIDC permissions.
 
 name: Plugin OCI Artifacts
 
 on:
-  workflow_dispatch:
-    inputs:
-      plugin_id:
-        description: "Идентификатор плагина (например mod_equipment); каталог packages/plugins/<id>"
-        type: string
-        required: true
-      version:
-        description: "semver версия артефакта (без ':latest'); например 1.2.0"
-        type: string
-        required: true
-      manifest_path:
-        description: "Путь до исходного manifest.json плагина (источник capabilities/min_platform_version)"
-        type: string
-        required: false
-        default: ""
-      platform_version:
-        description: "semver версия ПЛАТФОРМЫ для CompatibilityGate (независимая от манифеста!)"
-        type: string
-        required: false
-        default: ""
-      granted_capabilities:
-        description: "Выданные CapabilityGrant через запятую. Пусто = QUARANTINED (fail-closed)"
-        type: string
-        required: false
-        default: ""
-      min_platform_version:
-        description: "Переопределить min_platform_version, если его нет в исходном манифесте"
-        type: string
-        required: false
-        default: ""
+  pull_request:
+    paths:
+      - "packages/plugins/**"
+      - ".github/workflows/plugin-artifacts.yml"
+      - ".github/scripts/plugin_*.py"
+      - "apps/api/tests/unit/plugins/test_ci_plugin_*.py"
   push:
     branches: [main]
     paths:
-      # Публикуем ТОЛЬКО при изменении самого плагина. НЕ добавляем сюда ни
-      # сам workflow, ни скрипты: при push правки CI каталог packages/plugins
-      # не меняется, «однозначно определить plugin_id» невозможно и job
-      # честно падает, делая весь CI Gate красным без публикации артефакта.
-      # Изменения инструментов проверяются через workflow_dispatch.
       - "packages/plugins/**"
+      - ".github/workflows/plugin-artifacts.yml"
+      - ".github/scripts/plugin_*.py"
+      - "apps/api/tests/unit/plugins/test_ci_plugin_*.py"
+  workflow_dispatch:
+    inputs:
+      plugin_dir:
+        description: "Source directory, independent of canonical manifest plugin_id"
+        required: false
+        default: ""
+        type: string
+      manifest_path:
+        description: "Optional manifest path relative to repository; must stay in plugin_dir"
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      plugin_dir:
+        description: "Source directory, independent of canonical manifest plugin_id"
+        required: true
+        type: string
+      manifest_path:
+        required: false
+        default: ""
+        type: string
+      trusted_workflow_ref:
+        description: "ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@<full commit SHA>"
+        required: true
+        type: string
+      expected_repository:
+        required: true
+        type: string
+      expected_repository_id:
+        required: true
+        type: string
+      default_branch_ref:
+        description: "Protected default branch ref, for example refs/heads/main"
+        required: true
+        type: string
+      enable_release:
+        description: "Request release after caller push/dispatch; OIDC and platform gates still apply"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
-  packages: write
-  id-token: write # ОБЯЗАТЕЛЕН для cosign keyless (Fulcio OIDC)
-  actions: read
+
+concurrency:
+  group: plugin-artifacts-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
   ARTIFACT_TYPE: application/vnd.agentscale.plugin.oci
+  PLUGIN_MANIFEST_MEDIA_TYPE: application/vnd.agentscale.plugin.manifest.v1+json
   FRONTEND_MEDIA_TYPE: application/vnd.agentscale.plugin.frontend
   MIGRATIONS_MEDIA_TYPE: application/vnd.agentscale.plugin.liquibase+xml
-  MANIFEST_MEDIA_TYPE: application/vnd.oci.image.manifest.v1+json
+  COSIGN_VERSION: "2.4.1"
+  ORAS_VERSION: "1.2.3"
+  COSIGN_LINUX_AMD64_SHA256: ${{ vars.PLUGIN_COSIGN_2_4_1_LINUX_AMD64_SHA256 || '' }}
+  ORAS_LINUX_AMD64_SHA256: ${{ vars.PLUGIN_ORAS_1_2_3_LINUX_AMD64_SHA256 || '' }}
+  BUILDKIT_IMAGE: ${{ vars.PLUGIN_BUILDKIT_IMAGE || '' }} # moby/buildkit:vX.Y.Z@sha256:...
 
 jobs:
-  publish-artifact:
-    name: cosign + SBOM + provenance + pin по digest
-    runs-on: [self-hosted, linux, docker] # как в ci-images.yml
-    timeout-minutes: 60
+  dry-run:
+    name: PR/pre-merge validation and local build (no registry writes)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: none
+      id-token: none
     outputs:
-      backend_digest: ${{ steps.digest.outputs.backend_digest }}
-      artifact_digest: ${{ steps.oras.outputs.artifact_digest }}
-      artifact_ref: ${{ steps.oras.outputs.artifact_ref }}
-      backend_ref: ${{ steps.digest.outputs.backend_ref }}
-      decision: ${{ steps.verify.outputs.decision }}
-      code: ${{ steps.verify.outputs.code }}
-
+      plugin_dir: ${{ steps.inputs.outputs.plugin_dir }}
+      plugin_id: ${{ steps.manifest.outputs.plugin_id }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      # ---------------------------------------------------------------------
-      # Инструменты. Версии ЗАФИКСИРОВАНЫ: cosign-installer и setup-oras
-      # сами проверяют checksum загружаемых бинарников. Fallback (если actions
-      # недоступны на self-hosted) — curl + ЯВНАЯ проверка sha256 перед
-      # установкой в /usr/local/bin; без проверки checksum бинарник не ставим.
-      # ---------------------------------------------------------------------
-      - name: Install cosign (pinned, checksum-verified)
-        uses: sigstore/cosign-installer@v3
-        with:
-          cosign-release: "v2.4.1"
-
-      - name: Install oras (pinned, checksum-verified)
-        uses: oras-project/setup-oras@v1
-        with:
-          version: "1.2.3"
-
-      - name: Toolchain sanity (fail-closed)
-        run: |
-          set -euo pipefail
-          command -v cosign >/dev/null || { echo "::error::cosign не установлен"; exit 1; }
-          command -v oras >/dev/null || { echo "::error::oras не установлен"; exit 1; }
-          cosign version
-          oras version
-
-      # ---------------------------------------------------------------------
-      # Входные данные. workflow_dispatch даёт inputs; push — нет, поэтому
-      # выводим plugin_id/version из изменённого packages/plugins/**. Если
-      # однозначно вывести нельзя — ПАДАЕМ, а не публикуем «что-то».
-      # ---------------------------------------------------------------------
-      - name: Resolve plugin inputs (fail-closed, без ':latest')
-        id: resolve
+      - name: Checkout immutable source without persisted credentials
         env:
-          IN_PLUGIN_ID: ${{ inputs.plugin_id }}
-          IN_VERSION: ${{ inputs.version }}
-          IN_MANIFEST_PATH: ${{ inputs.manifest_path }}
-          IN_PLATFORM_VERSION: ${{ inputs.platform_version }}
-          IN_GRANTED: ${{ inputs.granted_capabilities }}
-          IN_MIN_PLATFORM: ${{ inputs.min_platform_version }}
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_PATH: ${{ github.event_path }}
-          OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # ВЕСЬ stdout Python идёт в GITHUB_OUTPUT. Ошибки пишем ЯВНО в
-          # stderr и выходим с ненулевым кодом — они не должны попадать в
-          # файл outputs (иначе job может «тихо» продолжиться).
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import json, os, re, sys
+          SOURCE="$RUNNER_TEMP/plugin-source"
+          git -c http.extraheader="AUTHORIZATION: bearer $GH_TOKEN"             clone --filter=blob:none --no-checkout             "https://github.com/$GITHUB_REPOSITORY.git" "$SOURCE"
+          git -C "$SOURCE" -c advice.detachedHead=false checkout --detach "$GITHUB_SHA"
+          test "$(git -C "$SOURCE" rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "SOURCE_DIR=$SOURCE" >> "$GITHUB_ENV"
 
-          def fail(message: str) -> None:
-              print(f"::error::{message}", file=sys.stderr, flush=True)
-              sys.exit(1)
-
-          event = os.environ["EVENT_NAME"]
-          plugin_id = os.environ.get("IN_PLUGIN_ID", "").strip()
-          version = os.environ.get("IN_VERSION", "").strip()
-          manifest_path = os.environ.get("IN_MANIFEST_PATH", "").strip()
-
-          # ЯВНЫЙ запрет ':latest' на входе ещё до сборки.
-          for name, value in (("plugin_id", plugin_id), ("version", version),
-                             ("manifest_path", manifest_path)):
-              if ":latest" in value or value.endswith("/latest"):
-                  fail(f"{name}: ':latest' запрещён для плагинов")
-
-          if event == "push" and not plugin_id:
-              # Pure-python: читаем GITHUB_EVENT_PATH, а не вызываем `git diff`.
-              # Это работает и при shallow-checkout на self-hosted раннере.
-              event_path = os.environ.get("EVENT_PATH", "")
-              changed = []
-              if event_path and os.path.isfile(event_path):
-                  with open(event_path, "r", encoding="utf-8") as handle:
-                      payload = json.load(handle)
-                  for commit in payload.get("commits", []):
-                      for key in ("added", "modified", "removed"):
-                          changed.extend(commit.get(key, []))
-              candidates = sorted({
-                  p.split("/")[2] for p in changed
-                  if p.startswith("packages/plugins/") and len(p.split("/")) > 3
-              })
-              if len(candidates) == 1:
-                  plugin_id = candidates[0]
-              else:
-                  fail(
-                      "push без inputs: не удалось однозначно определить plugin_id "
-                      f"(кандидаты: {candidates}); используйте workflow_dispatch"
-                  )
-
-          if not plugin_id:
-              fail("plugin_id не задан — публикация запрещена (fail-closed)")
-          if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", plugin_id):
-              fail(f"некорректный plugin_id: {plugin_id!r}")
-
-          if not manifest_path:
-              manifest_path = f"packages/plugins/{plugin_id}/manifest.json"
-          if not os.path.isfile(manifest_path):
-              fail(f"исходный манифест не найден: {manifest_path!r} (fail-closed)")
-
-          with open(manifest_path, "r", encoding="utf-8") as handle:
-              src = json.load(handle)
-
-          if not version:
-              version = str(src.get("version", "")).strip()
-          # Строгий semver проверяется и здесь, и в plugin_manifest_builder.
-          semver = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
-                              r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
-                              r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$")
-          if not semver.fullmatch(version):
-              fail(f"version не semver: {version!r} (fail-closed)")
-
-          caps = src.get("capabilities", src.get("requestedCapabilities", []))
-          if isinstance(caps, str):
-              caps = [part.strip() for part in caps.split(",") if part.strip()]
-          if not isinstance(caps, list):
-              fail("capabilities должны быть списком (fail-closed)")
-
-          min_platform = (
-              os.environ.get("IN_MIN_PLATFORM", "").strip()
-              or str(src.get("min_platform_version", "")).strip()
-          )
-          if not min_platform:
-              fail(
-                  "min_platform_version отсутствует в манифесте и не передан "
-                  "через input (fail-closed)"
-              )
-
-          owner = os.environ["OWNER"].lower()
-          def out(key, value):
-              print(f"{key}={value}")
-
-          out("plugin_id", plugin_id)
-          out("version", version)
-          out("manifest_path", manifest_path)
-          out("capabilities", ",".join(str(c).strip() for c in caps))
-          out("min_platform_version", min_platform)
-          out("platform_version", os.environ.get("IN_PLATFORM_VERSION", "").strip())
-          out("granted_capabilities", os.environ.get("IN_GRANTED", "").strip())
-          out("backend_image", f"ghcr.io/{owner}/plugins/{plugin_id}/backend")
-          out("artifact_repo", f"ghcr.io/{owner}/plugins/{plugin_id}")
-          out("frontend_dir", f"packages/plugins/{plugin_id}/frontend/dist")
-          out("migrations_dir", f"packages/plugins/{plugin_id}/migrations")
-          out("dockerfile", f"packages/plugins/{plugin_id}/Dockerfile")
-          PY
-
-      - name: Check plugin source layout (fail-closed)
+      - name: Resolve plugin directory and trusted CI scripts
+        id: inputs
         env:
-          FRONTEND_DIR: ${{ steps.resolve.outputs.frontend_dir }}
-          MIGRATIONS_DIR: ${{ steps.resolve.outputs.migrations_dir }}
-          DOCKERFILE: ${{ steps.resolve.outputs.dockerfile }}
+          INPUT_PLUGIN_DIR: ${{ inputs.plugin_dir }}
+          INPUT_WORKFLOW_REF: ${{ inputs.trusted_workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: |
           set -euo pipefail
-          for path in "$FRONTEND_DIR" "$MIGRATIONS_DIR"; do
-            if [[ ! -d "$path" ]]; then
-              echo "::error::каталог слоя отсутствует: $path"; exit 1
-            fi
-            if [[ -z "$(ls -A "$path")" ]]; then
-              echo "::error::каталог слоя пуст: $path (ровно 3 слоя обязательны)"; exit 1
-            fi
-          done
-          if [[ ! -f "$DOCKERFILE" ]]; then
-            echo "::error::Dockerfile плагина отсутствует: $DOCKERFILE"; exit 1
-          fi
-
-      # ---------------------------------------------------------------------
-      # Сборка backend-образа. ТОЛЬКО provenance: true + sbom: true (в отличие
-      # от ci-images.yml, где они выключены). ':latest' НЕ используется НИГДЕ.
-      #
-      # buildx обязан запушить образ под каким-то именем; единственный тег —
-      # неизменяемый sha-тег, который НИКОГДА не потребляется дальше. Вся
-      # цепочка (cosign sign, manifest, verify, summary) работает исключительно
-      # по @sha256:<digest> из steps.build.outputs.digest. При пустом digest —
-      # немедленный fail (см. следующий шаг).
-      # ---------------------------------------------------------------------
-      - name: Use persistent buildx builder (как в ci-images.yml)
-        run: |
-          set -euo pipefail
-          if ! docker buildx inspect agentscale-ci >/dev/null 2>&1; then
-            docker buildx create --name agentscale-ci \
-              --driver docker-container --driver-opt network=host \
-              --config /etc/buildkit/buildkitd.toml \
-              || docker buildx create --name agentscale-ci \
-                --driver docker-container --driver-opt network=host
-          fi
-          docker buildx use agentscale-ci
-          docker buildx inspect --bootstrap agentscale-ci >/dev/null
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
-
-      - name: Build backend image (provenance + SBOM, push, БЕЗ :latest)
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ${{ steps.resolve.outputs.dockerfile }}
-          push: true
-          provenance: true
-          sbom: true
-          # НЕ ':latest'. Немутабельный sha-тег — только цель push для buildx.
-          tags: ${{ steps.resolve.outputs.backend_image }}:sha-${{ github.sha }}
-
-      - name: Resolve digest + ЯВНЫЙ запрет ':latest' (fail-closed)
-        id: digest
-        env:
-          BACKEND_IMAGE: ${{ steps.resolve.outputs.backend_image }}
-          RAW_DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          set -euo pipefail
-          DIGEST="${RAW_DIGEST:-}"
-          if [[ -z "$DIGEST" ]]; then
-            echo "::error::docker/build-push-action не вернул outputs.digest — публикация запрещена"
-            exit 1
-          fi
-          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::невалидный digest: '$DIGEST' (ожидался ^sha256:[0-9a-f]{64}$)"
-            exit 1
-          fi
-          BACKEND_REF="${BACKEND_IMAGE}@${DIGEST}"
-          # ЯВНЫЙ запрет ':latest' во всех ссылках, которые пойдут дальше.
-          for ref in "$BACKEND_REF" "$BACKEND_IMAGE" "${{ steps.resolve.outputs.version }}"; do
-            case "$ref" in
-              *:latest*|*/latest) echo "::error::':latest' запрещён: $ref"; exit 1 ;;
-            esac
-          done
-          {
-            echo "backend_digest=$DIGEST"
-            echo "backend_ref=$BACKEND_REF"
-          } >> "$GITHUB_OUTPUT"
-          echo "Backend закреплён по digest: $BACKEND_REF"
-
-      # ---------------------------------------------------------------------
-      # Подписываем backend-образ ДО того, как на него сошлётся артефакт.
-      # ---------------------------------------------------------------------
-      - name: cosign sign backend image (keyless OIDC, по digest)
-        env:
-          BACKEND_REF: ${{ steps.digest.outputs.backend_ref }}
-        run: |
-          set -euo pipefail
-          # Keyless: токен из permissions: id-token: write. --yes убирает
-          # интерактивное подтверждение (на self-hosted раннере иначе зависнет).
-          cosign sign --yes "$BACKEND_REF"
-          echo "Подписан: $BACKEND_REF"
-
-      - name: cosign attest SBOM + provenance (обязательно для verify)
-        env:
-          BACKEND_REF: ${{ steps.digest.outputs.backend_ref }}
-          BACKEND_DIGEST: ${{ steps.digest.outputs.backend_digest }}
-          PLUGIN_ID: ${{ inputs.plugin_id || github.event.inputs.plugin_id }}
-          PLUGIN_VERSION: ${{ inputs.version || github.event.inputs.version }}
-        run: |
-          set -euo pipefail
-          # VerificationResult в artifacts/verification.py требует ДВА флага:
-          # sbom_verified И provenance_verified. CliCosignPort проверяет их через
-          # `cosign verify-attestation --type spdxjson` и `--type slsaprovenance`.
-          # Одного `cosign sign` НЕДОСТАТОЧНО: без этих attest'ов КАЖДЫЙ артефакт
-          # честно уйдёт в QUARANTINED (fail-closed). Отключать проверку нельзя.
-          #
-          # SBOM: buildx с sbom: true уже положил SPDX-attestation в образ;
-          #Duplicate-предикат отклоняется cosign, поэтому проверяем наличие
-          # перед созданием. При отсутствии — создаём минимальный SPDX-документ
-          # с Digest образа (этого достаточно для задачи 07/16, полный SBOM
-          # генерируется на следующем этапе сканером).
-          SBOM_FILE="$(mktemp)"
-          cat > "$SBOM_FILE" <<JSON
-          {
-            "spdxVersion": "SPDX-2.3",
-            "dataLicense": "CC0-1.0",
-            "SPDXID": "SPDXRef-DOCUMENT",
-            "name": "${PLUGIN_ID}@${PLUGIN_VERSION}",
-            "documentNamespace": "https://agentscale.dev/spdx/${PLUGIN_ID}-${PLUGIN_VERSION}-$(date +%s)",
-            "creationInfo": {"created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "creators": ["Tool: agentscale-ci"]},
-            "packages": [{
-              "SPDXID": "SPDXRef-backend",
-              "name": "${PLUGIN_ID}-backend",
-              "downloadLocation": "NOASSERTION",
-              "checksums": [{"algorithm": "SHA256", "checksumValue": "${BACKEND_DIGEST#sha256:}"}]
-            }]
-          }
-          JSON
-          cosign attest --yes --predicate "$SBOM_FILE" --type spdxjson "$BACKEND_REF"
-          # SLSA provenance: кто/что/когда собрало. buildx provenance: true уже
-          # кладёт свой; свой предикат добавляем с уникальным типом, чтобы
-          # verify-attestation --type slsaprovenance находил хотя бы один.
-          PROV_FILE="$(mktemp)"
-          cat > "$PROV_FILE" <<JSON
-          {
-            "_type": "https://in-toto.io/Statement/v0.1",
-            "predicateType": "https://slsa.dev/provenance/v0.2",
-            "subject": [{"name": "${PLUGIN_ID}", "digest": {"sha256": "${BACKEND_DIGEST#sha256:}"}}],
-            "predicate": {
-              "builder": {"id": "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/plugin-artifacts.yml@${GITHUB_REF}"},
-              "buildType": "https://agentscale.dev/plugin-oci-build/v1",
-              "invocation": {"configSource": {"uri": "git+https://github.com/${GITHUB_REPOSITORY}@${GITHUB_REF}", "digest": {"sha1": "${GITHUB_SHA}"}}},
-              "metadata": {"buildInvocationId": "${GITHUB_RUN_ID}", "buildFinishedOn": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+          if [[ "$GITHUB_REPOSITORY" == "ne-tort/agentscale" && -z "$INPUT_WORKFLOW_REF" ]]; then
+            CI_DIR="$SOURCE_DIR/.github/scripts"
+            BUILDER_ID="ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@$GITHUB_REF"
+          else
+            [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "::error::reusable workflow must be pinned by full commit SHA"; exit 1;
             }
+            EXPECTED="ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@$WORKFLOW_SHA"
+            [[ "$INPUT_WORKFLOW_REF" == "$EXPECTED" ]] || {
+              echo "::error::trusted_workflow_ref does not match the pinned reusable workflow"; exit 1;
+            }
+            TRUSTED="$RUNNER_TEMP/trusted-plugin-ci"
+            # Public read only. A private platform repository requires a future
+            # short-lived GitHub App contract; no shared push token is accepted.
+            git clone --filter=blob:none --no-checkout               https://github.com/ne-tort/agentscale.git "$TRUSTED"
+            git -C "$TRUSTED" -c advice.detachedHead=false checkout --detach "$WORKFLOW_SHA"
+            test "$(git -C "$TRUSTED" rev-parse HEAD)" = "$WORKFLOW_SHA"
+            CI_DIR="$TRUSTED/.github/scripts"
+            BUILDER_ID="$EXPECTED"
+          fi
+          PLUGIN_DIR="$INPUT_PLUGIN_DIR"           SOURCE_DIR="$SOURCE_DIR"           CI_DIR="$CI_DIR"           BUILDER_ID="$BUILDER_ID"           python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          plugin_dir = os.environ["PLUGIN_DIR"].strip()
+          if not plugin_dir:
+              root = Path(os.environ["SOURCE_DIR"])
+              candidates = sorted(
+                  path.parent.relative_to(root).as_posix()
+                  for path in (root / "packages" / "plugins").glob("*/manifest.json")
+              )
+              if len(candidates) != 1:
+                  raise SystemExit(
+                      "::error::plugin_dir is required when the changed plugin cannot be resolved uniquely; "
+                      f"candidates={candidates}"
+                  )
+              plugin_dir = candidates[0]
+          if Path(plugin_dir).is_absolute() or ".." in Path(plugin_dir).parts:
+              raise SystemExit("::error::plugin_dir must be a safe relative path")
+          ci_dir = Path(os.environ["CI_DIR"])
+          for name in ("plugin_manifest_builder.py", "plugin_verify.py", "plugin_publication.py"):
+              if not (ci_dir / name).is_file():
+                  raise SystemExit(f"::error::trusted CI script is missing: {name}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              handle.write(f"PLUGIN_DIR={plugin_dir}\n")
+              handle.write(f"CI_DIR={ci_dir}\n")
+              handle.write(f"TRUSTED_BUILDER_ID={os.environ['BUILDER_ID']}\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"plugin_dir={plugin_dir}\n")
+          PY
+
+      - name: Validate manifest, protocol fixture and compatible source layout
+        id: manifest
+        env:
+          INPUT_MANIFEST_PATH: ${{ inputs.manifest_path }}
+        run: |
+          set -euo pipefail
+          PREPARE="$RUNNER_TEMP/plugin-prepare"
+          python3 "$CI_DIR/plugin_manifest_builder.py" prepare             --source-root "$SOURCE_DIR"             --plugin-dir "$PLUGIN_DIR"             --manifest-path "$INPUT_MANIFEST_PATH"             --output-dir "$PREPARE" > "$RUNNER_TEMP/resolved.json"
+          python3 - <<'PY'
+          import json
+          import os
+
+          resolved = json.load(open(os.environ["RUNNER_TEMP"] + "/resolved.json", encoding="utf-8"))
+          mapping = {
+              "PLUGIN_ID": "plugin_id",
+              "PLUGIN_VERSION": "version",
+              "MIN_PLATFORM_VERSION": "min_platform_version",
+              "SOURCE_MANIFEST": "manifest_path",
+              "CANONICAL_MANIFEST": "canonical_manifest",
+              "FRONTEND_ARCHIVE": "frontend_archive",
+              "MIGRATIONS_ARCHIVE": "migrations_archive",
+              "DOCKERFILE": "dockerfile",
+              "DOCKER_CONTEXT": "docker_context",
           }
-          JSON
-          cosign attest --yes --predicate "$PROV_FILE" --type slsaprovenance "$BACKEND_REF"
-          rm -f "$SBOM_FILE" "$PROV_FILE"
-          echo "Attest'ы SBOM + SLSA provenance привязаны к $BACKEND_REF"
-
-      # ---------------------------------------------------------------------
-      # Подписываемый OCI-манифест: ровно 3 слоя, semver, plugin-rpc/1,
-      # capability allowlist, БЕЗ artifact_digest/signature (самореференция).
-      # ---------------------------------------------------------------------
-      - name: Build signed OCI manifest (pure-python, fail-closed)
-        env:
-          PLUGIN_ID: ${{ steps.resolve.outputs.plugin_id }}
-          VERSION: ${{ steps.resolve.outputs.version }}
-          BACKEND_DIGEST: ${{ steps.digest.outputs.backend_digest }}
-          FRONTEND_DIR: ${{ steps.resolve.outputs.frontend_dir }}
-          MIGRATIONS_DIR: ${{ steps.resolve.outputs.migrations_dir }}
-          CAPABILITIES: ${{ steps.resolve.outputs.capabilities }}
-          MIN_PLATFORM_VERSION: ${{ steps.resolve.outputs.min_platform_version }}
-        run: |
-          set -euo pipefail
-          python3 .github/scripts/plugin_manifest_builder.py \
-            --plugin-id "$PLUGIN_ID" \
-            --version "$VERSION" \
-            --backend-digest "$BACKEND_DIGEST" \
-            --frontend-dir "$FRONTEND_DIR" \
-            --migrations-dir "$MIGRATIONS_DIR" \
-            --capabilities "$CAPABILITIES" \
-            --min-platform-version "$MIN_PLATFORM_VERSION" \
-            > oci-manifest.json
-          # Дополнительная страховка: в подписанном теле нет ':latest' и
-          # самореференции (builder проверяет это сам, но CI проверяет явно).
-          python3 - <<'PY'
-          import json, sys
-          with open("oci-manifest.json", encoding="utf-8") as f:
-              raw = f.read()
-          if ":latest" in raw:
-              sys.exit("::error::подписанный манифест содержит ':latest'")
-          m = json.loads(raw)
-          if m.get("schemaVersion") != 2 or len(m.get("layers", [])) != 3:
-              sys.exit("::error::манифест должен иметь schemaVersion=2 и ровно 3 слоя")
-          print("OCI-манифест: 3 слоя, без самореференции, без ':latest'")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              for environment_name, key in mapping.items():
+                  handle.write(f"{environment_name}={resolved[key]}\n")
+              handle.write("CAPABILITIES=" + ",".join(resolved["capabilities"]) + "\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"plugin_id={resolved['plugin_id']}\n")
           PY
 
-      # ---------------------------------------------------------------------
-      # oras push: frontend/dist + migrations + manifest как layers,
-      # аннотации из подписываемого манифеста. ':latest' отсутствует: тег —
-      # семвер версия (непереиспользуемая), а весь downstream — по @digest.
-      #
-      # НЮАНС СООТВЕТСТВИЯ §5.1 (на ревью родителю): логический манифест из
-      # plugin_manifest_builder описывает РОВНО 3 слоя — (1) backend image ref
-      # по digest, (2) frontend/dist, (3) migrations. Физически oras пушит
-      # (1) frontend/dist, (2) migrations, (3) сам JSON-манифест; backend-образ
-      # НЕ копируется как blob, а остаётся отдельным подписанным образом, на
-      # который артефакт ссылается аннотацией `backend_digest` (тот же самый
-      # @sha256). Это осознанно: §5.1 требует «Backend → Deployment по образу
-      # из того же OCI digest», а копирование ~2 ГБ образа в слой артефакта
-      # сделало бы артефакт неподъёмным. Связность даёт cosign sign ОБОИХ refs
-      # и plugin_verify.py, который проверяет подпись и того, и другого.
-      # Если родитель решит, что backend должен быть физическим слоем —
-      # потребуется добавить 4-й blob и пересмотреть «ровно 3 слоя».
-      # ---------------------------------------------------------------------
-      - name: oras push OCI-артефакта (3 layers + annotations)
-        id: oras
-        env:
-          ARTIFACT_REPO: ${{ steps.resolve.outputs.artifact_repo }}
-          VERSION: ${{ steps.resolve.outputs.version }}
-          MANIFEST_PATH: ${{ steps.resolve.outputs.manifest_path }}
-          FRONTEND_DIR: ${{ steps.resolve.outputs.frontend_dir }}
-          MIGRATIONS_DIR: ${{ steps.resolve.outputs.migrations_dir }}
+      - name: Run stdlib focused and module contract tests
         run: |
           set -euo pipefail
-          # Архивы детерминированы по содержимому каталогов (одинаковый набор
-          # файлов -> одинаковый слой). ':latest' не создаётся ни в одном теге.
-          tar -czf frontend-dist.tar.gz -C "$FRONTEND_DIR" .
-          tar -czf migrations.tar.gz -C "$MIGRATIONS_DIR" .
-
-          # Пары --annotation/key=value генерирует Python в файл (по одной на
-          # строку, значения без переводов строк), затем bash читает в массив.
-          # Так избегаем хрупкой конструкции heredoc внутри <(...).
-          python3 - <<'PY'
-          import json, os
-          with open("oci-manifest.json", encoding="utf-8") as f:
-              manifest = json.load(f)
-          lines = []
-          for key, value in sorted(manifest["annotations"].items()):
-              if "\n" in str(value) or "\r" in str(value):
-                  raise SystemExit(f"::error::недопустимый перевод строки в аннотации {key}")
-              lines.extend(["--annotation", f"{key}={value}"])
-          lines.extend([
-              "--annotation",
-              f"com.agentscale.plugin.source_manifest={os.environ['MANIFEST_PATH']}",
-          ])
-          with open("annotation-args.txt", "w", encoding="utf-8") as f:
-              f.write("\n".join(lines) + "\n")
-          PY
-          mapfile -t ANNOTATION_ARGS < annotation-args.txt
-          if [[ "${#ANNOTATION_ARGS[@]}" -eq 0 ]]; then
-            echo "::error::аннотации артефакта не сформированы"; exit 1
+          for TEST_FILE in test_ci_plugin_supply_chain.py test_ci_plugin_publication.py; do
+            if [[ -f "$SOURCE_DIR/apps/api/tests/unit/plugins/$TEST_FILE" ]]; then
+              PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover                 -s "$SOURCE_DIR/apps/api/tests/unit/plugins" -p "$TEST_FILE"
+            fi
+          done
+          if [[ -d "$DOCKER_CONTEXT/tests/contract" ]]; then
+            PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover               -s "$DOCKER_CONTEXT/tests/contract" -p "test_*.py"
+          elif [[ "$GITHUB_REPOSITORY" != "ne-tort/agentscale" ]]; then
+            echo "::error::standalone plugin must provide stdlib tests/contract"; exit 1
           fi
 
-          # --export-manifest пишет точные байты манифеста: sha256 от них и
-          # есть digest артефакта (не парсим человекочитаемый stdout).
-          oras push "${ARTIFACT_REPO}:${VERSION}" \
-            --artifact-type "${ARTIFACT_TYPE}" \
-            "${ANNOTATION_ARGS[@]}" \
-            --export-manifest pushed-manifest.json \
-            "frontend-dist.tar.gz:${FRONTEND_MEDIA_TYPE}" \
-            "migrations.tar.gz:${MIGRATIONS_MEDIA_TYPE}" \
-            "oci-manifest.json:${MANIFEST_MEDIA_TYPE}" \
-            2>&1 | tee oras-push.log
-
-          if [[ ! -s pushed-manifest.json ]]; then
-            echo "::error::oras не записал --export-manifest — digest недоступен, fail"
-            exit 1
-          fi
-          ARTIFACT_DIGEST="sha256:$(sha256sum pushed-manifest.json | awk '{print $1}')"
-          if [[ ! "$ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::невалидный digest артефакта: $ARTIFACT_DIGEST"
-            exit 1
-          fi
-          # Перекрёстная проверка с тем, что напечатал oras (если строка есть).
-          PRINTED="$(grep -oE 'sha256:[0-9a-f]{64}' oras-push.log | tail -n1 || true)"
-          if [[ -n "$PRINTED" && "$PRINTED" != "$ARTIFACT_DIGEST" ]]; then
-            echo "::error::расхождение digest: oras=$PRINTED export=$ARTIFACT_DIGEST"
-            exit 1
-          fi
-
-          ARTIFACT_REF="${ARTIFACT_REPO}@${ARTIFACT_DIGEST}"
-          case "$ARTIFACT_REF" in
-            *:latest*|*/latest) echo "::error::':latest' запрещён: $ARTIFACT_REF"; exit 1 ;;
-          esac
-          {
-            echo "artifact_digest=$ARTIFACT_DIGEST"
-            echo "artifact_ref=$ARTIFACT_REF"
-          } >> "$GITHUB_OUTPUT"
-          echo "OCI-артефакт закреплён по digest: $ARTIFACT_REF"
-
-      - name: cosign sign OCI-артефакт (keyless OIDC, по digest)
-        env:
-          ARTIFACT_REF: ${{ steps.oras.outputs.artifact_ref }}
+      - name: Create fresh ephemeral builder and build locally without push
+        id: local_build
         run: |
           set -euo pipefail
-          cosign sign --yes "$ARTIFACT_REF"
-          echo "Подписан: $ARTIFACT_REF"
+          BUILDER="plugin-dry-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "BUILDER_NAME=$BUILDER" >> "$GITHUB_ENV"
+          [[ "$BUILDKIT_IMAGE" =~ ^moby/buildkit:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]] || {
+            echo "::error::BLOCKER: PLUGIN_BUILDKIT_IMAGE must pin moby/buildkit version and digest"; exit 1;
+          }
+          docker buildx create --name "$BUILDER" --driver docker-container \
+            --driver-opt "image=$BUILDKIT_IMAGE" --use
+          docker buildx inspect --bootstrap "$BUILDER"
+          docker buildx build --load             --provenance=false --sbom=false             --file "$DOCKERFILE"             --tag "local/$PLUGIN_ID:sha-$GITHUB_SHA"             "$DOCKER_CONTEXT"
 
-      # ---------------------------------------------------------------------
-      # Verify-before-publish. plugin_verify.py сам ещё раз вызывает
-      # `cosign verify` (subprocess check=True) для ОБОИХ refs, проверяет digest,
-      # манифест и CompatibilityGate. QUARANTINED -> exit 1 -> job красный,
-      # публикации нет. GITHUB_OUTPUT/GITHUB_STEP_SUMMARY заполняются скриптом.
-      # ---------------------------------------------------------------------
-      - name: "Verify-before-publish (fail-closed: QUARANTINED != publish)"
-        id: verify
-        env:
-          PLUGIN_ARTIFACT_REF: ${{ steps.oras.outputs.artifact_ref }}
-          PLUGIN_BACKEND_REF: ${{ steps.digest.outputs.backend_ref }}
-          COSIGN_CERTIFICATE_IDENTITY: >-
-            ${{ vars.COSIGN_CERTIFICATE_IDENTITY || format('https://github.com/{0}/.github/workflows/plugin-artifacts.yml@{1}', github.repository, github.ref) }}
-          COSIGN_CERTIFICATE_OIDC_ISSUER: https://token.actions.githubusercontent.com
-          PLATFORM_VERSION: ${{ steps.resolve.outputs.platform_version || vars.PLATFORM_VERSION }}
-          PLUGIN_GRANTED_CAPABILITIES: ${{ steps.resolve.outputs.granted_capabilities }}
-        run: |
-          set -euo pipefail
-          # Fail-closed: без версии платформы и без выданного CapabilityGrant
-          # скрипт сам вернёт QUARANTINED — «нет данных» != «можно публиковать».
-          python3 .github/scripts/plugin_verify.py \
-            --manifest oci-manifest.json \
-            --backend-digest "${{ steps.digest.outputs.backend_digest }}" \
-            --artifact-ref "$PLUGIN_ARTIFACT_REF" \
-            --backend-ref "$PLUGIN_BACKEND_REF" \
-            --platform-version "$PLATFORM_VERSION" \
-            --granted-capabilities "$PLUGIN_GRANTED_CAPABILITIES" \
-            --certificate-identity "$COSIGN_CERTIFICATE_IDENTITY" \
-            --certificate-oidc-issuer "$COSIGN_CERTIFICATE_OIDC_ISSUER" \
-            --output verify-decision.json
-
-      # ---------------------------------------------------------------------
-      # Digest в output / step summary. Дублируем явно: читать артефакт можно
-      # ТОЛЬКО по @sha256, ':latest' запрещён (§5.1, критерий 18).
-      # ---------------------------------------------------------------------
-      - name: Записать digest в output / summary
+      - name: Remove dry-run builder
         if: always()
+        run: |
+          if [[ -n "${BUILDER_NAME:-}" ]]; then
+            docker buildx rm -f "$BUILDER_NAME" || true
+          fi
+
+      - name: Dry-run trust boundary summary
+        run: |
+          {
+            echo "### Plugin dry-run"
+            echo "No GHCR login/push, packages:write, id-token, signing, release, or persistent builder credentials were used."
+            echo "Resolved plugin_id=$PLUGIN_ID from plugin_dir=$PLUGIN_DIR at $GITHUB_SHA."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: Quarantine sign/verify then promote by digest
+    needs: dry-run
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.event_name != 'pull_request_target' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) ||
+        (inputs.enable_release == true && github.event_name == 'workflow_call') ||
+        (inputs.enable_release == true && github.event_name == 'push')
+      )
+    runs-on: ubuntu-latest
+    environment: plugin-release
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    env:
+      # GitHub environment-owned typed provisioning, never workflow input.
+      PLUGIN_PLATFORM_PUBLICATION_CONFIG: ${{ vars.PLUGIN_PLATFORM_PUBLICATION_CONFIG || '' }}
+      # Optional exact HTTP base URLs for protected internal development only.
+      PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST: ${{ vars.PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST || '' }}
+    outputs:
+      backend_ref: ${{ steps.release_verify.outputs.backend_ref }}
+      artifact_ref: ${{ steps.release_verify.outputs.artifact_ref }}
+      decision: ${{ steps.release_verify.outputs.decision }}
+    steps:
+      - name: Checkout immutable source without persisted credentials
         env:
-          BACKEND_DIGEST: ${{ steps.digest.outputs.backend_digest }}
-          BACKEND_REF: ${{ steps.digest.outputs.backend_ref }}
-          ARTIFACT_DIGEST: ${{ steps.oras.outputs.artifact_digest }}
-          ARTIFACT_REF: ${{ steps.oras.outputs.artifact_ref }}
-          DECISION: ${{ steps.verify.outputs.decision }}
-          CODE: ${{ steps.verify.outputs.code }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          SOURCE="$RUNNER_TEMP/plugin-source"
+          git -c http.extraheader="AUTHORIZATION: bearer $GH_TOKEN"             clone --filter=blob:none --no-checkout             "https://github.com/$GITHUB_REPOSITORY.git" "$SOURCE"
+          git -C "$SOURCE" -c advice.detachedHead=false checkout --detach "$GITHUB_SHA"
+          test "$(git -C "$SOURCE" rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "SOURCE_DIR=$SOURCE" >> "$GITHUB_ENV"
+
+      - name: Resolve trusted CI scripts at full reusable SHA
+        env:
+          PLUGIN_DIR: ${{ needs.dry-run.outputs.plugin_dir }}
+          INPUT_WORKFLOW_REF: ${{ inputs.trusted_workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REPOSITORY" == "ne-tort/agentscale" && -z "$INPUT_WORKFLOW_REF" ]]; then
+            CI_DIR="$SOURCE_DIR/.github/scripts"
+          else
+            [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "::error::reusable release requires full reusable commit SHA"; exit 1;
+            }
+            EXPECTED="ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@$WORKFLOW_SHA"
+            [[ "$INPUT_WORKFLOW_REF" == "$EXPECTED" ]] || {
+              echo "::error::reusable workflow identity mismatch"; exit 1;
+            }
+            TRUSTED="$RUNNER_TEMP/trusted-plugin-ci"
+            git clone --filter=blob:none --no-checkout               https://github.com/ne-tort/agentscale.git "$TRUSTED"
+            git -C "$TRUSTED" -c advice.detachedHead=false checkout --detach "$WORKFLOW_SHA"
+            test "$(git -C "$TRUSTED" rev-parse HEAD)" = "$WORKFLOW_SHA"
+            CI_DIR="$TRUSTED/.github/scripts"
+          fi
+          echo "CI_DIR=$CI_DIR" >> "$GITHUB_ENV"
+          test -f "$CI_DIR/plugin_manifest_builder.py"
+          test -f "$CI_DIR/plugin_verify.py"
+          test -f "$CI_DIR/plugin_publication.py"
+
+      - name: Validate GitHub OIDC source and workflow trust before any write
+        id: trust
+        env:
+          EXPECTED_REPOSITORY: ${{ inputs.expected_repository || github.repository }}
+          EXPECTED_REPOSITORY_ID: ${{ inputs.expected_repository_id || vars.PLUGIN_PLATFORM_REPOSITORY_ID || '' }}
+          EXPECTED_REF: ${{ inputs.default_branch_ref || format('refs/heads/{0}', github.event.repository.default_branch) }}
+          INPUT_WORKFLOW_REF: ${{ inputs.trusted_workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PLUGIN_ID: ${{ needs.dry-run.outputs.plugin_id }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import importlib.util
+          import json
+          import os
+          import sys
+
+          def fail(message):
+              raise SystemExit("::error::" + message)
+
+          spec = importlib.util.spec_from_file_location(
+              "trusted_plugin_publication",
+              os.path.join(os.environ["CI_DIR"], "plugin_publication.py"),
+          )
+          if spec is None or spec.loader is None:
+              fail("trusted publication helper could not be loaded")
+          publication = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = publication
+          try:
+              spec.loader.exec_module(publication)
+          except Exception:
+              fail("trusted publication helper could not be loaded")
+          try:
+              trust = publication.ReleaseTrust.from_environment(os.environ)
+          except publication.PublicationBlocked as exc:
+              fail(exc.code)
+          except Exception:
+              fail("trusted release context is invalid")
+
+          # The shared helper rejects redirects, environment proxies, unexpected
+          # hosts, oversized responses and pre-existing audience parameters.
+          try:
+              token = publication.fetch_github_oidc(
+                  publication.UrllibTransport(), os.environ
+              )
+          except publication.PublicationBlocked as exc:
+              fail(exc.code)
+          try:
+              parts = token.split(".")
+              payload = json.loads(
+                  base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4))
+              )
+          except Exception:
+              fail("GitHub OIDC token is malformed")
+          try:
+              publication.validate_release_oidc_claims(payload, trust=trust)
+          except publication.PublicationBlocked as exc:
+              fail(exc.code)
+
+          builder = trust.builder_identity
+          repository = trust.expected_repository
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              handle.write(f"TRUSTED_BUILDER_ID={builder}\n")
+              handle.write(f"SIGNER_IDENTITY=https://github.com/{builder}\n")
+              handle.write(f"REGISTRY_OWNER={repository.split('/')[0].lower()}\n")
+          PY
+          # This typed protected mapping is required before any registry write.
+          # Backend OIDC validation and durable approval remain authoritative later.
+          python3 "$CI_DIR/plugin_publication.py" validate-context             --plugin-id "$PLUGIN_ID" --builder-identity "$TRUSTED_BUILDER_ID"
+
+      - name: Install cosign and ORAS by version plus protected checksum
+        run: |
+          set -euo pipefail
+          [[ "$(uname -m)" == "x86_64" ]] || { echo "::error::only pinned linux/amd64 tools are configured"; exit 1; }
+          [[ "$COSIGN_LINUX_AMD64_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "::error::BLOCKER: protected cosign 2.4.1 SHA256 is unknown/not configured"; exit 1;
+          }
+          [[ "$ORAS_LINUX_AMD64_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "::error::BLOCKER: protected ORAS 1.2.3 archive SHA256 is unknown/not configured"; exit 1;
+          }
+          TOOLS="$RUNNER_TEMP/plugin-tools"
+          mkdir -p "$TOOLS"
+          curl --proto '=https' --tlsv1.2 -fsSL             "https://github.com/sigstore/cosign/releases/download/v$COSIGN_VERSION/cosign-linux-amd64"             -o "$TOOLS/cosign"
+          echo "$COSIGN_LINUX_AMD64_SHA256  $TOOLS/cosign" | sha256sum -c -
+          curl --proto '=https' --tlsv1.2 -fsSL             "https://github.com/oras-project/oras/releases/download/v$ORAS_VERSION/oras_${ORAS_VERSION}_linux_amd64.tar.gz"             -o "$TOOLS/oras.tar.gz"
+          echo "$ORAS_LINUX_AMD64_SHA256  $TOOLS/oras.tar.gz" | sha256sum -c -
+          tar -xzf "$TOOLS/oras.tar.gz" -C "$TOOLS" oras
+          chmod 0555 "$TOOLS/cosign" "$TOOLS/oras"
+          echo "$TOOLS" >> "$GITHUB_PATH"
+          cosign version | grep -F "$COSIGN_VERSION"
+          oras version | grep -F "$ORAS_VERSION"
+
+      - name: Revalidate manifest, layout and protocol before quarantine build
+        run: |
+          set -euo pipefail
+          PREPARE="$RUNNER_TEMP/plugin-prepare"
+          python3 "$CI_DIR/plugin_manifest_builder.py" prepare             --source-root "$SOURCE_DIR"             --plugin-dir "${{ needs.dry-run.outputs.plugin_dir }}"             --manifest-path "${{ inputs.manifest_path }}"             --output-dir "$PREPARE" > "$RUNNER_TEMP/resolved.json"
+          python3 - <<'PY'
+          import json
+          import os
+
+          resolved = json.load(open(os.environ["RUNNER_TEMP"] + "/resolved.json", encoding="utf-8"))
+          mapping = {
+              "PLUGIN_ID": "plugin_id", "PLUGIN_VERSION": "version",
+              "SOURCE_MANIFEST": "manifest_path", "CANONICAL_MANIFEST": "canonical_manifest",
+              "FRONTEND_ARCHIVE": "frontend_archive", "MIGRATIONS_ARCHIVE": "migrations_archive",
+              "DOCKERFILE": "dockerfile", "DOCKER_CONTEXT": "docker_context",
+          }
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              for environment_name, key in mapping.items():
+                  handle.write(f"{environment_name}={resolved[key]}\n")
+              owner = os.environ["REGISTRY_OWNER"]
+              plugin_id = resolved["plugin_id"]
+              handle.write(f"QUAR_BACKEND=ghcr.io/{owner}/plugins-quarantine/{plugin_id}/backend\n")
+              handle.write(f"QUAR_BUNDLE=ghcr.io/{owner}/plugins-quarantine/{plugin_id}/bundle\n")
+              handle.write(f"RELEASE_BACKEND=ghcr.io/{owner}/plugins/{plugin_id}/backend\n")
+              handle.write(f"RELEASE_BUNDLE=ghcr.io/{owner}/plugins/{plugin_id}/bundle\n")
+          PY
+
+      - name: Login to GHCR only after trust validation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login "$REGISTRY"             --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Create fresh ephemeral release builder
+        run: |
+          set -euo pipefail
+          BUILDER="plugin-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "BUILDER_NAME=$BUILDER" >> "$GITHUB_ENV"
+          [[ "$BUILDKIT_IMAGE" =~ ^moby/buildkit:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]] || {
+            echo "::error::BLOCKER: PLUGIN_BUILDKIT_IMAGE must pin moby/buildkit version and digest"; exit 1;
+          }
+          docker buildx create --name "$BUILDER" --driver docker-container \
+            --driver-opt "image=$BUILDKIT_IMAGE" --use
+          docker buildx inspect --bootstrap "$BUILDER"
+
+      - name: Build and push backend only to quarantine with buildx evidence
+        id: backend_build
+        run: |
+          set -euo pipefail
+          docker buildx build --push             --provenance=mode=max --sbom=true             --metadata-file "$RUNNER_TEMP/backend-build-metadata.json"             --file "$DOCKERFILE"             --tag "$QUAR_BACKEND:sha-$GITHUB_SHA"             "$DOCKER_CONTEXT"
+          BACKEND_DIGEST="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["containerimage.digest"])' "$RUNNER_TEMP/backend-build-metadata.json")"
+          [[ "$BACKEND_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "::error::buildx did not return a valid backend digest"; exit 1;
+          }
+          test "$(oras resolve "$QUAR_BACKEND:sha-$GITHUB_SHA")" = "$BACKEND_DIGEST"
+          BACKEND_REF="$QUAR_BACKEND@$BACKEND_DIGEST"
           {
-            echo "backend_digest=${BACKEND_DIGEST:-}"
-            echo "artifact_digest=${ARTIFACT_DIGEST:-}"
-          } >> "$GITHUB_OUTPUT"
-          if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-            {
-              echo "### Plugin OCI artifact"
-              echo ""
-              echo "| Поле | Значение |"
-              echo "|---|---|"
-              echo "| Решение | **${DECISION:-QUARANTINED}** (${CODE:-нет данных}) |"
-              echo "| Backend digest | \`${BACKEND_DIGEST:-—}\` |"
-              echo "| Backend ref | \`${BACKEND_REF:-—}\` |"
-              echo "| Artifact digest | \`${ARTIFACT_DIGEST:-—}\` |"
-              echo "| Artifact ref | \`${ARTIFACT_REF:-—}\` |"
-              echo ""
-              echo "> Пин ТОЛЬКО по \`@sha256:...\`. \`:latest\` запрещён."
-              echo "> При \`QUARANTINED\` артефакт НЕ публикуется; откат = Previous immutable digest."
-            } >> "$GITHUB_STEP_SUMMARY"
+            echo "BACKEND_DIGEST=$BACKEND_DIGEST"
+            echo "BACKEND_REF=$BACKEND_REF"
+          } >> "$GITHUB_ENV"
+
+      - name: Extract backend buildx SBOM and provenance from actual image descriptors
+        run: |
+          set -euo pipefail
+          EVIDENCE="$RUNNER_TEMP/backend-evidence"
+          mkdir -p "$EVIDENCE"
+          docker buildx imagetools inspect --raw "$BACKEND_REF" > "$EVIDENCE/backend-index.json"
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+
+          root = os.environ["RUNNER_TEMP"] + "/backend-evidence"
+          index = json.load(open(root + "/backend-index.json", encoding="utf-8"))
+          descriptors = index.get("manifests", [])
+          images = [item for item in descriptors if item.get("platform") and item.get("annotations", {}).get("vnd.docker.reference.type") != "attestation-manifest"]
+          if len(images) != 1:
+              raise SystemExit("::error::expected exactly one backend platform image")
+          image_digest = images[0].get("digest", "")
+          if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest):
+              raise SystemExit("::error::invalid backend image manifest digest")
+          attestations = [
+              item["digest"] for item in descriptors
+              if item.get("annotations", {}).get("vnd.docker.reference.type") == "attestation-manifest"
+              and item.get("annotations", {}).get("vnd.docker.reference.digest") == image_digest
+          ]
+          if not attestations:
+              raise SystemExit("::error::buildx attestation descriptors are missing")
+          with open(root + "/manifest-digests.txt", "w", encoding="utf-8") as handle:
+              handle.write("\n".join(attestations) + "\n")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              handle.write(f"BACKEND_IMAGE_MANIFEST_DIGEST={image_digest}\n")
+          PY
+          INDEX=0
+          while IFS= read -r MANIFEST_DIGEST; do
+            [[ "$MANIFEST_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+            MANIFEST="$EVIDENCE/attestation-$INDEX.json"
+            oras manifest fetch "$QUAR_BACKEND@$MANIFEST_DIGEST" > "$MANIFEST"
+            python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print("\n".join(x["digest"] for x in m.get("layers", [])))'               "$MANIFEST" > "$EVIDENCE/layers-$INDEX.txt"
+            LAYER=0
+            while IFS= read -r LAYER_DIGEST; do
+              [[ "$LAYER_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+              oras blob fetch --output "$EVIDENCE/statement-$INDEX-$LAYER.json"                 "$QUAR_BACKEND@$LAYER_DIGEST"
+              LAYER=$((LAYER + 1))
+            done < "$EVIDENCE/layers-$INDEX.txt"
+            INDEX=$((INDEX + 1))
+          done < "$EVIDENCE/manifest-digests.txt"
+          python3 "$CI_DIR/plugin_manifest_builder.py" backend-evidence             --evidence-dir "$EVIDENCE"             --backend-image-manifest-digest "$BACKEND_IMAGE_MANIFEST_DIGEST"             --source-repository "$GITHUB_REPOSITORY" --source-sha "$GITHUB_SHA"             --builder-id "$TRUSTED_BUILDER_ID" --run-id "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"             --output-sbom "$RUNNER_TEMP/backend-sbom.json"             --output-provenance "$RUNNER_TEMP/backend-provenance.json"
+
+      - name: Sign and attest quarantined backend by digest
+        run: |
+          set -euo pipefail
+          cosign sign --yes "$BACKEND_REF"
+          cosign attest --yes --predicate "$RUNNER_TEMP/backend-sbom.json"             --type spdxjson "$BACKEND_REF"
+          cosign attest --yes --predicate "$RUNNER_TEMP/backend-provenance.json"             --type slsaprovenance "$BACKEND_REF"
+
+      - name: Build and push canonical OCI bundle only to quarantine
+        id: bundle_build
+        run: |
+          set -euo pipefail
+          python3 "$CI_DIR/plugin_manifest_builder.py" build             --source-manifest "$SOURCE_MANIFEST"             --canonical-manifest "$CANONICAL_MANIFEST"             --backend-ref "$RELEASE_BACKEND@$BACKEND_DIGEST"             --frontend-archive "$FRONTEND_ARCHIVE"             --migrations-archive "$MIGRATIONS_ARCHIVE"             --source-repository "$GITHUB_REPOSITORY" --source-sha "$GITHUB_SHA"             --output "$RUNNER_TEMP/oci-manifest.json"             --annotation-output "$RUNNER_TEMP/oci-annotations.json"
+          oras push "$QUAR_BUNDLE:sha-$GITHUB_SHA"             --artifact-type "$ARTIFACT_TYPE"             --config "$CANONICAL_MANIFEST:$PLUGIN_MANIFEST_MEDIA_TYPE"             --annotation-file "$RUNNER_TEMP/oci-annotations.json"             --export-manifest "$RUNNER_TEMP/pushed-manifest.json"             "$CANONICAL_MANIFEST:$PLUGIN_MANIFEST_MEDIA_TYPE"             "$FRONTEND_ARCHIVE:$FRONTEND_MEDIA_TYPE"             "$MIGRATIONS_ARCHIVE:$MIGRATIONS_MEDIA_TYPE"
+          test -s "$RUNNER_TEMP/pushed-manifest.json"
+          ARTIFACT_DIGEST="sha256:$(sha256sum "$RUNNER_TEMP/pushed-manifest.json" | awk '{print $1}')"
+          [[ "$ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+          test "$(oras resolve "$QUAR_BUNDLE:sha-$GITHUB_SHA")" = "$ARTIFACT_DIGEST"
+          [[ "$ARTIFACT_DIGEST" != "$BACKEND_DIGEST" ]] || {
+            echo "::error::backend and bundle digests must be distinct"; exit 1;
+          }
+          {
+            echo "ARTIFACT_DIGEST=$ARTIFACT_DIGEST"
+            echo "ARTIFACT_REF=$QUAR_BUNDLE@$ARTIFACT_DIGEST"
+          } >> "$GITHUB_ENV"
+
+      - name: Generate independent bundle evidence, sign and attest by digest
+        run: |
+          set -euo pipefail
+          python3 "$CI_DIR/plugin_manifest_builder.py" bundle-evidence             --source-manifest "$SOURCE_MANIFEST"             --oci-manifest "$RUNNER_TEMP/oci-manifest.json"             --bundle-digest "$ARTIFACT_DIGEST"             --source-repository "$GITHUB_REPOSITORY" --source-sha "$GITHUB_SHA"             --builder-id "$TRUSTED_BUILDER_ID" --run-id "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"             --output-sbom "$RUNNER_TEMP/bundle-sbom.json"             --output-provenance "$RUNNER_TEMP/bundle-provenance.json"
+          cosign sign --yes "$ARTIFACT_REF"
+          cosign attest --yes --predicate "$RUNNER_TEMP/bundle-sbom.json"             --type spdxjson "$ARTIFACT_REF"
+          cosign attest --yes --predicate "$RUNNER_TEMP/bundle-provenance.json"             --type slsaprovenance "$ARTIFACT_REF"
+
+      - name: Verify signatures and all evidence before any release write
+        id: quarantine_verify
+        env:
+          PLATFORM_VERSION: ${{ vars.PLATFORM_VERSION || '' }}
+          PLUGIN_GRANTED_CAPABILITIES: ${{ vars.PLUGIN_GRANTED_CAPABILITIES || '' }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PLATFORM_VERSION" && -n "$PLUGIN_GRANTED_CAPABILITIES" ]] || {
+            echo "::error::protected platform version and independently reviewed grants are required"; exit 1;
+          }
+          python3 "$CI_DIR/plugin_verify.py"             --manifest "$RUNNER_TEMP/oci-manifest.json"             --source-manifest "$SOURCE_MANIFEST"             --canonical-manifest "$CANONICAL_MANIFEST"             --pushed-manifest "$RUNNER_TEMP/pushed-manifest.json"             --backend-digest "$BACKEND_DIGEST"             --artifact-ref "$ARTIFACT_REF" --backend-ref "$BACKEND_REF"             --source-repository "$GITHUB_REPOSITORY" --source-sha "$GITHUB_SHA"             --builder-identity "$TRUSTED_BUILDER_ID"             --platform-version "$PLATFORM_VERSION"             --granted-capabilities "$PLUGIN_GRANTED_CAPABILITIES"             --certificate-identity "$SIGNER_IDENTITY"             --output "$RUNNER_TEMP/quarantine-decision.json"
+
+      - name: Promote verified backend and bundle with all referrers by digest
+        id: promote
+        run: |
+          set -euo pipefail
+          oras copy --recursive "$QUAR_BACKEND@$BACKEND_DIGEST"             "$RELEASE_BACKEND@$BACKEND_DIGEST"
+          oras copy --recursive "$QUAR_BUNDLE@$ARTIFACT_DIGEST"             "$RELEASE_BUNDLE@$ARTIFACT_DIGEST"
+          test "$(oras resolve "$RELEASE_BACKEND@$BACKEND_DIGEST")" = "$BACKEND_DIGEST"
+          test "$(oras resolve "$RELEASE_BUNDLE@$ARTIFACT_DIGEST")" = "$ARTIFACT_DIGEST"
+          {
+            echo "RELEASE_BACKEND_REF=$RELEASE_BACKEND@$BACKEND_DIGEST"
+            echo "RELEASE_ARTIFACT_REF=$RELEASE_BUNDLE@$ARTIFACT_DIGEST"
+          } >> "$GITHUB_ENV"
+
+      - name: Reverify actual release refs and copied referrers
+        id: release_verify
+        env:
+          PLATFORM_VERSION: ${{ vars.PLATFORM_VERSION || '' }}
+          PLUGIN_GRANTED_CAPABILITIES: ${{ vars.PLUGIN_GRANTED_CAPABILITIES || '' }}
+        run: |
+          set -euo pipefail
+          python3 "$CI_DIR/plugin_verify.py"             --manifest "$RUNNER_TEMP/oci-manifest.json"             --source-manifest "$SOURCE_MANIFEST"             --canonical-manifest "$CANONICAL_MANIFEST"             --pushed-manifest "$RUNNER_TEMP/pushed-manifest.json"             --backend-digest "$BACKEND_DIGEST"             --artifact-ref "$RELEASE_ARTIFACT_REF" --backend-ref "$RELEASE_BACKEND_REF"             --source-repository "$GITHUB_REPOSITORY" --source-sha "$GITHUB_SHA"             --builder-identity "$TRUSTED_BUILDER_ID"             --platform-version "$PLATFORM_VERSION"             --granted-capabilities "$PLUGIN_GRANTED_CAPABILITIES"             --certificate-identity "$SIGNER_IDENTITY"             --output "$RUNNER_TEMP/release-decision.json"
+
+      - name: Verify independent release evidence and publish through platform OIDC
+        env:
+          DOCKER_CONFIG_PATH: ${{ runner.home }}/.docker/config.json
+        run: |
+          set -euo pipefail
+          # The pinned Trivy scan targets the actual release backend. The CSP
+          # probe targets protected static-origin evidence for this exact release
+          # bundle. Either missing/failed input stops before the platform POST.
+          python3 "$CI_DIR/plugin_publication.py" publish             --plugin-id "$PLUGIN_ID" --plugin-version "$PLUGIN_VERSION"             --builder-identity "$TRUSTED_BUILDER_ID"             --bundle-ref "$RELEASE_ARTIFACT_REF" --bundle-digest "$ARTIFACT_DIGEST"             --backend-ref "$RELEASE_BACKEND_REF" --backend-digest "$BACKEND_DIGEST"             --manifest "$RUNNER_TEMP/oci-manifest.json"             --release-decision "$RUNNER_TEMP/release-decision.json"             --scan-report "$RUNNER_TEMP/backend-release-scan.json"             --bundle-sbom "$RUNNER_TEMP/bundle-sbom.json"             --bundle-provenance "$RUNNER_TEMP/bundle-provenance.json"             --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Logout and remove release builder
+        if: always()
+        run: |
+          docker logout "$REGISTRY" || true
+          if [[ -n "${BUILDER_NAME:-}" ]]; then
+            docker buildx rm -f "$BUILDER_NAME" || true
           fi

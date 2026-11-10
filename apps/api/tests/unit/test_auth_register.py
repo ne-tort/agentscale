@@ -75,7 +75,7 @@ async def test_handle_auth_command_envelope(_reset_admin: FakeUserAdmin) -> None
             "client_ref": "employee:x",
             "username": "u@t.com",
             "email": "u@t.com",
-            "password": None,
+            "password_ref": None,
             "realm_roles": ["employee"],
         },
     )

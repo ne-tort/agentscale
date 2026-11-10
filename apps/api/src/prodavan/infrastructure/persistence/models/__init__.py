@@ -1,5 +1,99 @@
 """Persistence models package."""
 
+import json as _json
+import re as _re
+
+from sqlalchemy import CheckConstraint
+from sqlalchemy.dialects.postgresql import JSONB as _JSONB
+from sqlalchemy.ext.compiler import compiles as _compiles
+
+
+@_compiles(_JSONB, "sqlite")
+def _compile_jsonb_type_for_sqlite(type_, compiler, **kwargs):
+    return "JSON"
+
+
+_SQLITE_JSON_LITERAL = _re.compile(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"")
+
+
+def _jsonb_deep_equal(left, right):
+    """Compare parsed JSON with JSONB type and numeric semantics."""
+    if isinstance(left, bool) or isinstance(right, bool):
+        return type(left) is type(right) and left == right
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        return left == right
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(
+            _jsonb_deep_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _jsonb_deep_equal(first, second)
+            for first, second in zip(left, right, strict=True)
+        )
+    return left == right
+
+
+def _sqlite_jsonb_deep_ne(left, right):
+    """SQLite UDF backing the JSONB projection inequality check."""
+    if left is None or right is None:
+        return None
+
+    def reject_constant(value):
+        raise ValueError(f"invalid JSON constant: {value}")
+
+    first = _json.loads(left, parse_constant=reject_constant)
+    second = _json.loads(right, parse_constant=reject_constant)
+    return not _jsonb_deep_equal(first, second)
+
+
+def _translate_sqlite_expression(expression):
+    # Token-aware replacement never re-parses SQL and never rewrites quoted
+    # literals such as ':latest' or regex fragments containing bind-like text.
+    replacements = (
+        ("right(backend_image_ref, 72)", "substr(backend_image_ref, -72)"),
+        ("jsonb_array_length", "json_array_length"),
+        ("jsonb_typeof", "json_type"),
+        ("strpos(", "instr("),
+        ("btrim(", "trim("),
+        (" ~ ", " REGEXP "),
+    )
+
+    def translate(segment):
+        for original, sqlite in replacements:
+            segment = segment.replace(original, sqlite)
+        return segment
+
+    result = []
+    offset = 0
+    for match in _SQLITE_JSON_LITERAL.finditer(expression):
+        result.append(translate(expression[offset : match.start()]))
+        result.append(match.group(0))
+        offset = match.end()
+    result.append(translate(expression[offset:]))
+    return "".join(result)
+
+
+@_compiles(CheckConstraint, "sqlite")
+def _compile_plugin_regex_constraints_for_sqlite(element, compiler, **kwargs):
+    # Production PostgreSQL continues to use the original constraint SQL. The
+    # deep JSON variant is enforced by the UDF registered in SQLite boundaries.
+    if element.name == "ck_plugin_artifact_projection_differs":
+        expression = "jsonb_deep_ne(manifest, app_version_projection)"
+    else:
+        expression = _translate_sqlite_expression(element.sqltext.text)
+    text = ""
+    if element.name is not None:
+        formatted_name = compiler.preparer.format_constraint(element)
+        if formatted_name is not None:
+            text += "CONSTRAINT %s " % formatted_name
+    text += "CHECK (%s)" % expression
+    text += compiler.define_constraint_deferrability(element)
+    return text
+
+
 from prodavan.infrastructure.persistence.models.admin import (
     CompanyAgentRuntimePolicyRow,
     CompanyCabinetQuotaRow,
@@ -92,7 +186,16 @@ from prodavan.infrastructure.persistence.models.modules import (
     ModuleProjectBindingRow,
     ModuleRow,
 )
+from prodavan.infrastructure.persistence.models.artifact_lifecycle import (
+    PluginArtifactLifecycleRow,
+)
+from prodavan.infrastructure.persistence.models.installation_scope import (
+    PluginInstallationScopeRow,
+)
 from prodavan.infrastructure.persistence.models.platform import PlatformBootstrapRow
+from prodavan.infrastructure.persistence.models.publication_approvals import (
+    PluginPublicationApprovalRow,
+)
 from prodavan.infrastructure.persistence.models.platform_events import PlatformEventRow
 # Plugin-платформа (дизайн v4, ревизия 2026110801): 6 таблиц СОСТОЯНИЯ
 # платформы. Без этого импорта Base.metadata их не увидит и `alembic check`
@@ -101,6 +204,7 @@ from prodavan.infrastructure.persistence.models.platform_events import PlatformE
 from prodavan.infrastructure.persistence.models.plugin_platform import (
     AUDIT_FORBIDDEN_RAW_COLUMNS,
     CapabilityGrantRow,
+    ModuleSourceRow,
     PluginArtifactRow,
     PluginAuditEventRow,
     PluginEventDeliveryRow,
@@ -108,6 +212,7 @@ from prodavan.infrastructure.persistence.models.plugin_platform import (
     PluginInstanceRow,
     build_app_version_projection,
 )
+from prodavan.infrastructure.persistence.models.plugin_routes import PluginRouteRow
 from prodavan.infrastructure.persistence.models.external_api import (
     ApiAppKeyRow,
     WebhookDeliveryRow,
@@ -287,14 +392,19 @@ __all__ = [
     "ModuleMetaDocumentRow",
     "ModuleProjectBindingRow",
     "ModuleRow",
+    "ModuleSourceRow",
     "PlatformBootstrapRow",
     "PlatformEventRow",
     "CapabilityGrantRow",
+    "PluginArtifactLifecycleRow",
+    "PluginInstallationScopeRow",
     "PluginArtifactRow",
     "PluginAuditEventRow",
     "PluginEventDeliveryRow",
     "PluginFeatureFlagRow",
     "PluginInstanceRow",
+    "PluginRouteRow",
+    "PluginPublicationApprovalRow",
     "build_app_version_projection",
     "ProjectAttachmentRow",
     "ProjectRow",

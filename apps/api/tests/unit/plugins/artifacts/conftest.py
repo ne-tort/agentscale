@@ -131,9 +131,8 @@ def pilot_manifest() -> dict[str, Any]:
     при обоих verified-флагах. Используется в интеграционном тесте gate.
     """
     # conftest.py -> artifacts(0), plugins(1), unit(2), tests(3), api(4),
-    # apps(5), wt-migration(6). Именно в worktree лежит packages/, и именно
-    # его же возвращает validation.py::_repo_root() (parents[6] от src/...),
-    # поэтому схема и манифест пилота резолвятся из одного корня.
+    # apps(5), worktree(6). validation.py независимо находит этот же repo root
+    # по наличию apps/api/src, поэтому схема и манифест пилота совпадают.
     root = Path(__file__).resolve().parents[6]
     path = root / "packages" / "plugins" / "hello-plugin" / "manifest.json"
     payload = json.loads(path.read_text(encoding="utf-8"))

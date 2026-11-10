@@ -29,16 +29,19 @@ events — dispatch на своём консьюмере. Но НИ ОДИН uni
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import hmac as _hmac
+import json
 from dataclasses import dataclass
 from typing import Any
 
 import pytest
 
+from prodavan.domain.plugins.validation import validate_manifest
+
 from .conftest import (
     FIXED_EPOCH,
+    ISSUER,
     FIXED_NOW,
     TEST_COMPANY,
     TEST_DIGEST,
@@ -46,6 +49,7 @@ from .conftest import (
     TEST_INSTANCE,
     TEST_OTHER_COMPANY,
     TEST_PLUGIN,
+    TEST_QUOTA_VALUES,
     TEST_VERSION,
     FakeRecord,
     Platform,
@@ -80,8 +84,14 @@ def _registry_with_network(platform: Platform) -> Any:
     contracts = pytest.importorskip(
         "prodavan.application.plugins.capabilities.contracts"
     )
+    quotas = pytest.importorskip("prodavan.application.plugins.capabilities.quotas")
 
     class NetworkAdapter:
+        def quota_usage(self, request: Any) -> Any:
+            return quotas.QuotaUsage(
+                ops=1, rows=0, bytes=0, keys=0, object_bytes=0, egress_bytes=1
+            )
+
         def egress(self, request: Any) -> Any:
             return contracts.NetworkEgressResponse(
                 request_id=request.envelope.request_id,
@@ -101,13 +111,35 @@ def _verifier_of(registry: Any) -> Any:
     return getattr(registry, "_verifier")
 
 
+def _publication_metadata() -> Any:
+    """CI provenance с явной, различной привязкой bundle и backend OCI digest."""
+
+    artifacts = pytest.importorskip("prodavan.application.plugins.artifacts")
+    registry_module = pytest.importorskip(
+        "prodavan.application.plugins.artifacts.registry"
+    )
+    backend_ref = artifacts.OciArtifactRef(
+        registry="ghcr.io",
+        repository=f"ne-tort/plugin-backends/{TEST_PLUGIN}",
+        digest="sha256:" + "b" * 64,
+    )
+    return registry_module.PublicationMetadata(
+        source_id="agentscale/plugins",
+        commit_sha="a" * 40,
+        backend_digest=backend_ref.digest,
+        backend_image_ref=backend_ref.image_ref(),
+        run_url="https://github.com/agentscale/plugins/actions/runs/42",
+    )
+
+
 # ===========================================================================
 # 1. identity -> capabilities -> audit: сквозной путь с валидным grant
 #    Стык: identity↔capabilities (критерии №11, №12, §4.2/§4.5)
 # ===========================================================================
 
 
-def test_mint_verify_is_active_invoke_audit_happy_path(
+@pytest.mark.asyncio
+async def test_mint_verify_is_active_invoke_audit_happy_path(
     platform: Platform, valid_claims: Any
 ) -> None:
     """mint → verify → ``is_active`` → ``invoke`` → два события аудита.
@@ -119,6 +151,8 @@ def test_mint_verify_is_active_invoke_audit_happy_path(
     подключены к тому же состоянию, что и identity.
     """
 
+    platform.grant_store.seed_active_grant()
+
     # 1) identity: подпись и claims уже проверены фикстурой valid_claims.
     assert valid_claims.typ == "plugin_capability"
     assert valid_claims.grant_id == TEST_GRANT_ID
@@ -129,11 +163,11 @@ def test_mint_verify_is_active_invoke_audit_happy_path(
     assert not hasattr(valid_claims, "quotas")
 
     # 2) revocation: тот же grant_id активен для capabilities.
-    assert platform.revocation.is_active(TEST_GRANT_ID, now=FIXED_NOW) is True
+    assert await platform.revocation.is_active(TEST_GRANT_ID, now=FIXED_NOW) is True
 
     # 3) capabilities: реальный сервис на реальном ядре gateway.
     service = platform.capability_service()
-    decision = service.invoke(
+    decision = await service.invoke(
         claims=valid_claims,
         capability="cache",
         operation="get",
@@ -154,7 +188,70 @@ def test_mint_verify_is_active_invoke_audit_happy_path(
     assert platform.quota.decisions, "квота должна быть списана ДО адаптера"
 
 
-def test_missing_revocation_port_fails_closed_on_real_service(
+@pytest.mark.asyncio
+async def test_exact_grant_quotas_drive_enforcement_not_runtime_defaults(
+    platform: Platform, valid_claims: Any
+) -> None:
+    contracts = pytest.importorskip("prodavan.application.plugins.admin.contracts")
+    quota_module = pytest.importorskip("prodavan.application.plugins.capabilities.quotas")
+    effective = contracts.QuotaSet(
+        ops_per_minute=1,
+        max_rows=1,
+        max_bytes=2,
+        max_keys=1,
+        max_object_bytes=2,
+        max_egress_bytes=2,
+    )
+    seeded = platform.grant_store.seed_active_grant(quotas=effective)
+    assert seeded.quotas == effective
+    await platform.instance_store.create(
+        instance=contracts.PluginInstanceRecord(
+            plugin_instance_id=TEST_INSTANCE,
+            company_id=TEST_COMPANY,
+            plugin_id=TEST_PLUGIN,
+            manifest_version=TEST_VERSION,
+            artifact_digest=TEST_DIGEST,
+            status=contracts.PluginInstanceStatus.ACTIVE,
+            tenant_db_name="tenant_co_alpha",
+            bucket_name="tenant-co-alpha",
+            created_at=FIXED_NOW,
+            updated_at=FIXED_NOW,
+        )
+    )
+    admin_snapshot = await platform.admin_service().list(company_id=TEST_COMPANY)
+    assert admin_snapshot.items[0].quotas == effective
+
+    service = platform.capability_service()
+    first = await service.invoke(
+        claims=valid_claims,
+        capability="cache",
+        operation="get",
+        request=make_cache_get_request(),
+        now=FIXED_NOW,
+    )
+    second = await service.invoke(
+        claims=valid_claims,
+        capability="cache",
+        operation="get",
+        request=make_cache_get_request(),
+        now=FIXED_NOW,
+    )
+
+    assert first.allowed is True
+    assert second.allowed is False
+    assert second.http_status == 429
+    assert second.code.value == "quota_exceeded"
+    ops = [item for item in platform.quota.decisions if item.op is quota_module.QuotaOp.OPS]
+    assert [item.limit for item in ops] == [1, 1]
+    assert ops[-1].allowed is False
+    assert admin_snapshot.items[0].quotas.ops_per_minute == ops[-1].limit
+    # Read-only grant evidence и enforcement используют один durable QuotaSet.
+    stored = await platform.grant_store.get_by_grant_id(grant_id=TEST_GRANT_ID)
+    assert stored.quotas == effective
+
+
+@pytest.mark.asyncio
+async def test_missing_revocation_port_fails_closed_on_real_service(
     platform: Platform, valid_claims: Any
 ) -> None:
     """Стык fail-closed: без подключённого порта отзывов invoke = deny.
@@ -164,15 +261,17 @@ def test_missing_revocation_port_fails_closed_on_real_service(
     """
 
     caps = pytest.importorskip("prodavan.application.plugins.capabilities")
+    platform.grant_store.seed_active_grant()
     registry = caps.AdapterRegistry()
     registry.register("cache", platform.cache_adapter)
     service = caps.PluginCapabilityService(
         registry=registry,
+        grant_store=platform.grant_store,
         quota=platform.quota,
         audit=platform.audit,
         revocation=None,
     )
-    decision = service.invoke(
+    decision = await service.invoke(
         claims=valid_claims,
         capability="cache",
         operation="get",
@@ -191,25 +290,27 @@ def test_missing_revocation_port_fails_closed_on_real_service(
 # ===========================================================================
 
 
-def test_revoke_denies_same_token_on_capabilities(
+@pytest.mark.asyncio
+async def test_revoke_denies_same_token_on_capabilities(
     platform: Platform, valid_claims: Any
 ) -> None:
     """Отзыв по ``grant_id`` деактивирует ещё НЕ истёкший токен мгновенно."""
 
+    platform.grant_store.seed_active_grant()
     service = platform.capability_service()
     request = make_cache_get_request()
 
-    before = service.invoke(
+    before = await service.invoke(
         claims=valid_claims, capability="cache", operation="get",
         request=request, now=FIXED_NOW,
     )
     assert before.allowed is True
 
     # Тот же токен, тот же grant_id — но реестр отзывов уже деактивирован.
-    platform.revocation.revoke(TEST_GRANT_ID, reason="admin revoke")
-    assert platform.revocation.is_active(TEST_GRANT_ID, now=FIXED_NOW) is False
+    await platform.revocation.revoke(TEST_GRANT_ID, reason="admin revoke")
+    assert await platform.revocation.is_active(TEST_GRANT_ID, now=FIXED_NOW) is False
 
-    after = service.invoke(
+    after = await service.invoke(
         claims=valid_claims, capability="cache", operation="get",
         request=request, now=FIXED_NOW,
     )
@@ -238,8 +339,10 @@ async def test_revoke_denies_same_grant_on_gateway(platform: Platform) -> None:
         path="/index.html", headers=headers,
     )
     assert allowed.claims.grant_id == TEST_GRANT_ID
+    assert allowed.grant.artifact_digest == TEST_DIGEST
+    assert allowed.grant.published_artifact_digest == TEST_DIGEST
 
-    platform.revocation.revoke(TEST_GRANT_ID, reason="admin revoke")
+    await platform.revocation.revoke(TEST_GRANT_ID, reason="admin revoke")
     with pytest.raises(gateway.GatewayError) as exc_info:
         await auth.authorize_page(
             plugin_id=TEST_PLUGIN, company_id=TEST_COMPANY,
@@ -304,13 +407,230 @@ def test_wrong_typ_is_not_a_plugin_capability_token(platform: Platform) -> None:
     assert identity.is_plugin_capability_token(platform.mint_claims()) is True
 
 
+# ---------------------------------------------------------------------------
+# CI publication fixture: durable approve -> PluginCiPublicationService -> grant
+# ---------------------------------------------------------------------------
+
+CI_COMMIT = "a" * 40
+"""Immutable commit SHA, к которому привязаны OIDC claims и OCI annotations."""
+
+CI_WORKFLOW = (
+    "ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@" + "b" * 40
+)
+"""Trusted reusable workflow на immutable SHA (НЕ ``refs/heads/main``)."""
+
+
+@dataclass(frozen=True)
+class _CiFixture:
+    """Реальный CI service + реестр + scoped source/OIDC/loader doubles."""
+
+    source: Any
+    command: Any
+    service: Any
+    registry: Any
+    store: Any
+    oidc: Any
+
+
+def _ci_publication_fixture(
+    platform: Platform, manifest: dict[str, Any]
+) -> _CiFixture:
+    """Собрать ``PluginCiPublicationService`` на ОБЩИХ acceptance-фейках.
+
+    ``approval_reader`` — тот же ``FakePublicationApprovalStore``, в который
+    ``admin.approve_publication`` пишет durable решение: CI и admin видят ОДИН
+    exact binding. ``source_repository``/``oidc_validator``/``artifact_loader``
+    — scoped test doubles (сети/OCI registry здесь нет и не должно быть);
+    verifier, registry, cosign и часы — реальные production-классы платформы.
+    """
+
+    publication = pytest.importorskip(
+        "prodavan.application.plugins.artifacts.publication"
+    )
+    artifacts = pytest.importorskip("prodavan.application.plugins.artifacts")
+    sources = pytest.importorskip("prodavan.application.plugins.sources.types")
+    oidc_module = pytest.importorskip("prodavan.application.plugins.artifacts.oidc")
+
+    source = sources.ModuleSource(
+        id="psrc_acceptance_ci",
+        company_id=TEST_COMPANY,
+        plugin_id=TEST_PLUGIN,
+        repo_id=424242,
+        full_name="ne-tort/agentscale",
+        private=True,
+        default_branch="main",
+        installation_credential_ref=(
+            f"vault://github_app/{TEST_COMPANY}/{TEST_PLUGIN}/installation"
+        ),
+        trusted_workflow_ref=CI_WORKFLOW,
+        status=sources.ModuleSourceStatus.READY,
+        created_at=FIXED_NOW,
+        updated_at=FIXED_NOW,
+    )
+    claims = oidc_module.GitHubActionsClaims(
+        repository=source.full_name,
+        repository_id=str(source.repo_id),
+        ref="refs/heads/main",
+        sha=CI_COMMIT,
+        event_name="push",
+        job_workflow_ref=CI_WORKFLOW,
+        run_id="123",
+        run_attempt="2",
+    )
+
+    class _SourceRepository:
+        async def get_by_id(self, source_id: str) -> Any:
+            assert source_id == source.id
+            return source
+
+    class _Oidc:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def validate_for_source(self, token: str, **kwargs: Any) -> Any:
+            self.calls += 1
+            assert token == "acceptance-oidc-token"
+            return claims
+
+    canonical_data = publication._canonical_manifest_bytes(manifest)
+    config_digest = "sha256:" + hashlib.sha256(canonical_data).hexdigest()
+    backend_digest = "sha256:" + "b" * 64
+    backend_ref = f"ghcr.io/ne-tort/plugin-backends/{TEST_PLUGIN}@" + backend_digest
+    oci = {
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "artifactType": "application/vnd.agentscale.plugin.oci",
+        "config": {
+            "mediaType": "application/vnd.agentscale.plugin.manifest.v1+json",
+            "digest": config_digest,
+            "size": len(canonical_data),
+        },
+        "layers": [
+            {
+                "mediaType": "application/vnd.agentscale.plugin.manifest.v1+json",
+                "digest": config_digest,
+                "size": len(canonical_data),
+                "annotations": {
+                    "com.agentscale.plugin.layer.role": "canonical-manifest",
+                    "org.opencontainers.image.title": "canonical-manifest.json",
+                },
+            },
+            {
+                "mediaType": "application/vnd.agentscale.plugin.frontend",
+                "digest": "sha256:" + "d" * 64,
+                "size": 10,
+                "annotations": {
+                    "com.agentscale.plugin.layer.role": "frontend-dist"
+                },
+            },
+            {
+                "mediaType": "application/vnd.agentscale.plugin.liquibase+xml",
+                "digest": "sha256:" + "e" * 64,
+                "size": 10,
+                "annotations": {"com.agentscale.plugin.layer.role": "migrations"},
+            },
+        ],
+        "annotations": {
+            "plugin_id": TEST_PLUGIN,
+            "manifest_version": TEST_VERSION,
+            "protocol": "plugin-rpc/1",
+            "requestedCapabilities": ",".join(manifest["capabilities"]),
+            "min_platform_version": "4.0.0",
+            "backend_digest": backend_digest,
+            "com.agentscale.plugin.backend_image_ref": backend_ref,
+            "com.agentscale.plugin.source_repository": source.full_name,
+            "com.agentscale.plugin.source_sha": CI_COMMIT,
+            "com.agentscale.plugin.manifest_digest": config_digest,
+        },
+    }
+    remote = json.dumps(oci, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    bundle_digest = "sha256:" + hashlib.sha256(remote).hexdigest()
+    bundle_ref = f"ghcr.io/ne-tort/plugins/{TEST_PLUGIN}/bundle@" + bundle_digest
+
+    class _Loader:
+        """Scoped OCI loader: байты только этого bundle, digest проверяется."""
+
+        async def load_manifest(self, ref: Any) -> Any:
+            assert ref.digest == bundle_digest
+            return publication.LoadedOciObject(
+                data=remote, digest=ref.digest, size=len(remote)
+            )
+
+        async def load_blob(
+            self, ref: Any, *, digest: str, expected_size: int | None = None
+        ) -> Any:
+            assert digest == config_digest
+            assert expected_size == len(canonical_data)
+            return publication.LoadedOciObject(
+                data=canonical_data, digest=digest, size=len(canonical_data)
+            )
+
+    command = publication.ArtifactPublicationCommand(
+        source_id=source.id,
+        plugin_id=TEST_PLUGIN,
+        version=TEST_VERSION,
+        bundle_ref=bundle_ref,
+        bundle_digest=bundle_digest,
+        backend_ref=backend_ref,
+        backend_digest=backend_digest,
+        manifest=oci,
+        commit_sha=CI_COMMIT,
+        ref="refs/heads/main",
+        run_url=(
+            f"https://github.com/{source.full_name}/actions/runs/123/attempts/2"
+        ),
+        evidence=publication.PublicationEvidence(
+            scan_verified=True, csp_verified=True
+        ),
+    )
+    verifier = artifacts.ArtifactVerifier(
+        platform.cosign,
+        validator=platform.validator,
+        # Cosign identity — trusted workflow на immutable SHA: CI service
+        # сверяет evidence.identity с source.expected_signer_identity.
+        identity=source.expected_signer_identity,
+        issuer=ISSUER,
+        compatibility=artifacts.CompatibilityGate(platform_version="4.0.0"),
+        clock=lambda: platform.clock.now(),
+    )
+    store = artifacts.InMemoryRegistryStore()
+    registry = artifacts.PluginArtifactRegistry(
+        store=store, verifier=verifier, clock=lambda: platform.clock.now()
+    )
+    oidc = _Oidc()
+    service = publication.PluginCiPublicationService(
+        source_repository=_SourceRepository(),
+        oidc_validator=oidc,
+        artifact_loader=_Loader(),
+        verifier=verifier,
+        artifact_registry=registry,
+        approval_reader=platform.publication_approvals,
+        instance_scope_resolver=publication.DurablePluginInstanceScopeResolver(
+            grant_store=platform.grant_store,
+            instance_store=platform.instance_store,
+        ),
+        # The publication boundary requires the typed domain result before
+        # deterministic scope validation; verifier still uses platform.validator.
+        manifest_validator=validate_manifest,
+    )
+    return _CiFixture(
+        source=source,
+        command=command,
+        service=service,
+        registry=registry,
+        store=store,
+        oidc=oidc,
+    )
+
+
 # ===========================================================================
 # 4. Grant.capabilities УЖЕ, чем manifest.capabilities -> INCOMPATIBLE / QUARANTINED
 #    Стык: artifacts↔CapabilityGrant (критерий №18, §5.1 compatibility gate)
 # ===========================================================================
 
 
-def test_narrow_grant_quarantines_artifact(
+@pytest.mark.asyncio
+async def test_narrow_grant_quarantines_artifact(
     platform: Platform, valid_manifest: dict[str, Any], oci_ref: Any
 ) -> None:
     """Манифест запрашивает БОЛЬШЕ capability, чем есть в grant → карантин.
@@ -334,18 +654,29 @@ def test_narrow_grant_quarantines_artifact(
 
     # Публикация с «чужим» успешным evidence тоже не проходит: реестр
     # перепроверяет compatibility gate, а не доверяет флагу.
-    result = registry.publish(oci_ref, valid_manifest, outcome.evidence, grant=narrow)
+    result = await registry.publish_async(
+        oci_ref,
+        valid_manifest,
+        outcome.evidence,
+        grant=narrow,
+        metadata=_publication_metadata(),
+    )
     assert result.outcome is RegistryOutcome.QUARANTINED
     assert artifacts.COMPATIBILITY_ERROR_CODE == "INCOMPATIBLE"
 
 
-def test_full_grant_publishes_then_admin_grant_is_allowed(
+@pytest.mark.asyncio
+async def test_legacy_direct_registry_publish_is_not_ci_approval_contract(
     platform: Platform, valid_manifest: dict[str, Any], oci_ref: Any
 ) -> None:
-    """Позитивная ветка того же стыка: полный grant → PUBLISHED → admin-гейт.
+    """LEGACY unit-стык: direct verifier → ``publish_async`` → admin-гейт.
 
-    Реестр артефактов задачи 07 и реестр установки задачи 12 в проде связаны
-    через ``ArtifactRegistryPort``; здесь оба реестра разделяют один digest.
+    Это НЕ полный CI approval contract: здесь нет ни durable
+    ``PluginPublicationApproval``, ни ``PluginCiPublicationService``
+    (OIDC/OCI/exact approval binding), ни grant из пустого target state.
+    Тест намеренно сохранён как узкий legacy unit для compatibility gate и
+    PUBLISHED-гейта кр. 18; полный путь ``approve → CI publish → grant``
+    проверяет ``test_ci_approval_publish_then_admin_grant_from_empty_state``.
     """
 
     from prodavan.application.dynamic_app_registry.contracts import RegistryOutcome
@@ -363,15 +694,161 @@ def test_full_grant_publishes_then_admin_grant_is_allowed(
         csp_verified=True,
     )
     assert outcome.evidence.verified is True
-    published = registry.publish(oci_ref, valid_manifest, outcome.evidence, grant=full)
+    metadata = _publication_metadata()
+    published = await registry.publish_async(
+        oci_ref,
+        valid_manifest,
+        outcome.evidence,
+        grant=full,
+        metadata=metadata,
+    )
     assert published.outcome is RegistryOutcome.APPLIED
-    assert registry.current(TEST_PLUGIN) is not None
+    record = registry.current(TEST_PLUGIN)
+    assert record is not None
+    assert record.digest == oci_ref.digest
+    assert record.publication is not None
+    assert record.publication == metadata
+    assert record.publication.backend_digest != oci_ref.digest
+    assert record.publication.backend_image_ref.endswith("@" + metadata.backend_digest)
 
     # Тот же digest виден админскому порту (PUBLISHED-гейт кр. 18).
     platform.artifact_admin.seed_published()
     assert platform.artifact_admin.records[
         (TEST_PLUGIN, TEST_VERSION, TEST_DIGEST)
     ].is_published
+
+
+@pytest.mark.asyncio
+async def test_ci_approval_publish_then_admin_grant_from_empty_state(
+    platform: Platform, valid_manifest: dict[str, Any]
+) -> None:
+    """ПОЛНЫЙ CI approval contract: approve → CI publish → admin grant.
+
+    В отличие от legacy direct-registry unit выше:
+      * durable approval создаётся ТОЛЬКО через ``admin.approve_publication``;
+      * публикацию выполняет ``PluginCiPublicationService`` (source → OIDC →
+        OCI bundle → exact approval binding → verifier → registry), а не
+        прямой ``registry.publish_async`` с заранее готовым evidence;
+      * admin читает PUBLISHED через production ``ArtifactRegistryAdapter``
+        поверх ТОГО ЖЕ реестра — без ``seed_published()``;
+      * target state (grants/instances) перед grant ПУСТОЙ: ACTIVE появляется
+        только из grant-saga, никакого ``seed_active_grant``.
+    """
+
+    contracts = pytest.importorskip("prodavan.application.plugins.admin.contracts")
+    adapters = pytest.importorskip(
+        "prodavan.application.plugins.adapters.artifacts_adapter"
+    )
+    fixture = _ci_publication_fixture(platform, valid_manifest)
+    capability_set = make_capability_set(
+        capabilities=tuple(valid_manifest["capabilities"])
+    )
+    bundle_digest = fixture.command.bundle_digest
+    admin = platform.admin_service()
+
+    # 0) Пустой target state: ни grant, ни instance, ни legacy artifact seed.
+    assert platform.grant_store.grants == {}
+    assert platform.instance_store.instances == {}
+    assert platform.artifact_admin.records == {}
+
+    # 1) Administrative pre-approval с EXACT bundle/capability binding.
+    approval_receipt = await admin.approve_publication(
+        actor_id="acceptance-platform-admin",
+        company_id=TEST_COMPANY,
+        plugin_id=TEST_PLUGIN,
+        manifest_version=TEST_VERSION,
+        artifact_digest=bundle_digest,
+        capabilities=capability_set,
+    )
+    assert approval_receipt.created is True
+    assert approval_receipt.approval.consumed_at is None
+
+    # 2) CI publication читает ТОТ ЖЕ approval store, но НЕ создаёт grant.
+    response = await fixture.service.publish(
+        fixture.command, oidc_token="acceptance-oidc-token"
+    )
+    assert response.status == "PUBLISHED", (
+        f"CI publication с exact approval обязана пройти: {response.code}"
+    )
+    record = fixture.registry.current(TEST_PLUGIN)
+    assert record is not None
+    assert record.digest == bundle_digest
+    assert record.publication is not None
+    assert record.publication.commit_sha == CI_COMMIT
+    pending = await platform.publication_approvals.get(
+        company_id=TEST_COMPANY,
+        plugin_id=TEST_PLUGIN,
+        manifest_version=TEST_VERSION,
+        artifact_digest=bundle_digest,
+    )
+    assert pending is not None and pending.consumed_at is None, (
+        "CI publish НЕ должен consume approval: consumption принадлежит grant-saga"
+    )
+    assert platform.grant_store.grants == {}, "CI никогда не создаёт CapabilityGrant"
+
+    # 3) admin grant из пустого target state через production adapter.
+    ci_admin = platform.admin_service(
+        artifact_registry=adapters.ArtifactRegistryAdapter(
+            registry=fixture.registry, store=fixture.store
+        )
+    )
+    receipt = await ci_admin.grant(
+        company_id=TEST_COMPANY,
+        plugin_id=TEST_PLUGIN,
+        manifest_version=TEST_VERSION,
+        artifact_digest=bundle_digest,
+        capabilities=capability_set,
+    )
+
+    assert receipt.replayed is False
+    assert receipt.grant.status is contracts.GrantStatus.ACTIVE
+    assert receipt.grant.artifact_digest == bundle_digest
+    # Долгоживущая политика берётся из APPROVAL, а не из тела запроса/JWT.
+    assert receipt.grant.capabilities == capability_set.capabilities
+    assert receipt.grant.egress_policy == capability_set.egress_policy
+    assert receipt.grant.quotas == capability_set.quotas
+    assert receipt.grant.webhook_secret_ref is not None
+    assert receipt.routes.grant_id == receipt.grant.grant_id
+    instance = await platform.instance_store.get(
+        company_id=TEST_COMPANY, plugin_id=TEST_PLUGIN
+    )
+    assert instance is not None
+    assert instance.status is contracts.PluginInstanceStatus.ACTIVE
+    assert instance.plugin_instance_id == receipt.plugin_instance_id
+    # Canonical identity initial grant: тот же deterministic instance id, что
+    # вычисляется из (company, plugin) ДО source/approval/grant. CI source и
+    # admin saga обязаны адресовать ОДНУ установку, не «inst_alpha_1»-literal.
+    helpers = pytest.importorskip("prodavan.domain.plugins.helpers")
+    assert receipt.plugin_instance_id == helpers.plugin_instance_id_for(
+        TEST_COMPANY, TEST_PLUGIN
+    )
+    assert receipt.plugin_instance_id == TEST_INSTANCE
+    assert fixture.source.plugin_instance_id == receipt.plugin_instance_id
+
+    # 4) Approval consumed РОВНО один раз и только grant-saga.
+    consumed = await platform.publication_approvals.get(
+        company_id=TEST_COMPANY,
+        plugin_id=TEST_PLUGIN,
+        manifest_version=TEST_VERSION,
+        artifact_digest=bundle_digest,
+    )
+    assert consumed is not None
+    assert consumed.consumed_at == FIXED_NOW
+    assert [
+        approval_id for approval_id, _ts in platform.publication_approvals.consumed
+    ] == [approval_receipt.approval.approval_id]
+
+    # 5) Control-plane pre-delivery — явная фаза ДО Deployment в grant-saga.
+    assert [
+        request.request_id for request in platform.secret_delivery.pre_deliver_calls
+    ] == [f"grant:{receipt.plugin_instance_id}:{bundle_digest}"]
+    assert (TEST_COMPANY, TEST_PLUGIN) in platform.activation_admin.deployments
+    assert (TEST_COMPANY, TEST_PLUGIN) in platform.tenant_db.schemas
+    assert f"module-{TEST_PLUGIN}/" in platform.objects_admin.buckets[
+        f"tenant-{TEST_COMPANY}"
+    ]
+    # Legacy direct-registry seed не использовался ни на одном шаге.
+    assert platform.artifact_admin.records == {}
 
 
 # ===========================================================================
@@ -393,10 +870,25 @@ async def test_full_install_path_artifacts_admin_tenantdb_objects_wake(
     """
 
     contracts = pytest.importorskip("prodavan.application.plugins.admin.contracts")
-    # 1) Артефакт опубликован (кр. 18) — иначе grant fail-closed.
+    # 1) Артефакт опубликован (кр. 18) — иначе grant fail-closed. Это legacy
+    # seed ONLY артефактного PUBLISHED-гейта, НЕ подмена durable approval и НЕ
+    # seed ACTIVE grant: target state ниже остаётся пустым.
     platform.artifact_admin.seed_published()
 
     service = platform.admin_service()
+    # Новый/revoked grant требует durable EXACT publication approval:
+    # approve → grant, consumption — только в grant-saga (§11 кр. 18/12).
+    approval_receipt = await service.approve_publication(
+        actor_id="acceptance-platform-admin",
+        company_id=TEST_COMPANY,
+        plugin_id=TEST_PLUGIN,
+        manifest_version=TEST_VERSION,
+        artifact_digest=TEST_DIGEST,
+        capabilities=make_capability_set(),
+    )
+    assert approval_receipt.created is True
+    assert platform.grant_store.grants == {}, "approval не создаёт grant"
+
     receipt = await service.grant(
         company_id=TEST_COMPANY,
         plugin_id=TEST_PLUGIN,
@@ -407,6 +899,13 @@ async def test_full_install_path_artifacts_admin_tenantdb_objects_wake(
 
     assert receipt.grant.status is contracts.GrantStatus.ACTIVE
     assert receipt.grant.grant_id
+    # Initial grant создаёт canonical deterministic instance (domain.helpers),
+    # а не произвольный/literal id из тела запроса.
+    helpers = pytest.importorskip("prodavan.domain.plugins.helpers")
+    assert receipt.plugin_instance_id == helpers.plugin_instance_id_for(
+        TEST_COMPANY, TEST_PLUGIN
+    )
+    assert receipt.plugin_instance_id == TEST_INSTANCE
     assert receipt.database.database_name == f"tenant_{TEST_COMPANY}"
     assert receipt.schema.schema_name == f"module_{TEST_PLUGIN}"
     assert receipt.objects.bucket == f"tenant-{TEST_COMPANY}"
@@ -414,6 +913,20 @@ async def test_full_install_path_artifacts_admin_tenantdb_objects_wake(
     # DSN наружу не ушёл: только secret_ref.
     assert "secret_ref" in receipt.database.dsn_ref
     assert "postgresql://" not in repr(receipt)
+    assert receipt.replayed is False
+
+    # Exact approval consume ровно один раз и только grant-saga (§5.5).
+    stored_approval = await platform.publication_approvals.get(
+        company_id=TEST_COMPANY,
+        plugin_id=TEST_PLUGIN,
+        manifest_version=TEST_VERSION,
+        artifact_digest=TEST_DIGEST,
+    )
+    assert stored_approval is not None
+    assert stored_approval.consumed_at == FIXED_NOW
+    assert [
+        approval_id for approval_id, _ts in platform.publication_approvals.consumed
+    ] == [approval_receipt.approval.approval_id]
 
     # 2) Тот же digest видит artifacts-реестр (стык F4 -> F12).
     assert platform.artifact_admin.records[
@@ -449,6 +962,136 @@ async def test_full_install_path_artifacts_admin_tenantdb_objects_wake(
 
 
 # ===========================================================================
+# 5c. revoke→re-grant: stable instance, fresh grant, revoked id остаётся inactive
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_revoke_then_regrant_keeps_instance_and_never_resurrects_old_grant(
+    platform: Platform,
+) -> None:
+    contracts = pytest.importorskip("prodavan.application.plugins.admin.contracts")
+    platform.artifact_admin.seed_published()
+    service = platform.admin_service()
+    await service.approve_publication(
+        actor_id="acceptance-platform-admin",
+        company_id=TEST_COMPANY,
+        plugin_id=TEST_PLUGIN,
+        manifest_version=TEST_VERSION,
+        artifact_digest=TEST_DIGEST,
+        capabilities=make_capability_set(),
+    )
+    grant_args = {
+        "company_id": TEST_COMPANY,
+        "plugin_id": TEST_PLUGIN,
+        "manifest_version": TEST_VERSION,
+        "artifact_digest": TEST_DIGEST,
+        "capabilities": make_capability_set(),
+    }
+    first = await service.grant(**grant_args)
+    await service.revoke(company_id=TEST_COMPANY, plugin_id=TEST_PLUGIN)
+
+    second = await service.grant(**grant_args)
+
+    assert second.plugin_instance_id == first.plugin_instance_id == TEST_INSTANCE
+    assert second.grant.grant_id != first.grant.grant_id
+    assert second.grant.status is contracts.GrantStatus.ACTIVE
+    assert second.grant.revoked_at is None
+    old = platform.grant_store.history[first.grant.grant_id]
+    assert old.status is contracts.GrantStatus.REVOKED
+    assert old.revoked_at is not None
+    assert not old.is_active
+    assert await platform.revocation.is_active(
+        first.grant.grant_id, now=FIXED_NOW
+    ) is False
+    assert await platform.revocation.is_active(
+        second.grant.grant_id, now=FIXED_NOW
+    ) is True
+    current = await platform.grant_store.get(
+        company_id=TEST_COMPANY, plugin_id=TEST_PLUGIN
+    )
+    assert current == second.grant
+    assert platform.grant_store.grants == {
+        (TEST_COMPANY, TEST_PLUGIN): second.grant
+    }
+
+
+# ===========================================================================
+# 5d. uninstall→reinstall: новая approval/publish, stable instance и fresh grant
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_uninstall_then_reinstall_keeps_instance_and_uses_fresh_grant(
+    platform: Platform,
+) -> None:
+    contracts = pytest.importorskip("prodavan.application.plugins.admin.contracts")
+    platform.artifact_admin.seed_published()
+    service = platform.admin_service()
+    await service.approve_publication(
+        actor_id="acceptance-platform-admin",
+        company_id=TEST_COMPANY,
+        plugin_id=TEST_PLUGIN,
+        manifest_version=TEST_VERSION,
+        artifact_digest=TEST_DIGEST,
+        capabilities=make_capability_set(),
+    )
+    first = await service.grant(
+        company_id=TEST_COMPANY,
+        plugin_id=TEST_PLUGIN,
+        manifest_version=TEST_VERSION,
+        artifact_digest=TEST_DIGEST,
+        capabilities=make_capability_set(),
+    )
+    removed = await service.uninstall(
+        company_id=TEST_COMPANY, plugin_id=TEST_PLUGIN
+    )
+    assert removed.fully_removed is True
+    assert await platform.revocation.is_active(
+        first.grant.grant_id, now=FIXED_NOW
+    ) is False
+
+    # Consumed approval is not reused for a new installation. A newly approved
+    # artifact preserves the deterministic installation identity, not the grant PK.
+    reinstall_version = "1.2.1"
+    reinstall_digest = "sha256:" + "b" * 64
+    platform.artifact_admin.seed_published(
+        manifest_version=reinstall_version,
+        artifact_digest=reinstall_digest,
+    )
+    approval = await service.approve_publication(
+        actor_id="acceptance-platform-admin",
+        company_id=TEST_COMPANY,
+        plugin_id=TEST_PLUGIN,
+        manifest_version=reinstall_version,
+        artifact_digest=reinstall_digest,
+        capabilities=make_capability_set(),
+    )
+    assert approval.created is True
+    second = await service.grant(
+        company_id=TEST_COMPANY,
+        plugin_id=TEST_PLUGIN,
+        manifest_version=reinstall_version,
+        artifact_digest=reinstall_digest,
+        capabilities=make_capability_set(),
+    )
+
+    assert second.plugin_instance_id == first.plugin_instance_id == TEST_INSTANCE
+    assert second.grant.grant_id != first.grant.grant_id
+    assert second.grant.status is contracts.GrantStatus.ACTIVE
+    assert second.grant.revoked_at is None
+    assert await platform.revocation.is_active(
+        first.grant.grant_id, now=FIXED_NOW
+    ) is False
+    assert await platform.revocation.is_active(
+        second.grant.grant_id, now=FIXED_NOW
+    ) is True
+    assert platform.grant_store.grants == {
+        (TEST_COMPANY, TEST_PLUGIN): second.grant
+    }
+
+
+# ===========================================================================
 # 6. uninstall дропает схему/роль/bucket и деактивирует grant, НЕ трогая другую компанию
 #    Стык: tenantdb↔objects↔admin (критерий №15)
 # ===========================================================================
@@ -467,6 +1110,19 @@ async def test_uninstall_drops_only_own_company_resources(
 
     platform.artifact_admin.seed_published()
     service = platform.admin_service()
+
+    # Каждый company/plugin/SemVer/digest требует СВОЕГО exact approval:
+    # общий OCI-digest не «делится» между компаниями (durable approval binding).
+    for company_id in (TEST_COMPANY, TEST_OTHER_COMPANY):
+        approval_receipt = await service.approve_publication(
+            actor_id="acceptance-platform-admin",
+            company_id=company_id,
+            plugin_id=TEST_PLUGIN,
+            manifest_version=TEST_VERSION,
+            artifact_digest=TEST_DIGEST,
+            capabilities=make_capability_set(),
+        )
+        assert approval_receipt.created is True
 
     await service.grant(
         company_id=TEST_COMPANY, plugin_id=TEST_PLUGIN,
@@ -502,6 +1158,63 @@ async def test_uninstall_drops_only_own_company_resources(
         assert call[1] in (TEST_COMPANY, TEST_OTHER_COMPANY)
     for call in platform.objects_admin.calls:
         assert call[1] in (TEST_COMPANY, TEST_OTHER_COMPANY)
+
+
+# ===========================================================================
+# 6b. Fail-closed: новый grant из пустого state требует EXACT approval (§11)
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_new_grant_from_empty_state_requires_exact_publication_approval(
+    platform: Platform,
+) -> None:
+    """Без durable exact approval новый grant не создаёт НИЧЕГО.
+
+    Negative-компаньон полного CI contract: legacy ``seed_published()``
+    открывает ТОЛЬКО artifact-гейт, но не заменяет durable approval; approval
+    с другим capability binding тоже не расширяет право на grant.
+    """
+
+    errors = pytest.importorskip("prodavan.domain.errors")
+    platform.artifact_admin.seed_published()
+    service = platform.admin_service()
+
+    # 1) Approval отсутствует -> PUBLICATION_APPROVAL_REQUIRED, state пустой.
+    with pytest.raises(errors.AppError) as missing:
+        await service.grant(
+            company_id=TEST_COMPANY,
+            plugin_id=TEST_PLUGIN,
+            manifest_version=TEST_VERSION,
+            artifact_digest=TEST_DIGEST,
+            capabilities=make_capability_set(),
+        )
+    assert missing.value.code == "PUBLICATION_APPROVAL_REQUIRED"
+    assert platform.grant_store.grants == {}
+    assert platform.instance_store.instances == {}
+    assert platform.secret_delivery.pre_deliver_calls == []
+
+    # 2) Approval с ДРУГИМ capability binding не разрешает этот grant.
+    await service.approve_publication(
+        actor_id="acceptance-platform-admin",
+        company_id=TEST_COMPANY,
+        plugin_id=TEST_PLUGIN,
+        manifest_version=TEST_VERSION,
+        artifact_digest=TEST_DIGEST,
+        capabilities=make_capability_set(capabilities=("cache",)),
+    )
+    with pytest.raises(errors.AppError) as mismatch:
+        await service.grant(
+            company_id=TEST_COMPANY,
+            plugin_id=TEST_PLUGIN,
+            manifest_version=TEST_VERSION,
+            artifact_digest=TEST_DIGEST,
+            capabilities=make_capability_set(),
+        )
+    assert mismatch.value.code == "PUBLICATION_APPROVAL_BINDING_MISMATCH"
+    assert platform.grant_store.grants == {}
+    assert platform.instance_store.instances == {}
+    assert platform.secret_delivery.pre_deliver_calls == []
 
 
 # ===========================================================================
@@ -562,7 +1275,7 @@ async def test_event_not_lost_when_consumer_is_idle(platform: Platform) -> None:
     events = pytest.importorskip("prodavan.application.plugins.events")
     dispatcher = platform.event_dispatcher()
     subscription = make_subscription()
-    platform.subscriptions.subscription = subscription
+    platform.subscriptions.register(subscription, active=True)
 
     # 1) Простой: записей нет.
     assert await dispatcher.consume(subscription) is None
@@ -571,17 +1284,124 @@ async def test_event_not_lost_when_consumer_is_idle(platform: Platform) -> None:
 
     # 2) Событие появилось: wake ДО handler, commit ПОСЛЕ.
     event = make_event()
-    platform.consumer.records.append(FakeRecord(value=event.to_wire()))
+    signed_wire = platform.event_signer().signed_wire(
+        event, topic="agentscale.plugin.events"
+    )
+    platform.consumer.records.append(FakeRecord(value=signed_wire))
     outcome = await dispatcher.consume(subscription)
     assert outcome is events.DeliveryOutcome.ACK
     assert platform.consumer.commits == [17]
     assert len(platform.wake_hook.calls) == 1
     assert len(platform.handler.calls) == 1
+    assert platform.raw_dlq.publish_calls == []
     # Аудит событий не содержит raw payload, только канонические id/digest.
     assert platform.audit.typed
     assert all(
         "payload_digest" in details for _, details in platform.audit.typed
     )
+
+
+@pytest.mark.asyncio
+async def test_signed_event_duplicate_acks_without_second_delivery(
+    platform: Platform,
+) -> None:
+    """Дедуп по subscription/source event сохраняет ACK, но не повторяет handler."""
+
+    events = pytest.importorskip("prodavan.application.plugins.events")
+    dispatcher = platform.event_dispatcher()
+    subscription = make_subscription()
+    platform.subscriptions.register(subscription, active=True)
+    event = make_event()
+    signed_wire = platform.event_signer().signed_wire(
+        event, topic="agentscale.plugin.events"
+    )
+    platform.consumer.records.extend(
+        [FakeRecord(value=signed_wire), FakeRecord(value=signed_wire)]
+    )
+
+    first = await dispatcher.consume(subscription)
+    duplicate = await dispatcher.consume(subscription)
+
+    assert first is events.DeliveryOutcome.ACK
+    assert duplicate is events.DeliveryOutcome.ACK
+    assert platform.consumer.commits == [17, 17]
+    assert len(platform.wake_hook.calls) == 1
+    assert len(platform.handler.calls) == 1
+    assert len(platform.idempotency.remembered) == 1
+    assert platform.raw_dlq.publish_calls == []
+
+
+@pytest.mark.asyncio
+async def test_malformed_event_uses_durable_raw_dlq_and_dedup(
+    platform: Platform,
+) -> None:
+    """Malformed bytes идут только в raw DLQ; retry подтверждает natural key."""
+
+    events = pytest.importorskip("prodavan.application.plugins.events")
+    dispatcher = platform.event_dispatcher()
+    subscription = make_subscription()
+    platform.subscriptions.register(subscription, active=True)
+    poison = b'{"event_id":"untrusted","payload":'
+    consumed = FakeRecord(
+        value={}, raw_value=poison, partition=3, offset=91
+    )
+    platform.consumer.records.append(consumed)
+
+    first = await dispatcher.consume(subscription)
+
+    assert first is events.DeliveryOutcome.DLQ
+    assert platform.consumer.commits == [91]
+    assert platform.handler.calls == []
+    assert platform.wake_hook.calls == []
+    assert platform.dlq.published == []
+    assert len(platform.raw_dlq.records) == 1
+    raw = platform.raw_dlq.records[0]
+    assert raw.topic == "agentscale.plugin.events"
+    assert raw.partition == 3
+    assert raw.offset == 91
+    assert raw.consumer_group == subscription.consumer_group
+    assert raw.error_kind == "JSONDecodeError"
+    assert raw.payload_digest == f"sha256:{hashlib.sha256(poison).hexdigest()}"
+    assert "payload" not in raw.to_wire()
+    assert "event_id" not in raw.to_wire()
+
+    # Повтор после неопределённого результата/commit retry не создаёт дубль.
+    platform.consumer.records.append(consumed)
+    second = await dispatcher.consume(subscription)
+    assert second is events.DeliveryOutcome.DLQ
+    assert platform.consumer.commits == [91, 91]
+    assert len(platform.raw_dlq.publish_calls) == 2
+    assert len(platform.raw_dlq.records) == 1
+
+
+@pytest.mark.asyncio
+async def test_event_subscription_negative_cases_are_keyed_by_id(
+    platform: Platform,
+) -> None:
+    """Чужая id не наследует active подписки; revoked id отклоняется до poll."""
+
+    events = pytest.importorskip("prodavan.application.plugins.events")
+    dispatcher = platform.event_dispatcher()
+    subscription = make_subscription()
+    unknown = events.Subscription(
+        id="sub_unknown",
+        plugin_id=TEST_PLUGIN,
+        event_types=subscription.event_types,
+        consumer_group="plugin-mod_equipment-sub_unknown",
+    )
+    platform.subscriptions.register(subscription, active=True)
+
+    with pytest.raises(events.PluginEventError) as missing:
+        await dispatcher.consume(unknown)
+    assert missing.value.code is events.PluginEventErrorCode.UNKNOWN_SUBSCRIPTION
+
+    platform.subscriptions.register(subscription, active=False)
+    with pytest.raises(events.PluginEventError) as revoked:
+        await dispatcher.consume(subscription)
+    assert revoked.value.code is events.PluginEventErrorCode.UNKNOWN_SUBSCRIPTION
+    assert platform.consumer.polls == 0
+    assert platform.consumer.commits == []
+    assert platform.handler.calls == []
 
 
 # ===========================================================================
@@ -602,10 +1422,23 @@ def test_egress_policy_comes_from_grant_not_from_expired_jwt(
     """
 
     egress = pytest.importorskip("prodavan.application.plugins.egress")
-    platform.grant_store.seed_active_grant()
+    seeded = platform.grant_store.seed_active_grant()
+    # NON-default quota: resolver/enforcement обязаны читать exact grant.quotas,
+    # а не hardcoded default фейка (get_grant раньше возвращал 1_000_000).
+    assert seeded.quotas.max_egress_bytes == TEST_QUOTA_VALUES["max_egress_bytes"]
+    assert seeded.quotas.max_egress_bytes != 1_000_000, "нужен NON-default лимит"
+    lookup = platform.grant_store.get_grant(TEST_GRANT_ID)
+    assert lookup is not None
+    assert (
+        lookup.raw["egress"]["max_egress_bytes"]
+        == seeded.quotas.max_egress_bytes
+    ), "get_grant обязан маппить max_egress_bytes из grant.quotas"
     resolver = platform.egress_resolver()
 
     fresh = resolver.resolve_claims(valid_claims)
+    assert fresh.max_egress_bytes == TEST_QUOTA_VALUES["max_egress_bytes"], (
+        "resolver обязан взять квоту из durable grant, а не из default"
+    )
     assert fresh.mode is egress.EgressMode.WEBHOOKS_ONLY
     assert "hooks.slack.com" in fresh.allowed_hosts
 
@@ -637,7 +1470,8 @@ def test_egress_policy_comes_from_grant_not_from_expired_jwt(
     assert "agentscale-postgres" not in repr(plugin_np)
 
 
-def test_capabilities_egress_port_reads_grant_not_token(
+@pytest.mark.asyncio
+async def test_capabilities_egress_port_reads_grant_not_token(
     platform: Platform, valid_claims: Any
 ) -> None:
     """Стык capabilities↔egress: ``EgressPolicyPort`` резолвит по grant_id.
@@ -671,6 +1505,7 @@ def test_capabilities_egress_port_reads_grant_not_token(
     policy_port = GrantBackedPolicy(platform.egress_resolver())
     service = caps.PluginCapabilityService(
         registry=_registry_with_network(platform),
+        grant_store=platform.grant_store,
         quota=platform.quota,
         audit=platform.audit,
         revocation=platform.revocation,
@@ -690,7 +1525,7 @@ def test_capabilities_egress_port_reads_grant_not_token(
             grant_id=TEST_GRANT_ID,
         ),
     )
-    decision = service.invoke(
+    decision = await service.invoke(
         claims=valid_claims,
         capability="network",
         operation="egress",
@@ -787,8 +1622,12 @@ async def test_public_page_does_not_open_backend_api_anonymously(
         path="/public/index.html", headers={},
     )
     assert page.public is True
-    assert page.grant.capability_token == ""
     assert page.claims.anonymous is True
+    assert page.claims.artifact_digest == TEST_DIGEST
+    assert page.grant.artifact_digest == TEST_DIGEST
+    assert page.grant.published_artifact_digest == TEST_DIGEST
+    assert page.grant.capability_token == ""
+    assert page.grant.operations == frozenset()
 
     # Тот же путь, но /api/* -> сессия обязательна (иначе 401).
     with pytest.raises(gateway.GatewayError):
@@ -832,6 +1671,24 @@ async def test_webhook_hmac_and_delivery_idempotency_across_gateway(
         path="/webhook", method="POST", raw_body=body, headers=headers,
     )
     assert first.duplicate is False
+    assert first.claims.plugin_instance_id == TEST_INSTANCE
+    assert first.grant.plugin_instance_id == TEST_INSTANCE
+    assert first.claims.artifact_digest == TEST_DIGEST
+    assert first.grant.artifact_digest == TEST_DIGEST
+    assert first.grant.published_artifact_digest == TEST_DIGEST
+    for method in ("claim_delivery_lease", "commit_delivery", "release_delivery"):
+        assert callable(getattr(platform.rate_limit, method, None))
+
+    # До commit повтор — processing lease, а НЕ ложный duplicate из legacy fake.
+    with pytest.raises(gateway.GatewayError) as in_progress:
+        await auth.authorize_webhook(
+            plugin_id=TEST_PLUGIN, company_id=TEST_COMPANY,
+            path="/webhook", method="POST", raw_body=body, headers=headers,
+        )
+    assert in_progress.value.gateway_code is gateway.GatewayErrorCode.DELIVERY_IN_PROGRESS
+
+    # Duplicate допустим только после confirmed backend success, как в production.
+    await auth.commit_webhook(first)
 
     # Повтор с тем же delivery-id: 200 без повторной обработки.
     second = await auth.authorize_webhook(
@@ -870,7 +1727,7 @@ async def test_admin_revoke_is_immediately_visible_to_capabilities(
     admin = platform.admin_service()
     caps_service = platform.capability_service()
 
-    before = caps_service.invoke(
+    before = await caps_service.invoke(
         claims=valid_claims, capability="cache", operation="get",
         request=make_cache_get_request(), now=FIXED_NOW,
     )
@@ -880,7 +1737,7 @@ async def test_admin_revoke_is_immediately_visible_to_capabilities(
     assert receipt.token_revoked is True
 
     # Общий реестр отзывов: capabilities видит отзыв без дополнительной связи.
-    after = caps_service.invoke(
+    after = await caps_service.invoke(
         claims=valid_claims, capability="cache", operation="get",
         request=make_cache_get_request(), now=FIXED_NOW,
     )
@@ -888,7 +1745,8 @@ async def test_admin_revoke_is_immediately_visible_to_capabilities(
     assert platform.audit.events, "revoke и deny обязаны писать аудит"
 
 
-def test_activation_wake_token_is_verifiable_by_identity_keyring(
+@pytest.mark.asyncio
+async def test_activation_wake_token_is_verifiable_by_identity_keyring(
     platform: Platform,
 ) -> None:
     """Стык activation↔identity: токен из ``MintPort`` проверяется KeyRing'ом.
@@ -899,20 +1757,16 @@ def test_activation_wake_token_is_verifiable_by_identity_keyring(
     """
 
     identity = pytest.importorskip("prodavan.application.plugins.identity")
-
-    async def _run() -> None:
-        platform.readiness.ready[TEST_INSTANCE] = True
-        activator = platform.activator()
-        result = await activator.wake(TEST_INSTANCE)
-        claims = identity.verify_plugin_token(
-            result.token, keyring=platform.keyring(), now=FIXED_EPOCH
-        )
-        assert claims.typ == identity.PLUGIN_TOKEN_TYP
-        assert claims.grant_id == TEST_GRANT_ID
-        assert claims.plugin_instance_id == TEST_INSTANCE
-        assert claims.exp > claims.iat
-
-    asyncio.run(_run())
+    platform.readiness.ready[TEST_INSTANCE] = True
+    activator = platform.activator()
+    result = await activator.wake(TEST_INSTANCE)
+    claims = identity.verify_plugin_token(
+        result.token, keyring=platform.keyring(), now=FIXED_EPOCH
+    )
+    assert claims.typ == identity.PLUGIN_TOKEN_TYP
+    assert claims.grant_id == TEST_GRANT_ID
+    assert claims.plugin_instance_id == TEST_INSTANCE
+    assert claims.exp > claims.iat
 
 
 __all__: list[str] = []

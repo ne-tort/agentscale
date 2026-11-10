@@ -11,7 +11,11 @@
   async-итератор, он передаётся в ``StreamingResponse`` как есть, тело нигде
   не читается целиком;
 * **недоступность ≠ молчание**: нет Ready → ``202 + Retry-After``; таймаут →
-  ``504``; ошибка upstream → ``502``; отсутствие lease → ``503``.
+  ``504``; ошибка upstream → ``502``; отсутствие lease → ``503``;
+* **trusted instance assertion**: ``X-Plugin-Instance-ID`` берётся только из
+  согласованных ``GatewayClaims``/активного ``GatewayGrant``; lease обязан
+  подтвердить тот же grant/tenant/plugin/instance/artifact. Клиентские identity-заголовки
+  не являются источником assertion и не попадают в audit.
 """
 
 from __future__ import annotations
@@ -21,6 +25,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from prodavan.application.plugins.gateway.auth import GatewayLimits
+from prodavan.application.plugins.gateway.canonical import (
+    canonical_backend_path,
+    canonical_raw_query,
+)
 from prodavan.application.plugins.gateway.errors import (
     BackendNotReadyError,
     BackendTimeoutError,
@@ -37,7 +45,10 @@ from prodavan.application.plugins.gateway.ports import (
     GatewayAuditEvent,
     GatewayClaims,
     GatewayGrant,
+    StaticResponsePolicy,
+    VerifiedWebhook,
     WakeLease,
+    is_valid_artifact_digest,
 )
 
 #: Идемпотентные методы, для которых допустим retry (RFC 7231 §4.2.2).
@@ -93,6 +104,7 @@ class GatewayProxy:
     #: обращении к статике — иначе fail-closed 503, а не «молчание».
     static_http: BackendHttpPort | None = None
     limits: GatewayLimits = field(default_factory=GatewayLimits)
+    static_response_policy: StaticResponsePolicy | None = None
 
     def __post_init__(self) -> None:
         for name in ("activation", "backend_http", "audit"):
@@ -105,6 +117,13 @@ class GatewayProxy:
             raise GatewayError(
                 GatewayErrorCode.PORT_UNAVAILABLE,
                 detail="GatewayLimits are not wired",
+            )
+        if self.static_http is not None and not isinstance(
+            self.static_response_policy, StaticResponsePolicy
+        ):
+            raise GatewayError(
+                GatewayErrorCode.PORT_UNAVAILABLE,
+                detail="trusted shell-origin static response policy is not wired",
             )
 
     # ------------------------------------------------------------------ аудит
@@ -132,7 +151,83 @@ class GatewayProxy:
 
     # ------------------------------------------------------------------ wake
 
-    async def _wake_and_wait(self, claims: GatewayClaims) -> WakeLease:
+    @staticmethod
+    def _required_instance_id(claims: GatewayClaims, grant: GatewayGrant) -> str:
+        claims_instance = claims.plugin_instance_id
+        grant_instance = grant.plugin_instance_id
+        if (
+            not isinstance(claims_instance, str)
+            or not claims_instance.strip()
+            or not isinstance(grant_instance, str)
+            or not grant_instance.strip()
+        ):
+            raise GatewayError(
+                GatewayErrorCode.PORT_UNAVAILABLE,
+                detail="durable grant plugin_instance_id is required for backend forward",
+            )
+        if claims_instance != grant_instance:
+            raise GatewayError(
+                GatewayErrorCode.PORT_UNAVAILABLE,
+                detail="claims and durable grant plugin_instance_id mismatch",
+            )
+        return claims_instance
+
+    @staticmethod
+    def _required_artifact_digest(
+        claims: GatewayClaims, grant: GatewayGrant
+    ) -> str:
+        claims_digest = claims.artifact_digest
+        grant_digest = grant.artifact_digest
+        if (
+            not isinstance(claims_digest, str)
+            or not isinstance(grant_digest, str)
+            or not is_valid_artifact_digest(claims_digest)
+            or not is_valid_artifact_digest(grant_digest)
+        ):
+            raise GatewayError(
+                GatewayErrorCode.PORT_UNAVAILABLE,
+                detail="durable grant artifact_digest is required for backend forward",
+            )
+        if claims_digest != grant_digest:
+            raise GatewayError(
+                GatewayErrorCode.PORT_UNAVAILABLE,
+                detail="claims and durable grant artifact_digest mismatch",
+            )
+        return grant_digest
+
+    @staticmethod
+    def _required_static_artifact_digest(
+        claims: GatewayClaims, grant: GatewayGrant
+    ) -> str:
+        """Require the same bundle digest in claims, grant and published artifact."""
+        grant_digest = GatewayProxy._required_artifact_digest(claims, grant)
+        published_digest = grant.published_artifact_digest
+        if not is_valid_artifact_digest(published_digest):
+            raise GatewayError(
+                GatewayErrorCode.PORT_UNAVAILABLE,
+                detail=(
+                    "published static artifact identity is unavailable "
+                    "(fail-closed; no backend digest fallback)"
+                ),
+            )
+        if published_digest != grant_digest:
+            raise GatewayError(
+                GatewayErrorCode.PORT_UNAVAILABLE,
+                detail=(
+                    "durable grant and published static artifact_digest mismatch "
+                    "(fail-closed)"
+                ),
+            )
+        return published_digest
+
+    async def _wake_and_wait(
+        self,
+        claims: GatewayClaims,
+        *,
+        plugin_instance_id: str,
+        expected_artifact_digest: str,
+        expected_grant_id: str,
+    ) -> WakeLease:
         """Пробудить backend и ДОЖДАТЬСЯ Ready. Возвращает lease с токеном.
 
         Fail-closed: ``wake`` без lease → 503; ``wait_ready=False`` →
@@ -140,7 +235,9 @@ class GatewayProxy:
         """
         try:
             lease = await self.activation.wake(
-                plugin_id=claims.plugin_id, company_id=claims.company_id
+                plugin_id=claims.plugin_id,
+                company_id=claims.company_id,
+                plugin_instance_id=plugin_instance_id,
             )
         except Exception as exc:  # noqa: BLE001 — любая ошибка активатора явная
             await self._audit(
@@ -168,6 +265,26 @@ class GatewayProxy:
             raise GatewayError(
                 GatewayErrorCode.WAKE_LEASE_MISSING,
                 detail="activator did not return a wake lease with a capability token",
+            )
+
+        if (
+            lease.plugin_instance_id != plugin_instance_id
+            or lease.plugin_id != claims.plugin_id
+            or lease.company_id != claims.company_id
+            or lease.artifact_digest != expected_artifact_digest
+            or lease.grant_id != expected_grant_id
+        ):
+            await self._audit(
+                "plugin_wake_up",
+                plugin_id=claims.plugin_id,
+                company_id=claims.company_id,
+                decision="deny",
+                code=GatewayErrorCode.WAKE_LEASE_MISSING.value,
+                reason="activator returned a lease with a different grant/tenant/plugin/instance/artifact binding",
+            )
+            raise GatewayError(
+                GatewayErrorCode.WAKE_LEASE_MISSING,
+                detail="activator returned a lease with a different grant/tenant/plugin/instance/artifact binding",
             )
 
         ready = await self.activation.wait_ready(
@@ -207,12 +324,16 @@ class GatewayProxy:
         grant: GatewayGrant,
         stream: bool = False,
         request_id: str = "",
+        query_string: bytes = b"",
+        verified_webhook: VerifiedWebhook | None = None,
     ) -> BackendResponse:
         """Пробудить, построить доверенные заголовки и проксировать.
 
         ``grant`` приходит из ``GatewayAuth``; при wake-up в него подставляется
-        **новый короткий capability-token** из lease (§7.2, §7.4). Клиентский
-        ``X-Plugin-Capability-Token`` уже отброшен в ``headers.py``.
+        **новый короткий capability-token** из lease (§7.2, §7.4). Клиентские
+        ``X-Plugin-Capability-Token``/``X-Plugin-Instance-ID`` уже отброшены
+        в ``headers.py`` и пересоздаются только из проверенных server-side
+        claims/grant/lease. Никакие trusted header values не пишутся в audit.
         """
         normalized_method = method.upper()
         if normalized_method not in IDEMPOTENT_METHODS | {"POST", "PATCH"}:
@@ -220,26 +341,43 @@ class GatewayProxy:
                 GatewayErrorCode.METHOD_NOT_ALLOWED,
                 detail=f"method '{method}' is not supported by the plugin gateway",
             )
-        if not path or ".." in path.split("/"):
+        plugin_instance_id = self._required_instance_id(claims, grant)
+        artifact_digest = self._required_artifact_digest(claims, grant)
+        try:
+            backend_path = canonical_backend_path(path)
+            canonical_raw_query(query_string)
+        except (TypeError, ValueError) as exc:
             raise GatewayError(
                 GatewayErrorCode.INVALID_PATH,
-                detail="invalid backend path",
-            )
+                detail="invalid backend path or raw query",
+            ) from exc
 
         # 1) WAKE ДО FORWARD. Ни один send() не выполняется раньше.
-        lease = await self._wake_and_wait(claims)
+        lease = await self._wake_and_wait(
+            claims,
+            plugin_instance_id=plugin_instance_id,
+            expected_artifact_digest=artifact_digest,
+            expected_grant_id=grant.grant_id,
+        )
 
         # 2) Новый короткий lease → обновляем доверенный capability-token.
         effective_grant = GatewayGrant(
             grant_id=grant.grant_id,
+            plugin_instance_id=plugin_instance_id,
             active=grant.active,
             capability_token=lease.capability_token,
             operations=grant.operations,
+            artifact_digest=artifact_digest,
         )
 
         # 3) Allowlist: клиентские X-Plugin-*/Cookie/Authorization/Forwarded
         #    отброшены, доверенные значения выставлены ПОСЛЕДНИМИ.
-        forward_headers = build_forward_headers(headers, claims, effective_grant)
+        forward_headers = build_forward_headers(
+            headers,
+            claims,
+            effective_grant,
+            verified_webhook=verified_webhook,
+        )
 
         # 4) Серверный таймаут; для SSE — отдельный, более длинный.
         timeout = (
@@ -248,12 +386,15 @@ class GatewayProxy:
             else self.limits.backend_timeout_seconds
         )
         request = BackendRequest(
-            path="/" + path.strip("/"),
+            path=backend_path,
             method=normalized_method,
             headers=forward_headers,
             body=body,
             timeout_seconds=timeout,
             stream=stream,
+            query_string=query_string,
+            max_response_bytes=self.limits.backend_response_limit_bytes,
+            plugin_instance_id=plugin_instance_id,
         )
 
         # 5) Retry ТОЛЬКО на идемпотентные методы и ТОЛЬКО не-стриминг.
@@ -331,6 +472,7 @@ class GatewayProxy:
         grant: GatewayGrant,
         is_api: bool,
         request_id: str = "",
+        query_string: bytes = b"",
     ) -> BackendResponse:
         """Отдать статику pluginpage с отдельного static-origin (§5.2).
 
@@ -349,21 +491,31 @@ class GatewayProxy:
                 GatewayErrorCode.INVALID_PATH,
                 detail="/api/* must be proxied to the backend, not to static origin",
             )
-        normalized = path.strip("/")
-        if not normalized:
+        plugin_instance_id = self._required_instance_id(claims, grant)
+        artifact_digest = self._required_static_artifact_digest(claims, grant)
+        try:
+            normalized = canonical_backend_path(path)
+            canonical_raw_query(query_string)
+        except (TypeError, ValueError) as exc:
+            raise GatewayError(
+                GatewayErrorCode.INVALID_PATH,
+                detail="invalid static path or raw query",
+            ) from exc
+        if normalized == "/":
             raise GatewayError(
                 GatewayErrorCode.INVALID_PATH,
                 detail="empty pluginpage path: index.html fallback is forbidden",
-            )
-        if ".." in normalized.split("/"):
-            raise GatewayError(
-                GatewayErrorCode.INVALID_PATH,
-                detail="invalid static path",
             )
         if self.static_http is None:
             raise GatewayError(
                 GatewayErrorCode.STATIC_ORIGIN_NOT_CONFIGURED,
                 detail="plugin static origin is not configured (fail-closed)",
+            )
+        policy = self.static_response_policy
+        if policy is None:
+            raise GatewayError(
+                GatewayErrorCode.PORT_UNAVAILABLE,
+                detail="trusted shell-origin static response policy is not wired",
             )
         if method.upper() not in {"GET", "HEAD"}:
             raise GatewayError(
@@ -375,24 +527,51 @@ class GatewayProxy:
         # туда НЕ уходит: у static-origin нет /.capabilities и нет cookie.
         safe_grant = GatewayGrant(
             grant_id=grant.grant_id,
+            plugin_instance_id=plugin_instance_id,
             active=grant.active,
             capability_token="",
             operations=frozenset(),
+            artifact_digest=artifact_digest,
+            published_artifact_digest=artifact_digest,
         )
+        policy_headers = policy.response_headers(
+            artifact_digest=artifact_digest
+        )
+        managed_names = {name.lower() for name in policy_headers}
+        static_request_headers = {
+            name: value
+            for name, value in headers.items()
+            if isinstance(name, str) and name.lower() not in managed_names
+        }
         request = BackendRequest(
-            path="/" + normalized,
+            path=normalized,
             method=method.upper(),
-            headers=build_forward_headers(headers, claims, safe_grant),
+            headers=build_forward_headers(static_request_headers, claims, safe_grant),
             timeout_seconds=self.limits.backend_timeout_seconds,
             stream=False,
+            query_string=query_string,
+            max_response_bytes=self.limits.backend_response_limit_bytes,
+            plugin_instance_id=plugin_instance_id,
         )
         try:
             response = await self.static_http.send(request)
+        except GatewayError:
+            raise
         except Exception as exc:  # noqa: BLE001 — транспорт -> типизированная ошибка
             raise GatewayError(
                 GatewayErrorCode.UPSTREAM_ERROR,
                 detail=f"static origin unavailable: {type(exc).__name__}",
             ) from exc
+
+        # Static-origin/client values cannot override evidence or security policy.
+        # Remove case-insensitive duplicates before writing canonical server values.
+        response_headers = {
+            name: value
+            for name, value in response.headers.items()
+            if isinstance(name, str) and name.lower() not in managed_names
+        }
+        response_headers.update(policy_headers)
+        response.headers = response_headers
 
         await self._audit(
             "plugin_page_opened",

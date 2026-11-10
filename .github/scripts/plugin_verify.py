@@ -1,36 +1,19 @@
 #!/usr/bin/env python3
-"""Verify-before-publish для OCI-артефактов плагинов (§5.1, критерий 18, F4).
+"""Fail-closed verification of quarantined and promoted plugin OCI artifacts.
 
-Pure-python, только stdlib. Запускается CI ПОСЛЕ ``cosign sign`` и ДО перевода
-артефакта в состояние PUBLISHED в реестре (AppVersion / RegistryOutcome).
+Both the backend image and the OCI bundle require a keyless signature and their
+own SPDX + SLSA attestations. Evidence is validated by subject digest, source
+repository/full commit SHA, trusted builder workflow, and artifact-specific
+build type. The full canonical source manifest must be the OCI config and an
+identical explicit blob. No fixed layer count is imposed.
 
-Порядок (fail-closed, строго по §5.1 «Реестр: cosign verify → digest → manifest →
-compatibility gate»):
-
-    1. cosign verify (keyless, по @sha256-digest) backend-образа и OCI-артефакта;
-    2. проверка digest (формат, запрет ':latest', совпадение с манифестом);
-    3. validate_manifest-подобные проверки: semver / protocol=plugin-rpc/1 /
-       capability allowlist / min_platform_version / ровно 3 слоя /
-       отсутствие самореференции;
-    4. CompatibilityGate (минимальная версия платформы, CapabilityGrant);
-    5. решение: ``PUBLISH_ALLOWED`` или ``QUARANTINED``.
-
-ЛЮБАЯ ошибка (исключение, отсутствие данных, «тихий» успех без проверки) даёт
-``QUARANTINED`` и НИКОГДА ``publish``. Непроверенный digest не публикуется.
-
-``cosign_runner`` — инъекция для тестов: вызываемая функция ``list[str] -> Any``.
-В CI это ``_ci_cosign_runner`` (``subprocess.run(..., check=True)``). Сам
-``subprocess`` НЕ импортируется и НЕ запускается на уровне модуля: импорт
-скрипта не должен ни подписывать, ни проверять, ни ходить в сеть.
-
-CLI печатает JSON-решение в stdout; ``QUARANTINED`` -> exit code 1 (job падает).
-При наличии ``GITHUB_OUTPUT`` / ``GITHUB_STEP_SUMMARY`` пишет туда решение и
-digest'ы (это и есть «записать digest в output/summary»).
+Importing this module performs no process, network, or registry operation.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -39,24 +22,24 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-# ---------------------------------------------------------------------------
-# Константы и коды. Значения совпадают с artifacts/errors.py (F4) и
-# plugin_manifest_builder.py, чтобы QuarantineEvidence.metadata был стабильным.
-# ---------------------------------------------------------------------------
-
 DECISION_PUBLISH = "PUBLISH_ALLOWED"
 DECISION_QUARANTINE = "QUARANTINED"
-
 PLUGIN_PROTOCOL = "plugin-rpc/1"
-CAPABILITY_ALLOWLIST: frozenset[str] = frozenset(
+CAPABILITY_ALLOWLIST = frozenset(
     {"cache", "objects", "docs", "events", "jobs", "pods", "mcp", "secrets", "network"}
 )
 DEFAULT_OIDC_ISSUER = "https://token.actions.githubusercontent.com"
+SPDX_PREDICATE_TYPE = "https://spdx.dev/Document"
+SLSA_PREDICATE_TYPES = frozenset({"https://slsa.dev/provenance/v0.2"})
 
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_PLUGIN_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _SEMVER_RE = re.compile(
     r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)"
-    r"(?:-(?P<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+    r"(?:-(?P<prerelease>(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)"
+    r"(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?"
     r"(?:\+(?P<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
 )
 _REF_RE = re.compile(
@@ -67,8 +50,6 @@ _REF_RE = re.compile(
 
 
 class VerifyErrorCode:
-    """Стабильные строковые коды решения (общие с ArtifactErrorCode)."""
-
     OK = "OK"
     UNSIGNED = "UNSIGNED"
     VERIFY_FAILED = "VERIFY_FAILED"
@@ -77,13 +58,12 @@ class VerifyErrorCode:
     LATEST_FORBIDDEN = "LATEST_FORBIDDEN"
     INCOMPATIBLE = "INCOMPATIBLE"
     INVALID_MANIFEST = "INVALID_MANIFEST"
+    INVALID_EVIDENCE = "INVALID_EVIDENCE"
     MISSING_INPUT = "MISSING_INPUT"
     QUARANTINED = "QUARANTINED"
 
 
 class VerifyError(Exception):
-    """Внутренний отказ одного из шагов pipeline. Всегда -> QUARANTINED."""
-
     def __init__(self, code: str, reason: str) -> None:
         super().__init__(f"{code}: {reason}")
         self.code = code
@@ -93,31 +73,10 @@ class VerifyError(Exception):
 CosignRunner = Callable[[list[str]], Any]
 
 
-# ---------------------------------------------------------------------------
-# cosign: CI-runner и построение команды
-# ---------------------------------------------------------------------------
-
-
 def _ci_cosign_runner(argv: list[str]) -> dict[str, Any]:
-    """CI-реализация cosign_runner: subprocess с ``check=True``.
+    import subprocess
 
-    ВАЖНО: ``subprocess`` импортируется ТОЛЬКО здесь, при вызове. Импорт модуля
-    не запускает ни одного процесса. Fail-closed: ненулевой код и любое
-    исключение пробрасываются наверх и превращаются в QUARANTINED.
-    """
-    import subprocess  # локальный импорт: побочных эффектов при import модуля нет
-
-    completed = subprocess.run(  # noqa: S603 — argv собирается только этим модулем
-        argv,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    if completed.returncode != 0:  # check=True уже гарантирует, но проверяем явно
-        raise VerifyError(
-            VerifyErrorCode.VERIFY_FAILED,
-            f"cosign завершился с кодом {completed.returncode}: {completed.stderr.strip()[:500]}",
-        )
+    completed = subprocess.run(argv, check=True, capture_output=True, text=True)
     return {
         "returncode": completed.returncode,
         "stdout": completed.stdout,
@@ -126,233 +85,145 @@ def _ci_cosign_runner(argv: list[str]) -> dict[str, Any]:
 
 
 def _cosign_verify_command(ref: str, identity: str, oidc_issuer: str) -> list[str]:
-    """Команда ``cosign verify`` с жёсткой привязкой keyless-идентичности.
-
-    §5.1: ``cosign verify --certificate-identity --certificate-oidc-issuer``.
-    Без обоих флагов проверка подписи не считается состоявшейся.
-    """
     return [
-        "cosign",
-        "verify",
-        "--certificate-identity",
-        identity,
-        "--certificate-oidc-issuer",
-        oidc_issuer,
+        "cosign", "verify",
+        "--certificate-identity", identity,
+        "--certificate-oidc-issuer", oidc_issuer,
+        ref,
+    ]
+
+
+def _cosign_verify_attestation_command(
+    ref: str, predicate_type: str, identity: str, oidc_issuer: str
+) -> list[str]:
+    return [
+        "cosign", "verify-attestation",
+        "--type", predicate_type,
+        "--certificate-identity", identity,
+        "--certificate-oidc-issuer", oidc_issuer,
         ref,
     ]
 
 
 def _run_cosign(runner: CosignRunner, argv: list[str], label: str) -> dict[str, Any]:
-    """Безопасно вызвать инъекцию и трактовать ЛЮБОЙ сомнительный исход как отказ."""
     if not callable(runner):
-        raise VerifyError(
-            VerifyErrorCode.MISSING_INPUT, "cosign_runner должен быть вызываемой функцией"
-        )
+        raise VerifyError(VerifyErrorCode.MISSING_INPUT, "cosign_runner is required")
     if not isinstance(argv, list) or not argv or argv[0] != "cosign":
-        raise VerifyError(
-            VerifyErrorCode.MISSING_INPUT, f"{label}: некорректная команда cosign"
-        )
-    for arg in argv:
-        if not isinstance(arg, str) or "\n" in arg or "\0" in arg or "\r" in arg:
-            raise VerifyError(
-                VerifyErrorCode.MISSING_INPUT, f"{label}: недопустимый аргумент команды"
-            )
+        raise VerifyError(VerifyErrorCode.MISSING_INPUT, f"{label}: invalid cosign command")
+    for argument in argv:
+        if not isinstance(argument, str) or any(char in argument for char in ("\n", "\r", "\0")):
+            raise VerifyError(VerifyErrorCode.MISSING_INPUT, f"{label}: unsafe command argument")
     try:
         result = runner(argv)
     except VerifyError:
         raise
-    except Exception as exc:  # cosign verify упал -> QUARANTINED, не publish
-        raise VerifyError(
-            VerifyErrorCode.VERIFY_FAILED,
-            f"{label}: cosign verify завершился ошибкой: {exc!r}",
-        ) from exc
-
-    # Fail-closed: «молчаливый» False / ненулевой returncode / ok=false — отказ.
+    except Exception as exc:
+        raise VerifyError(VerifyErrorCode.VERIFY_FAILED, f"{label}: {exc!r}") from exc
     if result is False:
-        raise VerifyError(VerifyErrorCode.VERIFY_FAILED, f"{label}: cosign вернул False")
+        raise VerifyError(VerifyErrorCode.VERIFY_FAILED, f"{label}: cosign returned False")
     if isinstance(result, int) and result != 0:
         raise VerifyError(VerifyErrorCode.VERIFY_FAILED, f"{label}: cosign rc={result}")
     if isinstance(result, dict) and result.get("ok") is False:
-        raise VerifyError(
-            VerifyErrorCode.VERIFY_FAILED,
-            f"{label}: {str(result.get('detail', 'ok=false'))[:300]}",
-        )
-    returncode = getattr(result, "returncode", None)
-    if returncode is None and isinstance(result, dict):
-        returncode = result.get("returncode", 0)
-    if isinstance(returncode, int) and returncode != 0:
-        raise VerifyError(
-            VerifyErrorCode.VERIFY_FAILED, f"{label}: cosign rc={returncode}"
-        )
-    return {"label": label, "ref": argv[-1], "verified": True}
-
-
-# ---------------------------------------------------------------------------
-# Вспомогательные проверки
-# ---------------------------------------------------------------------------
+        raise VerifyError(VerifyErrorCode.VERIFY_FAILED, f"{label}: ok=false")
+    returncode = result.get("returncode", 0) if isinstance(result, dict) else getattr(result, "returncode", 0)
+    if returncode != 0:
+        raise VerifyError(VerifyErrorCode.VERIFY_FAILED, f"{label}: cosign rc={returncode}")
+    stdout = result.get("stdout", "") if isinstance(result, dict) else getattr(result, "stdout", "")
+    return {"label": label, "ref": argv[-1], "verified": True, "stdout": stdout or ""}
 
 
 def _require_digest(value: str, field_name: str) -> str:
-    """Digest строго ``^sha256:[0-9a-f]{64}$``; ':latest' запрещён явно."""
     if not isinstance(value, str) or not value.strip():
-        raise VerifyError(
-            VerifyErrorCode.INVALID_DIGEST, f"{field_name}: отсутствует digest (fail-closed)"
-        )
+        raise VerifyError(VerifyErrorCode.INVALID_DIGEST, f"{field_name}: missing digest")
     candidate = value.strip()
     if ":latest" in candidate or candidate.endswith("/latest"):
-        raise VerifyError(
-            VerifyErrorCode.LATEST_FORBIDDEN,
-            f"{field_name}: ':latest' для плагинов запрещён (§5.1, критерий 18)",
-        )
+        raise VerifyError(VerifyErrorCode.LATEST_FORBIDDEN, f"{field_name}: :latest is forbidden")
     if _DIGEST_RE.fullmatch(candidate) is None:
-        raise VerifyError(
-            VerifyErrorCode.INVALID_DIGEST,
-            f"{field_name}: ожидался ^sha256:[0-9a-f]{{64}}$, получено {candidate!r}",
-        )
+        raise VerifyError(VerifyErrorCode.INVALID_DIGEST, f"{field_name}: invalid digest {candidate!r}")
     return candidate
 
 
 def _require_ref(value: str, field_name: str) -> str:
-    """Ссылка обязана быть по digest (``repo@sha256:...``), без тегов."""
     if not isinstance(value, str) or not value.strip():
-        raise VerifyError(
-            VerifyErrorCode.MISSING_INPUT,
-            f"{field_name}: отсутствует OCI-ссылка по digest (fail-closed)",
-        )
+        raise VerifyError(VerifyErrorCode.MISSING_INPUT, f"{field_name}: missing digest-pinned ref")
     candidate = value.strip()
-    if ":latest" in candidate or "/latest" in candidate:
-        raise VerifyError(
-            VerifyErrorCode.LATEST_FORBIDDEN, f"{field_name}: ':latest' запрещён"
-        )
-    if "@" not in candidate:
-        raise VerifyError(
-            VerifyErrorCode.MISSING_INPUT,
-            f"{field_name}: ссылка без '@sha256:...' — пин по тегу запрещён",
-        )
+    if ":latest" in candidate or candidate.endswith("/latest"):
+        raise VerifyError(VerifyErrorCode.LATEST_FORBIDDEN, f"{field_name}: :latest is forbidden")
     if _REF_RE.fullmatch(candidate) is None:
-        raise VerifyError(
-            VerifyErrorCode.INVALID_DIGEST,
-            f"{field_name}: некорректная ссылка по digest: {candidate!r}",
-        )
+        raise VerifyError(VerifyErrorCode.INVALID_DIGEST, f"{field_name}: expected repo@sha256:<64 hex>")
     return candidate
 
 
 def _load_manifest_module() -> Any:
-    """Ленивая загрузка соседнего builder'а — единый источник правил валидации.
-
-    При обычном CLI ``python .github/scripts/plugin_verify.py`` каталог скрипта
-    уже в ``sys.path[0]``. Fallback нужен для pytest, импортирующего модуль
-    из другого каталога. Любая ошибка импорта -> QUARANTINED (не публикуем).
-    """
     try:
         import plugin_manifest_builder as module  # type: ignore[import-not-found]
     except ModuleNotFoundError:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import plugin_manifest_builder as module  # type: ignore[import-not-found]
     if not hasattr(module, "validate_signed_manifest"):
-        raise VerifyError(
-            VerifyErrorCode.INVALID_MANIFEST,
-            "plugin_manifest_builder не экспортирует validate_signed_manifest",
-        )
+        raise VerifyError(VerifyErrorCode.INVALID_MANIFEST, "canonical builder validator is unavailable")
     return module
 
 
 def _read_manifest(manifest_path: str) -> dict[str, Any]:
-    """Прочитать подписываемый OCI-манифест. Fail-closed на любом отклонении."""
     if not isinstance(manifest_path, str) or not manifest_path.strip():
-        raise VerifyError(
-            VerifyErrorCode.MISSING_INPUT, "путь до манифеста не задан (fail-closed)"
-        )
-    path = manifest_path.strip()
-    if not os.path.isfile(path):
-        raise VerifyError(
-            VerifyErrorCode.MISSING_INPUT, f"файл манифеста не найден: {path!r}"
-        )
+        raise VerifyError(VerifyErrorCode.MISSING_INPUT, "manifest path is required")
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(manifest_path, "r", encoding="utf-8") as handle:
             raw = handle.read()
     except OSError as exc:
-        raise VerifyError(
-            VerifyErrorCode.INVALID_MANIFEST, f"не удалось прочитать манифест: {exc!r}"
-        ) from exc
+        raise VerifyError(VerifyErrorCode.MISSING_INPUT, f"cannot read manifest: {exc!r}") from exc
     if ":latest" in raw:
-        raise VerifyError(
-            VerifyErrorCode.LATEST_FORBIDDEN,
-            "манифест содержит ':latest' (пин только по digest)",
-        )
+        raise VerifyError(VerifyErrorCode.LATEST_FORBIDDEN, "manifest contains :latest")
     try:
-        manifest = json.loads(raw)
+        payload = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise VerifyError(
-            VerifyErrorCode.INVALID_MANIFEST, f"манифест не является JSON: {exc!r}"
-        ) from exc
-    if not isinstance(manifest, dict):
-        raise VerifyError(
-            VerifyErrorCode.INVALID_MANIFEST, "корень манифеста должен быть объектом"
-        )
-    return manifest
+        raise VerifyError(VerifyErrorCode.INVALID_MANIFEST, f"invalid JSON: {exc!r}") from exc
+    if not isinstance(payload, dict):
+        raise VerifyError(VerifyErrorCode.INVALID_MANIFEST, "manifest root must be an object")
+    return payload
 
 
-def validate_manifest(
-    manifest: dict[str, Any], *, backend_digest: str
-) -> dict[str, Any]:
-    """Проверки semver / protocol / capabilities / min_platform / 3 слоя.
-
-    Делегирует ``plugin_manifest_builder.validate_signed_manifest`` (единый
-    источник истины). ``ManifestError`` пробрасывается с его кодом.
-    """
+def validate_manifest(manifest: dict[str, Any], *, backend_digest: str) -> dict[str, Any]:
+    """Compatibility wrapper retaining the canonical plugin_id regression gate."""
     module = _load_manifest_module()
     try:
-        return module.validate_signed_manifest(manifest, backend_digest=backend_digest)
+        summary = module.validate_signed_manifest(manifest, backend_digest=backend_digest)
+        plugin_id = summary.get("plugin_id")
+        if not isinstance(plugin_id, str) or _PLUGIN_ID_RE.fullmatch(plugin_id) is None:
+            raise VerifyError(
+                VerifyErrorCode.INVALID_MANIFEST,
+                f"plugin_id must match ^[a-z][a-z0-9_]*$: {plugin_id!r}",
+            )
+        return summary
+    except VerifyError:
+        raise
     except module.ManifestError:
         raise
-    except Exception as exc:  # fail-closed на любую непредвиденную ошибку валидации
-        raise VerifyError(
-            VerifyErrorCode.INVALID_MANIFEST, f"валидация манифеста упала: {exc!r}"
-        ) from exc
-
-
-# ---------------------------------------------------------------------------
-# Compatibility gate
-# ---------------------------------------------------------------------------
+    except Exception as exc:
+        raise VerifyError(VerifyErrorCode.INVALID_MANIFEST, f"manifest validation failed: {exc!r}") from exc
 
 
 def _semver_key(value: str) -> tuple[int, int, int, int, tuple[Any, ...]]:
-    """Ключ сравнения semver 2.0.0: релиз > prerelease, buildmeta игнорируется."""
-    match = _SEMVER_RE.fullmatch(value.strip())
+    match = _SEMVER_RE.fullmatch(value)
     if match is None:
-        raise VerifyError(
-            VerifyErrorCode.INCOMPATIBLE, f"невалидный semver для gate: {value!r}"
-        )
+        raise VerifyError(VerifyErrorCode.INCOMPATIBLE, f"invalid SemVer: {value!r}")
     prerelease = match.group("prerelease")
     parts: list[tuple[int, Any]] = []
     if prerelease:
-        # Нормализуем идентификаторы к однотипным парам, чтобы сравнение
-        # кортежей никогда не упало на смеси int/str (semver 2.0.0:
-        # числовой идентификатор младше буквенно-цифрового).
         for chunk in prerelease.split("."):
             parts.append((0, int(chunk)) if chunk.isdigit() else (1, chunk))
-        # (0, parts) < (1, ()) — prerelease младше соответствующего релиза
         return (
-            int(match.group("major")),
-            int(match.group("minor")),
-            int(match.group("patch")),
-            0,
-            tuple(parts),
+            int(match.group("major")), int(match.group("minor")), int(match.group("patch")),
+            0, tuple(parts),
         )
     return (
-        int(match.group("major")),
-        int(match.group("minor")),
-        int(match.group("patch")),
-        1,
-        (),
+        int(match.group("major")), int(match.group("minor")), int(match.group("patch")), 1, (),
     )
 
 
 @dataclass(frozen=True)
 class GateResult:
-    """Результат compatibility gate."""
-
     compatible: bool
     code: str
     reason: str
@@ -360,16 +231,6 @@ class GateResult:
 
 
 class CompatibilityGate:
-    """Проверка совместимости ДО PUBLISHED (§5.1).
-
-    Проверяет: semver версии плагина, ``protocol == plugin-rpc/1``,
-    ``requestedCapabilities`` против allowlist и против выданного
-    ``CapabilityGrant``, ``min_platform_version`` против версии платформы.
-
-    Fail-closed: если версия платформы или grant не переданы, gate считает
-    артефакт НЕсовместимым. «Нет данных» != «можно публиковать».
-    """
-
     def __init__(
         self,
         platform_version: str | None = None,
@@ -377,109 +238,243 @@ class CompatibilityGate:
         *,
         supported_capabilities: Iterable[str] = CAPABILITY_ALLOWLIST,
     ) -> None:
-        # Значения могут прийти из окружения CI (см. workflow), но пустое
-        # значение — это отсутствие данных, а не «всё разрешено».
-        self.platform_version = (
-            platform_version or os.environ.get("PLATFORM_VERSION") or ""
-        ).strip()
+        self.platform_version = (platform_version or os.environ.get("PLATFORM_VERSION") or "").strip()
         raw_grants = granted_capabilities
         if raw_grants is None:
-            env_grants = os.environ.get("PLUGIN_GRANTED_CAPABILITIES", "")
-            raw_grants = [part.strip() for part in env_grants.split(",") if part.strip()]
-        self.granted_capabilities: frozenset[str] = frozenset(
-            str(cap).strip() for cap in raw_grants if str(cap).strip()
-        )
-        self.supported_capabilities: frozenset[str] = frozenset(supported_capabilities)
+            raw_grants = [
+                part.strip()
+                for part in os.environ.get("PLUGIN_GRANTED_CAPABILITIES", "").split(",")
+                if part.strip()
+            ]
+        self.granted_capabilities = frozenset(str(cap).strip() for cap in raw_grants if str(cap).strip())
+        self.supported_capabilities = frozenset(supported_capabilities)
 
     def evaluate(self, summary: dict[str, Any]) -> GateResult:
-        """Вернуть решение gate. Никогда не «доверяет» неполному summary."""
         checks: list[dict[str, Any]] = []
 
         def check(name: str, ok: bool, detail: str) -> None:
             checks.append({"name": name, "ok": bool(ok), "detail": detail})
 
-        # 1. semver версии плагина (уже проверен в validate_manifest, дублируем).
         version = summary.get("version", "")
-        version_ok = isinstance(version, str) and _SEMVER_RE.fullmatch(version) is not None
-        check("semver", version_ok, f"version={version!r}")
-
-        # 2. protocol — единственный допустимый handshake.
-        protocol = summary.get("protocol")
-        protocol_ok = protocol == PLUGIN_PROTOCOL
-        check("protocol", protocol_ok, f"protocol={protocol!r}, ожидался {PLUGIN_PROTOCOL!r}")
-
-        # 3. Capability: allowlist платформы + выданный CapabilityGrant.
+        check("semver", isinstance(version, str) and _SEMVER_RE.fullmatch(version) is not None, repr(version))
+        check("protocol", summary.get("protocol") == PLUGIN_PROTOCOL, repr(summary.get("protocol")))
         capabilities = tuple(summary.get("capabilities", ()))
         unsupported = tuple(cap for cap in capabilities if cap not in self.supported_capabilities)
-        check(
-            "capability_allowlist",
-            not unsupported,
-            f"неподдерживаемые capability: {unsupported or 'нет'}",
-        )
-        if not self.platform_version:
-            check("platform_version", False, "версия платформы не предоставлена")
-        else:
-            check("platform_version", True, f"platform_version={self.platform_version!r}")
+        check("capability_allowlist", not unsupported, repr(unsupported))
+        check("platform_version", bool(self.platform_version), self.platform_version or "missing")
         if not self.granted_capabilities:
-            check(
-                "capability_grant",
-                False,
-                "CapabilityGrant не предоставлен: публикация без grant запрещена (fail-closed)",
-            )
+            check("capability_grant", False, "no independently reviewed CapabilityGrant")
         else:
             missing = tuple(cap for cap in capabilities if cap not in self.granted_capabilities)
-            check(
-                "capability_grant",
-                not missing,
-                f"capability без grant: {missing or 'нет'}",
-            )
-
-        # 4. min_platform_version <= platform_version.
-        min_platform = summary.get("min_platform_version", "")
-        if not self.platform_version:
-            version_gate_ok = False
-            version_detail = "нет версии платформы — сравнение невозможно"
-        else:
-            try:
-                version_gate_ok = _semver_key(min_platform) <= _semver_key(self.platform_version)
-                version_detail = (
-                    f"min_platform_version={min_platform!r} <= "
-                    f"platform_version={self.platform_version!r}"
-                )
-            except VerifyError as exc:
-                version_gate_ok = False
-                version_detail = exc.reason
-        check("min_platform_version", version_gate_ok, version_detail)
-
+            check("capability_grant", not missing, repr(missing))
+        try:
+            version_ok = bool(self.platform_version) and _semver_key(
+                summary.get("min_platform_version", "")
+            ) <= _semver_key(self.platform_version)
+            detail = "minimum platform comparison evaluated"
+        except VerifyError as exc:
+            version_ok, detail = False, exc.reason
+        check("min_platform_version", version_ok, detail)
         failed = [item for item in checks if not item["ok"]]
         if failed:
             return GateResult(
-                compatible=False,
-                code=VerifyErrorCode.INCOMPATIBLE,
-                reason="; ".join(f"{item['name']}: {item['detail']}" for item in failed),
-                checks=checks,
+                False,
+                VerifyErrorCode.INCOMPATIBLE,
+                "; ".join(f"{item['name']}: {item['detail']}" for item in failed),
+                checks,
             )
-        return GateResult(
-            compatible=True,
-            code=VerifyErrorCode.OK,
-            reason="compatibility gate пройден",
-            checks=checks,
-        )
+        return GateResult(True, VerifyErrorCode.OK, "compatibility gate passed", checks)
 
 
-# ---------------------------------------------------------------------------
-# Публичный контракт
-# ---------------------------------------------------------------------------
+def _decode_statement(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        result: list[dict[str, Any]] = []
+        for item in value:
+            result.extend(_decode_statement(item))
+        return result
+    if not isinstance(value, dict):
+        return []
+    if "predicateType" in value and "predicate" in value:
+        return [value]
+    encoded = value.get("payload")
+    if isinstance(encoded, str):
+        try:
+            decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
+            return _decode_statement(json.loads(decoded))
+        except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
+            raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "invalid attestation payload") from exc
+    return []
 
 
-def _quarantine(
+def _parse_attestations(stdout: str) -> list[dict[str, Any]]:
+    if not isinstance(stdout, str) or not stdout.strip():
+        raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "cosign returned no attestation payload")
+    try:
+        statements = _decode_statement(json.loads(stdout))
+    except json.JSONDecodeError:
+        statements = []
+        for line in stdout.splitlines():
+            if line.strip():
+                try:
+                    statements.extend(_decode_statement(json.loads(line)))
+                except json.JSONDecodeError as exc:
+                    raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "non-JSON attestation output") from exc
+    if not statements:
+        raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "no in-toto statements in attestation output")
+    return statements
+
+
+def _subject_matches(statement: dict[str, Any], ref: str) -> bool:
+    expected = ref.rsplit("@sha256:", 1)[1]
+    subjects = statement.get("subject")
+    return isinstance(subjects, list) and any(
+        isinstance(subject, dict)
+        and bool(subject.get("name"))
+        and subject.get("digest", {}).get("sha256") == expected
+        for subject in subjects
+    )
+
+
+def _validate_sbom_predicate(
+    predicate: dict[str, Any],
     *,
-    code: str,
-    reason: str,
-    checks: list[dict[str, Any]],
-    context: dict[str, Any],
-) -> dict[str, Any]:
-    """Единая форма решения «в карантин». Никакой публикации."""
+    kind: str,
+    ref: str,
+    source_repository: str,
+    source_sha: str,
+    manifest_digest: str,
+) -> None:
+    if predicate.get("spdxVersion") != "SPDX-2.3" or not predicate.get("documentNamespace"):
+        raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "SPDX version/namespace is missing")
+    packages = predicate.get("packages")
+    if not isinstance(packages, list) or not packages:
+        raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "SPDX packages are missing")
+    for package in packages:
+        if not isinstance(package, dict) or not package.get("SPDXID") or not package.get("name"):
+            raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "incomplete SPDX package")
+    if kind == "bundle":
+        namespace = str(predicate["documentNamespace"])
+        comment = str(predicate.get("comment", ""))
+        if f"/{source_repository}/{source_sha}/" not in namespace:
+            raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "bundle SBOM source identity mismatch")
+        if f"source_repository={source_repository}" not in comment or f"source_sha={source_sha}" not in comment:
+            raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "bundle SBOM source comment mismatch")
+        expected_checksums = {
+            ref.rsplit("@sha256:", 1)[1],
+            manifest_digest.removeprefix("sha256:"),
+        }
+        actual_checksums = {
+            checksum.get("checksumValue")
+            for package in packages
+            for checksum in package.get("checksums", [])
+            if isinstance(checksum, dict) and checksum.get("algorithm") == "SHA256"
+        }
+        if not expected_checksums <= actual_checksums:
+            raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "bundle SBOM lacks bundle/config checksums")
+
+
+def _validate_provenance_predicate(
+    predicate: dict[str, Any],
+    *,
+    kind: str,
+    source_repository: str,
+    source_sha: str,
+    builder_identity: str,
+    manifest_digest: str,
+) -> None:
+    expected_build_type = (
+        "https://agentscale.dev/plugin-backend-buildx/v1"
+        if kind == "backend"
+        else "https://agentscale.dev/plugin-oci-bundle/v1"
+    )
+    if predicate.get("buildType") != expected_build_type:
+        raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, f"wrong {kind} provenance buildType")
+    if predicate.get("builder", {}).get("id") != "https://github.com/" + builder_identity:
+        raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "provenance builder identity mismatch")
+    source = predicate.get("invocation", {}).get("configSource", {})
+    if source.get("uri") != f"git+https://github.com/{source_repository}@{source_sha}":
+        raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "provenance source URI mismatch")
+    if source.get("digest", {}).get("sha1") != source_sha:
+        raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "provenance source SHA mismatch")
+    if not predicate.get("metadata", {}).get("buildInvocationId"):
+        raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "provenance run identity is missing")
+    internal = predicate.get("invocation", {}).get("parameters")
+    if not isinstance(internal, dict):
+        raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "SLSA v0.2 invocation.parameters are missing")
+    if kind == "backend":
+        buildx = internal.get("buildxProvenance")
+        if not isinstance(buildx, dict) or not buildx.get("builder", {}).get("id") or not buildx.get("buildType"):
+            raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "backend lacks genuine buildx provenance")
+    elif internal.get("canonicalManifestDigest") != manifest_digest or internal.get("artifactKind") != "agentscale-plugin-bundle":
+        raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "bundle provenance is not bound to canonical config")
+
+
+def _verify_evidence(
+    runner: CosignRunner,
+    *,
+    ref: str,
+    kind: str,
+    identity: str,
+    issuer: str,
+    source_repository: str,
+    source_sha: str,
+    builder_identity: str,
+    manifest_digest: str,
+) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    for evidence_type, cli_type in (("sbom", "spdxjson"), ("provenance", "slsaprovenance")):
+        result = _run_cosign(
+            runner,
+            _cosign_verify_attestation_command(ref, cli_type, identity, issuer),
+            f"{kind}-{evidence_type}",
+        )
+        statements = _parse_attestations(result["stdout"])
+        valid = False
+        for statement in statements:
+            predicate_type = statement.get("predicateType")
+            type_matches = (
+                predicate_type == SPDX_PREDICATE_TYPE
+                if evidence_type == "sbom"
+                else predicate_type in SLSA_PREDICATE_TYPES
+            )
+            if not type_matches or not _subject_matches(statement, ref):
+                continue
+            predicate = statement.get("predicate")
+            if not isinstance(predicate, dict):
+                continue
+            try:
+                if evidence_type == "sbom":
+                    _validate_sbom_predicate(
+                        predicate,
+                        kind=kind,
+                        ref=ref,
+                        source_repository=source_repository,
+                        source_sha=source_sha,
+                        manifest_digest=manifest_digest,
+                    )
+                else:
+                    _validate_provenance_predicate(
+                        predicate,
+                        kind=kind,
+                        source_repository=source_repository,
+                        source_sha=source_sha,
+                        builder_identity=builder_identity,
+                        manifest_digest=manifest_digest,
+                    )
+                valid = True
+                break
+            except VerifyError:
+                continue
+        if not valid:
+            raise VerifyError(
+                VerifyErrorCode.INVALID_EVIDENCE,
+                f"{kind}: no {evidence_type} statement with valid subject/source/sha/builder/content",
+            )
+        checks.append({"name": f"attestation:{kind}:{evidence_type}", "ok": True, "detail": ref})
+    return checks
+
+
+def _quarantine(code: str, reason: str, checks: list[dict[str, Any]], context: dict[str, Any]) -> dict[str, Any]:
     return {
         "decision": DECISION_QUARANTINE,
         "publish_allowed": False,
@@ -491,26 +486,18 @@ def _quarantine(
         "artifact_ref": context.get("artifact_ref"),
         "backend_ref": context.get("backend_ref"),
         "quarantine_evidence": {
-            "code": code,
-            "reason": reason,
-            "ref": context.get("artifact_ref"),
-            "backend_digest": context.get("backend_digest"),
-            "checks": checks,
+            "code": code, "reason": reason, "ref": context.get("artifact_ref"),
+            "backend_digest": context.get("backend_digest"), "checks": checks,
         },
     }
 
 
-def _allowed(
-    *,
-    checks: list[dict[str, Any]],
-    context: dict[str, Any],
-) -> dict[str, Any]:
-    """Единая форма решения «публикация разрешена» — только после всех проверок."""
+def _allowed(checks: list[dict[str, Any]], context: dict[str, Any]) -> dict[str, Any]:
     return {
         "decision": DECISION_PUBLISH,
         "publish_allowed": True,
         "code": VerifyErrorCode.OK,
-        "reason": "cosign verify + digest + manifest + compatibility gate пройдены",
+        "reason": "signatures, independent evidence, canonical OCI and compatibility gate passed",
         "checks": checks,
         "manifest_summary": context.get("manifest_summary"),
         "backend_digest": context.get("backend_digest"),
@@ -527,40 +514,17 @@ def verify_artifact(
     cosign_runner: CosignRunner,
     artifact_ref: str | None = None,
     backend_ref: str | None = None,
+    source_manifest_path: str | None = None,
+    canonical_manifest_path: str | None = None,
+    pushed_manifest_path: str | None = None,
+    source_repository: str | None = None,
+    source_sha: str | None = None,
+    builder_identity: str | None = None,
     platform_version: str | None = None,
     granted_capabilities: Iterable[str] | None = None,
     certificate_identity: str | None = None,
     certificate_oidc_issuer: str | None = None,
 ) -> dict[str, Any]:
-    """Проверить артефакт перед публикацией и вернуть структуру решения.
-
-    Args:
-        manifest_path: путь до подписанного OCI-манифеста (JSON).
-        backend_digest: ``sha256:<64 hex>`` backend-образа из output сборки.
-        cosign_runner: вызываемая ``list[str] -> Any`` (инъекция для тестов;
-            в CI — subprocess с ``check=True``). Импорт модуля процессов не
-            запускает.
-        artifact_ref: ``repo@sha256:...`` OCI-артефакта (fallback: env
-            ``PLUGIN_ARTIFACT_REF``). Обязателен — иначе QUARANTINED.
-        backend_ref: ``repo@sha256:...`` backend-образа (fallback: env
-            ``PLUGIN_BACKEND_REF``). Обязателен — иначе QUARANTINED.
-        platform_version: версия платформы для gate (fallback: env
-            ``PLATFORM_VERSION``). Отсутствие -> QUARANTINED.
-        granted_capabilities: выданные capability (fallback: env
-            ``PLUGIN_GRANTED_CAPABILITIES``). Отсутствие -> QUARANTINED.
-        certificate_identity: OIDC-identity подписанта (fallback: env
-            ``COSIGN_CERTIFICATE_IDENTITY``). Отсутствие -> QUARANTINED.
-        certificate_oidc_issuer: issuer Fulcio (по умолчанию GitHub Actions).
-
-    Returns:
-        Словарь решения: ``decision`` = ``PUBLISH_ALLOWED`` | ``QUARANTINED``,
-        ``publish_allowed``, ``code``, ``reason``, ``checks``,
-        ``manifest_summary``, ``quarantine_evidence``, digest'ы и ссылки.
-
-    Fail-closed: ЛЮБАЯ ошибка (включая отсутствие обязательных входных
-    данных и «тихое» исключение) возвращает ``QUARANTINED``. Функция НЕ
-    возбуждает исключений наружу (кроме SystemExit/KeyboardInterrupt).
-    """
     checks: list[dict[str, Any]] = []
     context: dict[str, Any] = {}
 
@@ -568,105 +532,116 @@ def verify_artifact(
         checks.append({"name": name, "ok": bool(ok), "detail": detail})
 
     try:
-        # --- Шаг 0: обязательные входные данные (fail-closed) -----------------
         if not callable(cosign_runner):
-            raise VerifyError(
-                VerifyErrorCode.MISSING_INPUT,
-                "cosign_runner не передан: проверка подписи не может быть пропущена",
-            )
-
+            raise VerifyError(VerifyErrorCode.MISSING_INPUT, "cosign_runner is required")
         digest = _require_digest(backend_digest, "backend_digest")
-        context["backend_digest"] = digest
-        record("backend_digest_format", True, f"digest={digest}")
+        artifact = _require_ref(artifact_ref or os.environ.get("PLUGIN_ARTIFACT_REF", ""), "artifact_ref")
+        backend = _require_ref(backend_ref or os.environ.get("PLUGIN_BACKEND_REF", ""), "backend_ref")
+        artifact_digest = artifact.rsplit("@", 1)[1]
+        if artifact == backend or artifact_digest == digest:
+            raise VerifyError(VerifyErrorCode.DIGEST_CONFLICT, "backend and bundle must be distinct artifacts")
+        if not backend.endswith("@" + digest):
+            raise VerifyError(VerifyErrorCode.DIGEST_CONFLICT, "backend ref/digest mismatch")
+        backend_repository = backend.rsplit("@", 1)[0]
+        artifact_repository = artifact.rsplit("@", 1)[0]
+        if not backend_repository.endswith("/backend") or artifact_repository != backend_repository[:-8] + "/bundle":
+            raise VerifyError(VerifyErrorCode.DIGEST_CONFLICT, "backend/bundle repository pair mismatch")
+        context.update(backend_digest=digest, artifact_ref=artifact, backend_ref=backend)
+        record("digest_pinned_refs", True, f"bundle={artifact}; backend={backend}")
 
-        artifact = _require_ref(
-            artifact_ref or os.environ.get("PLUGIN_ARTIFACT_REF", ""), "artifact_ref"
-        )
-        backend = _require_ref(
-            backend_ref or os.environ.get("PLUGIN_BACKEND_REF", ""), "backend_ref"
-        )
-        context["artifact_ref"] = artifact
-        context["backend_ref"] = backend
-        record("digest_pinned_refs", True, f"artifact={artifact}; backend={backend}")
-
-        identity = (
-            certificate_identity
-            or os.environ.get("COSIGN_CERTIFICATE_IDENTITY")
-            or ""
-        ).strip()
-        if not identity:
-            raise VerifyError(
-                VerifyErrorCode.MISSING_INPUT,
-                "COSIGN_CERTIFICATE_IDENTITY не задан: keyless-подпись без привязки "
-                "к identity не проверяется (fail-closed)",
-            )
+        repository = (source_repository or "").strip()
+        sha = (source_sha or "").strip()
+        builder = (builder_identity or "").strip()
+        if _REPOSITORY_RE.fullmatch(repository) is None or _SHA_RE.fullmatch(sha) is None:
+            raise VerifyError(VerifyErrorCode.MISSING_INPUT, "source repository/full SHA are required")
+        if not builder.startswith("ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@"):
+            raise VerifyError(VerifyErrorCode.MISSING_INPUT, "untrusted builder workflow identity")
+        identity = (certificate_identity or os.environ.get("COSIGN_CERTIFICATE_IDENTITY") or "").strip()
+        if identity != "https://github.com/" + builder:
+            raise VerifyError(VerifyErrorCode.MISSING_INPUT, "certificate identity must equal trusted builder")
         issuer = (
             certificate_oidc_issuer
             or os.environ.get("COSIGN_CERTIFICATE_OIDC_ISSUER")
             or DEFAULT_OIDC_ISSUER
         ).strip()
-        if not issuer.startswith("https://"):
-            raise VerifyError(
-                VerifyErrorCode.MISSING_INPUT, f"некорректный OIDC issuer: {issuer!r}"
-            )
+        if issuer != DEFAULT_OIDC_ISSUER:
+            raise VerifyError(VerifyErrorCode.MISSING_INPUT, "unexpected OIDC issuer")
 
-        # --- Шаг 1: cosign verify (keyless) по digest ------------------------
-        # Проверяем ОБА объекта: и сам OCI-артефакт, и backend-образ, на
-        # который он ссылается. Иначе подписанный манифест мог бы указывать на
-        # неподписанный образ (ровно та ошибка v3, описанная в §13.3).
         for label, ref in (("oci-artifact", artifact), ("backend-image", backend)):
-            command = _cosign_verify_command(ref, identity, issuer)
-            _run_cosign(cosign_runner, command, label)
-            record(f"cosign_verify:{label}", True, f"ref={ref}; issuer={issuer}")
+            _run_cosign(cosign_runner, _cosign_verify_command(ref, identity, issuer), label)
+            record(f"cosign_verify:{label}", True, ref)
 
-        # --- Шаг 2: проверка digest ------------------------------------------
-        if not backend.endswith("@" + digest):
-            raise VerifyError(
-                VerifyErrorCode.DIGEST_CONFLICT,
-                "backend_ref не закреплён на переданный backend_digest",
-            )
-        record("digest_match", True, "backend_ref и backend_digest совпадают")
-
-        # --- Шаг 3: validate_manifest-подобные проверки ---------------------
-        manifest = _read_manifest(manifest_path)
-        summary = validate_manifest(manifest, backend_digest=digest)
+        if not source_manifest_path or not canonical_manifest_path or not pushed_manifest_path:
+            raise VerifyError(VerifyErrorCode.MISSING_INPUT, "source, canonical and pushed manifests are required")
+        module = _load_manifest_module()
+        source_manifest = module._read_json(source_manifest_path)
+        expected = module._read_json(manifest_path)
+        pushed = module._read_json(pushed_manifest_path)
+        if not isinstance(expected, dict) or not isinstance(pushed, dict):
+            raise VerifyError(VerifyErrorCode.INVALID_MANIFEST, "OCI manifests must be JSON objects")
+        if pushed != expected:
+            raise VerifyError(VerifyErrorCode.INVALID_MANIFEST, "registry OCI manifest differs from signed expectation")
+        canonical_bytes = module.canonical_manifest_bytes(source_manifest)
+        with open(canonical_manifest_path, "rb") as handle:
+            actual_canonical = handle.read()
+        if actual_canonical != canonical_bytes:
+            raise VerifyError(VerifyErrorCode.INVALID_MANIFEST, "canonical manifest bytes differ from full source")
+        if "/plugins-quarantine/" in backend:
+            # The signed annotation declares the intended release deploy pin while
+            # quarantine is still staging. No registry operation uses that release
+            # ref before promotion. Release reverify below requires this same
+            # annotation to equal the actual promoted backend ref.
+            expected_signed_backend_ref = backend.replace("/plugins-quarantine/", "/plugins/", 1)
+            if "/plugins-quarantine/" not in artifact:
+                raise VerifyError(VerifyErrorCode.DIGEST_CONFLICT, "quarantine backend/bundle namespace mismatch")
+        elif "/plugins/" in backend:
+            # Promotion changes repository, never digest or signed annotation.
+            expected_signed_backend_ref = backend
+            if "/plugins/" not in artifact:
+                raise VerifyError(VerifyErrorCode.DIGEST_CONFLICT, "release backend/bundle namespace mismatch")
+        else:
+            raise VerifyError(VerifyErrorCode.INVALID_DIGEST, "backend ref is outside plugin trust namespaces")
+        summary = module.validate_signed_manifest(
+            expected,
+            backend_digest=digest,
+            source_manifest=source_manifest,
+            backend_ref=expected_signed_backend_ref,
+            source_repository=repository,
+            source_sha=sha,
+        )
+        if summary["backend_image_ref"] != expected_signed_backend_ref:
+            raise VerifyError(VerifyErrorCode.DIGEST_CONFLICT, "signed release backend link mismatch")
+        if not summary.get("manifest_content_verified"):
+            raise VerifyError(VerifyErrorCode.INVALID_MANIFEST, "full source manifest was not verified")
         context["manifest_summary"] = summary
-        if summary.get("layer_count") != 3:
-            raise VerifyError(
-                VerifyErrorCode.INVALID_MANIFEST,
-                "манифест должен содержать ровно 3 слоя",
-            )
-        record(
-            "validate_manifest",
-            True,
-            "semver / protocol=plugin-rpc/1 / capability allowlist / "
-            "min_platform_version / ровно 3 слоя / без самореференции",
-        )
+        record("canonical_manifest_config_and_blob", True, summary["manifest_digest"])
+        record("backend_bundle_link", True, summary["backend_image_ref"])
 
-        # --- Шаг 4: CompatibilityGate ---------------------------------------
-        gate = CompatibilityGate(
-            platform_version=platform_version,
-            granted_capabilities=granted_capabilities,
-        )
+        for kind, ref in (("backend", backend), ("bundle", artifact)):
+            checks.extend(
+                _verify_evidence(
+                    cosign_runner,
+                    ref=ref,
+                    kind=kind,
+                    identity=identity,
+                    issuer=issuer,
+                    source_repository=repository,
+                    source_sha=sha,
+                    builder_identity=builder,
+                    manifest_digest=summary["manifest_digest"],
+                )
+            )
+
+        gate = CompatibilityGate(platform_version, granted_capabilities)
         gate_result = gate.evaluate(summary)
         for item in gate_result.checks:
             record(f"gate:{item['name']}", item["ok"], item["detail"])
         if not gate_result.compatible:
-            return _quarantine(
-                code=VerifyErrorCode.INCOMPATIBLE,
-                reason=gate_result.reason,
-                checks=checks,
-                context=context,
-            )
-
-        # --- Шаг 5: publish allowed ------------------------------------------
-        return _allowed(checks=checks, context=context)
-
+            return _quarantine(VerifyErrorCode.INCOMPATIBLE, gate_result.reason, checks, context)
+        return _allowed(checks, context)
     except VerifyError as exc:
-        return _quarantine(code=exc.code, reason=exc.reason, checks=checks, context=context)
+        return _quarantine(exc.code, exc.reason, checks, context)
     except Exception as exc:
-        # Абсолютно любая непредвиденная ошибка = карантин, не publish.
-        module = None
         code = VerifyErrorCode.QUARANTINED
         try:
             module = _load_manifest_module()
@@ -674,50 +649,30 @@ def verify_artifact(
                 code = exc.code
         except Exception:
             pass
-        return _quarantine(
-            code=code,
-            reason=f"{type(exc).__name__}: {exc}",
-            checks=checks,
-            context=context,
-        )
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
+        return _quarantine(code, f"{type(exc).__name__}: {exc}", checks, context)
 
 
 def _build_cli_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Verify-before-publish OCI-артефакта плагина (fail-closed)."
-    )
-    parser.add_argument("--manifest", required=True, help="путь до OCI-манифеста JSON")
-    parser.add_argument(
-        "--backend-digest", required=True, help="sha256:<64 hex> из output docker/build-push-action"
-    )
-    parser.add_argument("--artifact-ref", default="", help="repo@sha256:<64 hex> артефакта")
-    parser.add_argument("--backend-ref", default="", help="repo@sha256:<64 hex> backend-образа")
-    parser.add_argument("--platform-version", default="", help="semver версия платформы")
-    parser.add_argument(
-        "--granted-capabilities", default="", help="выданные CapabilityGrant через запятую"
-    )
-    parser.add_argument("--certificate-identity", default="", help="OIDC identity подписанта")
-    parser.add_argument(
-        "--certificate-oidc-issuer",
-        default=DEFAULT_OIDC_ISSUER,
-        help="OIDC issuer Fulcio",
-    )
-    parser.add_argument("--output", default="", help="дополнительно записать JSON-решение в файл")
-    parser.add_argument(
-        "--no-fail-on-quarantine",
-        action="store_true",
-        help="НЕ ронять job при QUARANTINED (только для локальной отладки; в CI не использовать)",
-    )
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest", required=True)
+    parser.add_argument("--source-manifest", required=True)
+    parser.add_argument("--canonical-manifest", required=True)
+    parser.add_argument("--pushed-manifest", required=True)
+    parser.add_argument("--backend-digest", required=True)
+    parser.add_argument("--artifact-ref", required=True)
+    parser.add_argument("--backend-ref", required=True)
+    parser.add_argument("--source-repository", required=True)
+    parser.add_argument("--source-sha", required=True)
+    parser.add_argument("--builder-identity", required=True)
+    parser.add_argument("--platform-version", default="")
+    parser.add_argument("--granted-capabilities", default="")
+    parser.add_argument("--certificate-identity", required=True)
+    parser.add_argument("--certificate-oidc-issuer", default=DEFAULT_OIDC_ISSUER)
+    parser.add_argument("--output", default="")
     return parser
 
 
 def _write_github_files(decision: dict[str, Any]) -> None:
-    """Записать digest и решение в ``GITHUB_OUTPUT`` / ``GITHUB_STEP_SUMMARY``."""
     output_path = os.environ.get("GITHUB_OUTPUT")
     if output_path:
         with open(output_path, "a", encoding="utf-8") as handle:
@@ -727,261 +682,54 @@ def _write_github_files(decision: dict[str, Any]) -> None:
             handle.write(f"artifact_ref={decision.get('artifact_ref') or ''}\n")
             handle.write(f"backend_ref={decision.get('backend_ref') or ''}\n")
             handle.write(f"publish_allowed={'true' if decision['publish_allowed'] else 'false'}\n")
-
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:
         rows = [
-            "| Проверка | Результат |",
-            "|---|---|",
-            f"| Решение | **{decision['decision']}** (`{decision['code']}`) |",
-            f"| Причина | {decision['reason']} |",
-            f"| Backend digest | `{decision.get('backend_digest') or '—'}` |",
-            f"| Артефакт | `{decision.get('artifact_ref') or '—'}` |",
-            f"| Backend ref | `{decision.get('backend_ref') or '—'}` |",
+            f"### {decision['decision']} ({decision['code']})",
+            decision["reason"],
             "",
-            "| Шаг | OK | Деталь |",
-            "|---|---|---|",
+            "QUARANTINED is a trust decision, not a claim that no blob exists.",
+            "Only a verified digest may be promoted to release; platform registration is separate.",
+            "",
         ]
         for item in decision["checks"]:
-            detail = str(item["detail"]).replace("|", "\\|").replace("\n", " ")
-            rows.append(f"| {item['name']} | {'✅' if item['ok'] else '❌'} | {detail} |")
-        rows.append("")
-        rows.append(
-            "> Пин ТОЛЬКО по `@sha256:...`; `:latest` запрещён (§5.1, критерий 18). "
-            "При `QUARANTINED` публикация запрещена."
-        )
+            rows.append(f"- {'OK' if item['ok'] else 'FAIL'} {item['name']}: {item['detail']}")
         with open(summary_path, "a", encoding="utf-8") as handle:
             handle.write("\n".join(rows) + "\n")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """CLI: JSON-решение в stdout; ``QUARANTINED`` -> exit 1 (fail-closed)."""
     args = _build_cli_parser().parse_args(argv)
     decision = verify_artifact(
-        manifest_path=args.manifest,
-        backend_digest=args.backend_digest,
+        args.manifest,
+        args.backend_digest,
         cosign_runner=_ci_cosign_runner,
-        artifact_ref=args.artifact_ref or None,
-        backend_ref=args.backend_ref or None,
+        artifact_ref=args.artifact_ref,
+        backend_ref=args.backend_ref,
+        source_manifest_path=args.source_manifest,
+        canonical_manifest_path=args.canonical_manifest,
+        pushed_manifest_path=args.pushed_manifest,
+        source_repository=args.source_repository,
+        source_sha=args.source_sha,
+        builder_identity=args.builder_identity,
         platform_version=args.platform_version or None,
         granted_capabilities=(
             [part.strip() for part in args.granted_capabilities.split(",") if part.strip()]
-            if args.granted_capabilities
-            else None
+            if args.granted_capabilities else None
         ),
-        certificate_identity=args.certificate_identity or None,
-        certificate_oidc_issuer=args.certificate_oidc_issuer or None,
+        certificate_identity=args.certificate_identity,
+        certificate_oidc_issuer=args.certificate_oidc_issuer,
     )
     payload = json.dumps(decision, ensure_ascii=False, indent=2, sort_keys=True)
     print(payload)
     if args.output:
         with open(args.output, "w", encoding="utf-8") as handle:
             handle.write(payload + "\n")
-    try:
-        _write_github_files(decision)
-    except OSError as exc:
-        # Не подменяем решение, но не прячем проблему записи output/summary.
-        print(f"::warning::не удалось записать GITHUB_OUTPUT/SUMMARY: {exc!r}", file=sys.stderr)
-    if decision["decision"] == DECISION_PUBLISH:
-        return 0
-    if args.no_fail_on_quarantine:
-        return 0
-    print(f"::error::{decision['code']}: {decision['reason']} — публикация запрещена", file=sys.stderr)
-    return 1
-
-
-# ---------------------------------------------------------------------------
-# Unit-тесты (НЕ запускаются в этой сессии; родитель вынесет в pytest)
-# ---------------------------------------------------------------------------
-
-
-def _selftest() -> None:
-    """Покрытие: :latest, невалидный digest, самореференция, capability,
-    ровно 3 слоя, падение ``cosign verify`` -> QUARANTINED.
-
-    Функция определена, но НЕ вызывается из ``__main__``: CLI всегда делает
-    реальную проверку. Родитель перенесёт тело в pytest без изменений логики.
-    """
-    import tempfile
-
-    # Изолируем тест от переменных окружения CI: иначе проверки «отсутствие
-    # обязательных данных» могут случайно пройти за счёт внешних значений.
-    # Родитель при переносе в pytest может заменить это на monkeypatch.delenv.
-    for _name in (
-        "COSIGN_CERTIFICATE_IDENTITY",
-        "COSIGN_CERTIFICATE_OIDC_ISSUER",
-        "PLATFORM_VERSION",
-        "PLUGIN_GRANTED_CAPABILITIES",
-        "PLUGIN_ARTIFACT_REF",
-        "PLUGIN_BACKEND_REF",
-    ):
-        os.environ.pop(_name, None)
-
-    good_digest = "sha256:" + "a" * 64
-    other_digest = "sha256:" + "b" * 64
-    artifact_ref = f"ghcr.io/ne-tort/plugins/mod_equipment@{good_digest}"
-    backend_ref = f"ghcr.io/ne-tort/plugins/mod_equipment/backend@{good_digest}"
-
-    def ok_runner(argv: list[str]) -> None:
-        assert isinstance(argv, list) and argv[0] == "cosign"
-        assert "--certificate-identity" in argv
-        assert "--certificate-oidc-issuer" in argv
-        return None
-
-    def failing_runner(argv: list[str]) -> None:
-        raise RuntimeError("cosign verify: no matching signatures")
-
-    def nonzero_runner(argv: list[str]) -> int:
+    _write_github_files(decision)
+    if decision["decision"] != DECISION_PUBLISH:
+        print(f"::error::{decision['code']}: {decision['reason']} — release is forbidden", file=sys.stderr)
         return 1
-
-    def false_runner(argv: list[str]) -> bool:
-        return False
-
-    with tempfile.TemporaryDirectory() as tmp:
-        frontend = os.path.join(tmp, "index.html")
-        migrations = os.path.join(tmp, "changelog.xml")
-        with open(frontend, "w", encoding="utf-8") as handle:
-            handle.write("<html></html>")
-        with open(migrations, "w", encoding="utf-8") as handle:
-            handle.write("<databaseChangeLog/>")
-
-        module = _load_manifest_module()
-        valid = module.build_oci_manifest(
-            plugin_id="mod_equipment",
-            version="1.2.0",
-            backend_digest=good_digest,
-            frontend_files=[frontend],
-            migrations_files=[migrations],
-            requested_capabilities=("cache", "objects"),
-            min_platform_version="1.0.0",
-        )
-
-        def manifest_file(payload: dict[str, Any], name: str = "m.json") -> str:
-            path = os.path.join(tmp, name)
-            with open(path, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, ensure_ascii=False)
-            return path
-
-        def verify(
-            payload: dict[str, Any] | None = None,
-            *,
-            digest: str = good_digest,
-            runner: CosignRunner = ok_runner,
-            platform_version: str = "1.5.0",
-            grants: tuple[str, ...] = ("cache", "objects"),
-            ref: str = artifact_ref,
-            bref: str = backend_ref,
-            identity: str = "https://github.com/ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@refs/heads/main",
-            issuer: str = DEFAULT_OIDC_ISSUER,
-        ) -> dict[str, Any]:
-            path = manifest_file(valid if payload is None else payload)
-            return verify_artifact(
-                path,
-                digest,
-                cosign_runner=runner,
-                artifact_ref=ref,
-                backend_ref=bref,
-                platform_version=platform_version,
-                granted_capabilities=grants,
-                certificate_identity=identity,
-                certificate_oidc_issuer=issuer,
-            )
-
-        # Базовый случай: все проверки проходят -> PUBLISH_ALLOWED.
-        ok = verify()
-        assert ok["decision"] == DECISION_PUBLISH, ok
-        assert ok["publish_allowed"] is True
-        assert ok["code"] == VerifyErrorCode.OK
-        assert ok["manifest_summary"]["layer_count"] == 3
-        assert ok["quarantine_evidence"] is None
-
-        # 1) ':latest' отклоняется.
-        latest = verify(digest="ghcr.io/x/p:latest")
-        assert latest["decision"] == DECISION_QUARANTINE, latest
-        assert latest["code"] == VerifyErrorCode.LATEST_FORBIDDEN, latest
-        latest_ref = verify(ref="ghcr.io/ne-tort/plugins/mod_equipment:latest")
-        assert latest_ref["decision"] == DECISION_QUARANTINE
-        assert latest_ref["code"] == VerifyErrorCode.LATEST_FORBIDDEN
-
-        # 2) Невалидный digest и DIGEST_CONFLICT.
-        for bad in ("sha256:ABC", "sha256:" + "A" * 64, "", "md5:" + "a" * 64):
-            res = verify(digest=bad)
-            assert res["decision"] == DECISION_QUARANTINE, (bad, res)
-        conflict = verify(digest=other_digest)
-        assert conflict["decision"] == DECISION_QUARANTINE
-        assert conflict["code"] in (
-            VerifyErrorCode.DIGEST_CONFLICT,
-            VerifyErrorCode.INVALID_DIGEST,
-        ), conflict
-        bad_ref = verify(bref=f"ghcr.io/ne-tort/plugins/mod_equipment/backend@{other_digest}")
-        assert bad_ref["decision"] == DECISION_QUARANTINE
-
-        # 3) Самореференция: artifact_digest / signature в подписываемом теле.
-        self_ref = json.loads(json.dumps(valid))
-        self_ref["artifact_digest"] = good_digest
-        res = verify(self_ref)
-        assert res["decision"] == DECISION_QUARANTINE, res
-        assert res["code"] == module.ManifestErrorCode.SELF_REFERENCE, res
-        nested = json.loads(json.dumps(valid))
-        nested["layers"][1]["annotations"]["signature"] = "MEUCI..."
-        res = verify(nested)
-        assert res["decision"] == DECISION_QUARANTINE
-        assert res["code"] == module.ManifestErrorCode.SELF_REFERENCE
-
-        # 4) Неизвестная capability / отсутствующий grant / gate по версии.
-        unknown = json.loads(json.dumps(valid))
-        unknown["annotations"]["requestedCapabilities"] = "cache,root"
-        res = verify(unknown)
-        assert res["decision"] == DECISION_QUARANTINE, res
-        assert res["code"] == module.ManifestErrorCode.UNKNOWN_CAPABILITY, res
-        no_grant = verify(grants=())
-        assert no_grant["decision"] == DECISION_QUARANTINE
-        assert no_grant["code"] == VerifyErrorCode.INCOMPATIBLE
-        old_platform = verify(platform_version="0.9.0")
-        assert old_platform["decision"] == DECISION_QUARANTINE
-        assert old_platform["code"] == VerifyErrorCode.INCOMPATIBLE
-        bad_protocol = json.loads(json.dumps(valid))
-        bad_protocol["annotations"]["protocol"] = "plugin-rpc/2"
-        res = verify(bad_protocol)
-        assert res["decision"] == DECISION_QUARANTINE
-        assert res["code"] == module.ManifestErrorCode.INVALID_PROTOCOL
-
-        # 5) Ровно 3 слоя.
-        two = json.loads(json.dumps(valid))
-        two["layers"].pop()
-        res = verify(two)
-        assert res["decision"] == DECISION_QUARANTINE, res
-        assert res["code"] == module.ManifestErrorCode.INVALID_LAYERS, res
-        four = json.loads(json.dumps(valid))
-        four["layers"].append(json.loads(json.dumps(valid["layers"][2])))
-        assert verify(four)["decision"] == DECISION_QUARANTINE
-
-        # 6) cosign verify упал -> QUARANTINED (и «тихий» отказ тоже).
-        for runner in (failing_runner, nonzero_runner, false_runner):
-            res = verify(runner=runner)
-            assert res["decision"] == DECISION_QUARANTINE, (runner, res)
-            assert res["code"] == VerifyErrorCode.VERIFY_FAILED, (runner, res)
-            assert any(
-                item["name"].startswith("cosign_verify:") for item in res["checks"]
-            ) is False  # проверка не записана как успешная
-
-        # 7) Fail-closed на отсутствии обязательных данных.
-        assert verify(identity="")["decision"] == DECISION_QUARANTINE
-        assert verify(ref="")["decision"] == DECISION_QUARANTINE
-        assert verify(bref="")["decision"] == DECISION_QUARANTINE
-        assert verify(platform_version="")["decision"] == DECISION_QUARANTINE
-        missing = verify_artifact(
-            os.path.join(tmp, "absent.json"),
-            good_digest,
-            cosign_runner=ok_runner,
-            artifact_ref=artifact_ref,
-            backend_ref=backend_ref,
-            platform_version="1.5.0",
-            granted_capabilities=("cache", "objects"),
-            certificate_identity="id",
-        )
-        assert missing["decision"] == DECISION_QUARANTINE
-        assert missing["code"] == VerifyErrorCode.MISSING_INPUT
+    return 0
 
 
 if __name__ == "__main__":

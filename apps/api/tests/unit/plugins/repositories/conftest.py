@@ -112,12 +112,13 @@ class FakeRedis:
         self.ops: dict[str, list[tuple[int, int]]] = {}
         self.counters: dict[str, int] = {}
         self.calls = 0
+        self.members: list[str] = []
 
     def _check(self) -> None:
         if not self.available:
             raise ConnectionError("redis unavailable")
 
-    def eval(self, script: str, key_count: int, *args: Any) -> list[int]:
+    async def eval(self, script: str, key_count: int, *args: Any) -> list[int]:
         self._check()
         self.calls += 1
         key = str(args[0])
@@ -129,6 +130,7 @@ class FakeRedis:
             # ValueError → RedisPluginQuota.enforce уходил в fail-closed deny
             # даже на ПЕРВЫЙ запрос. Фейк хранит окно списком (ts, amount),
             # поэтому сам member ему не нужен — он эмулирует только счётчики.
+            self.members.append(str(args[5]))
             now, window, amount, limit = (int(args[i]) for i in range(1, 5))
             events = [(ts, qty) for ts, qty in self.ops.get(key, ()) if ts > now - window]
             used = sum(qty for _, qty in events)
@@ -145,11 +147,11 @@ class FakeRedis:
         self.counters[key] = used + amount
         return [self.counters[key], 1]
 
-    def zcard(self, key: str) -> int:
+    async def zcard(self, key: str) -> int:
         self._check()
         return sum(qty for _, qty in self.ops.get(key, ()))
 
-    def get(self, key: str) -> int:
+    async def get(self, key: str) -> int:
         self._check()
         return self.counters.get(key, 0)
 
@@ -197,7 +199,14 @@ def grant_row(**overrides: Any) -> Any:
         "artifact_digest": DIGEST,
         "capabilities": ["cache"],
         "egress_policy": {"mode": "none"},
-        "quota": {"ops_per_minute": 60},
+        "quota": {
+            "ops_per_minute": 60,
+            "max_rows": 10_000,
+            "max_bytes": 10_000_000,
+            "max_keys": 1_000,
+            "max_object_bytes": 50_000_000,
+            "max_egress_bytes": 10_000_000,
+        },
         "status": "active",
         "issued_at": NOW,
         "expires_at": None,

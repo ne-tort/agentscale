@@ -80,6 +80,93 @@ export interface MigrationsDeclaration {
  * подписываемый документ (самореференция). Встроенный egress allowlist запрещён —
  * только egress_ref.
  */
+export type RpcHttpMethod = "GET" | "POST";
+
+/** Typed operation from signed manifest; generic URL/proxy запрещены. */
+export interface RpcOperationDeclaration {
+  readonly capability: {
+    readonly id: string;
+    readonly version: string;
+  };
+  readonly operation: string;
+  readonly http_method: RpcHttpMethod;
+  /** Только /api/... без host/query/fragment/dot-segments. */
+  readonly backend_path: string;
+  /** Разрешение отдельной public-операции; route_path всё равно обязателен в public_pages. */
+  readonly public?: boolean;
+}
+
+export type McpInputSchemaType =
+  | "object"
+  | "array"
+  | "string"
+  | "number"
+  | "integer"
+  | "boolean"
+  | "null";
+
+/** Data-only JSON Schema subset; runtime code, URL and secret fields отсутствуют. */
+export interface McpInputSchema {
+  readonly type: McpInputSchemaType;
+  readonly title?: string;
+  readonly description?: string;
+  readonly properties?: { readonly [name: string]: McpInputSchema };
+  readonly required?: readonly string[];
+  readonly additionalProperties?: boolean;
+  readonly items?: McpInputSchema;
+  readonly minProperties?: number;
+  readonly maxProperties?: number;
+  readonly minItems?: number;
+  readonly maxItems?: number;
+  readonly uniqueItems?: boolean;
+  readonly minLength?: number;
+  readonly maxLength?: number;
+  readonly pattern?: string;
+  readonly minimum?: number;
+  readonly maximum?: number;
+  readonly exclusiveMinimum?: number;
+  readonly exclusiveMaximum?: number;
+  readonly enum?: readonly JsonPrimitive[];
+  readonly const?: JsonPrimitive;
+}
+
+export interface McpObjectInputSchema extends McpInputSchema {
+  readonly type: "object";
+}
+
+export interface McpToolDeclaration {
+  readonly name: string;
+  readonly description: string;
+  readonly version: SemVer;
+  readonly input_schema: McpObjectInputSchema;
+}
+
+export interface McpServerDeclaration {
+  readonly server_id: string;
+  readonly tools: readonly McpToolDeclaration[];
+}
+
+/** Exact current pod executor scope tuple; commands, args и pod ids отсутствуют. */
+export interface PodAllowlistEntry {
+  readonly plugin_instance_id: string;
+  readonly project_id: string;
+  readonly job_id: string;
+}
+
+export interface PodsDeclaration {
+  readonly allowlist: readonly PodAllowlistEntry[];
+}
+
+export type SecretDeliveryMode = "k8s_secret";
+
+/** Canonical opaque reference; никогда не plaintext и не delivery Secret data. */
+export type SecretRef = string;
+
+export interface SecretDeliveryDeclaration {
+  readonly mode: SecretDeliveryMode;
+  readonly allowlist: readonly SecretRef[];
+}
+
 export interface PluginManifest {
   plugin_id: PluginId;
   version: SemVer;
@@ -94,6 +181,14 @@ export interface PluginManifest {
   /** Входящие webhook-маршруты. */
   webhooks: string[];
   min_platform_version: SemVer;
+  /** Optional frontend/backend allowlist; infra capabilities и grant не расширяются. */
+  rpc_operations?: readonly RpcOperationDeclaration[];
+  /** Signed data-only discovery declarations; отсутствие означает пустой список. */
+  mcp_servers?: readonly McpServerDeclaration[];
+  /** Optional exact pod scopes; отсутствие означает fail-closed executor access. */
+  pods?: PodsDeclaration;
+  /** Optional reference-only k8s secret delivery; отсутствие означает отсутствие delivery. */
+  secret_delivery?: SecretDeliveryDeclaration;
 }
 
 /** Код решения gateway (свой enum, по идее application/capability_gateway_service.py). */
@@ -132,6 +227,10 @@ export type ManifestValidationErrorCode =
   | "migrations_invalid"
   | "public_pages_invalid"
   | "webhooks_invalid"
+  | "rpc_operations_invalid"
+  | "mcp_servers_invalid"
+  | "pods_invalid"
+  | "secret_delivery_invalid"
   | "unknown_field"
   | "missing_field";
 
@@ -183,15 +282,10 @@ export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
 /**
- * Проверка event.origin: точное совпадение с зарегистрированным static-origin.
- * opaque origin ("null") отклоняется; источник сверяется с MessageEvent.origin.
+ * Общие обязательные поля закрытого конверта. Origin здесь намеренно отсутствует:
+ * доверие определяется только MessageEvent.origin + exact WindowProxy, а для
+ * opaque sandbox дополнительно обязательными nonce/instance_id/artifact_digest.
  */
-export interface MessageOrigin {
-  origin: string;
-  source?: "iframe";
-}
-
-/** Общие поля закрытого конверта plugin-rpc/1. */
 export interface PluginMessageBase {
   protocol: PluginRpcProtocol;
   plugin_id: PluginId;
@@ -199,15 +293,17 @@ export interface PluginMessageBase {
   artifact_digest: ArtifactDigest;
   instance_id: string;
   nonce: string;
-  event?: MessageOrigin;
 }
 
-/** plugin -> host: первое сообщение handshake. */
+/** host -> plugin: только после первого iframe load. */
+export interface HostReadyMessage extends PluginMessageBase {
+  type: "host.ready";
+}
+
+/** plugin -> host: обязательное эхо identity/digest/instance/nonce. */
 export interface PluginReadyMessage extends PluginMessageBase {
   type: "plugin.ready";
 }
-
-export type PluginRpcMethod = "capability.call" | "host.navigate" | "host.resize";
 
 export interface PluginRequestContext {
   company_id?: string;
@@ -216,21 +312,65 @@ export interface PluginRequestContext {
   session_id?: string;
 }
 
+/** host -> plugin: effective grant канала, без capability token. */
+export interface GrantReadyMessage extends PluginMessageBase {
+  type: "grant.ready";
+  capabilities: readonly string[];
+  scope: PluginRequestContext;
+  expires_at: string;
+}
+
+export type PluginRpcMethod = "capability.call" | "host.navigate" | "host.resize";
+
 export interface CapabilityRef {
   id: string;
   version: string;
 }
 
-/** host -> plugin: только объявленные typed-методы, без capability token. */
-export interface PluginRpcRequest extends PluginMessageBase {
+export interface PluginHostNavigateInput {
+  /** Только внутренний absolute path без origin, query, fragment и '..'. */
+  path: string;
+}
+
+export interface PluginHostResizeInput {
+  height: number;
+}
+
+interface PluginRpcRequestBase extends PluginMessageBase {
   type: "plugin.rpc.request";
   request_id: string;
-  method: PluginRpcMethod;
-  capability?: CapabilityRef;
   context: PluginRequestContext;
-  idempotency_key?: string;
+}
+
+export interface CapabilityCallRequest extends PluginRpcRequestBase {
+  method: "capability.call";
+  capability: CapabilityRef;
+  idempotency_key: string;
   input: JsonValue;
 }
+
+export interface HostNavigateRequest extends PluginRpcRequestBase {
+  method: "host.navigate";
+  input: PluginHostNavigateInput;
+  idempotency_key?: string;
+}
+
+export interface HostResizeRequest extends PluginRpcRequestBase {
+  method: "host.resize";
+  input: PluginHostResizeInput;
+  idempotency_key?: string;
+}
+
+/** Двунаправленный closed request union; generic proxy/fetch URL отсутствует. */
+export type PluginRpcRequest =
+  | CapabilityCallRequest
+  | HostNavigateRequest
+  | HostResizeRequest;
+
+export type PluginRpcRequestFor<TMethod extends PluginRpcMethod> = Extract<
+  PluginRpcRequest,
+  { method: TMethod }
+>;
 
 export type PluginRpcErrorCode =
   | "ORIGIN_MISMATCH"
@@ -244,7 +384,9 @@ export type PluginRpcErrorCode =
   | "PAYLOAD_TOO_LARGE"
   | "SCOPE_DENIED"
   | "GRANT_EXPIRED"
-  | "INVALID_ENVELOPE";
+  | "INVALID_ENVELOPE"
+  | "REQUEST_FAILED"
+  | "REQUEST_TIMEOUT";
 
 /** Тексты ошибок не содержат токенов, SQL, внутренних URL и stack traces. */
 export interface PluginRpcError {
@@ -253,13 +395,22 @@ export interface PluginRpcError {
   trace_id: string;
 }
 
-export interface PluginRpcResponse extends PluginMessageBase {
+interface PluginRpcResponseBase extends PluginMessageBase {
   type: "plugin.rpc.response";
   request_id: string;
-  ok: boolean;
-  result?: JsonValue;
-  error?: PluginRpcError;
 }
+
+export interface PluginRpcSuccessResponse extends PluginRpcResponseBase {
+  ok: true;
+  result: JsonValue;
+}
+
+export interface PluginRpcFailureResponse extends PluginRpcResponseBase {
+  ok: false;
+  error: PluginRpcError;
+}
+
+export type PluginRpcResponse = PluginRpcSuccessResponse | PluginRpcFailureResponse;
 
 export interface PluginErrorMessage extends PluginMessageBase {
   type: "plugin.error";
@@ -268,7 +419,9 @@ export interface PluginErrorMessage extends PluginMessageBase {
 }
 
 export type PluginRpcMessage =
+  | HostReadyMessage
   | PluginReadyMessage
+  | GrantReadyMessage
   | PluginRpcRequest
   | PluginRpcResponse
   | PluginErrorMessage;

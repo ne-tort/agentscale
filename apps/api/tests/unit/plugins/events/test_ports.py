@@ -13,10 +13,12 @@ import inspect
 from prodavan.application.plugins.events import (
     AuditPort,
     ConsumerPort,
+    DeliveryClaimPort,
     DlqPort,
     IdempotencyStorePort,
     ProducerPort,
     PublishedEventStorePort,
+    RawDlqPort,
     SubscriptionStorePort,
     TopicAdminPort,
     WakeHookPort,
@@ -25,9 +27,11 @@ from prodavan.application.plugins.events import (
 from .conftest import (
     FakeAudit,
     FakeConsumer,
+    FakeDeliveryClaims,
     FakeDlq,
     FakeHandler,
     FakeProducer,
+    FakeRawDlq,
     FakeSeenStore,
     FakeSubscriptions,
     FakeTopicAdmin,
@@ -53,12 +57,14 @@ def test_all_required_ports_exist() -> None:
     ports = (
         ProducerPort,
         ConsumerPort,
+        DeliveryClaimPort,
         DlqPort,
         SubscriptionStorePort,
         AuditPort,
         TopicAdminPort,
         IdempotencyStorePort,
         PublishedEventStorePort,
+        RawDlqPort,
         WakeHookPort,
     )
     for port in ports:
@@ -79,19 +85,23 @@ def test_fakes_satisfy_runtime_protocols() -> None:
     assert isinstance(h.consumer, ConsumerPort)
     assert isinstance(h.admin, TopicAdminPort)
     assert isinstance(h.dlq, DlqPort)
+    assert isinstance(h.raw_dlq, RawDlqPort)
     assert isinstance(h.subscriptions, SubscriptionStorePort)
     assert isinstance(h.published, PublishedEventStorePort)
     assert isinstance(h.idempotency, IdempotencyStorePort)
+    assert isinstance(h.claims, DeliveryClaimPort)
     assert isinstance(h.audit, AuditPort)
     from prodavan.application.plugins.events import EventHandlerPort
 
     assert isinstance(h.handler, EventHandlerPort)
     assert isinstance(h.wake, WakeHookPort)
     assert isinstance(FakeSeenStore(), IdempotencyStorePort)
+    assert isinstance(FakeDeliveryClaims(), DeliveryClaimPort)
     assert isinstance(FakeSubscriptions(), SubscriptionStorePort)
     assert isinstance(FakeProducer(), ProducerPort)
     assert isinstance(FakeConsumer(records=[]), ConsumerPort)
     assert isinstance(FakeDlq(), DlqPort)
+    assert isinstance(FakeRawDlq(), RawDlqPort)
     assert isinstance(FakeAudit(), AuditPort)
     assert isinstance(FakeTopicAdmin(), TopicAdminPort)
     assert isinstance(FakeWake(), WakeHookPort)

@@ -77,7 +77,8 @@ class DigestLookupPort(Protocol):
     работать с тонким БД-репозиторием, ищущим запись по digest.
     """
 
-    def by_digest(self, digest: str) -> PluginArtifactRecord | None: ...
+    async def by_digest_async(self, digest: str) -> PluginArtifactRecord | None: ...
+    async def get_async(self, plugin_id: str, version: str) -> PluginArtifactRecord | None: ...
 
 
 class ArtifactRegistryAdapter:
@@ -100,10 +101,11 @@ class ArtifactRegistryAdapter:
             raise TypeError("ArtifactRegistryAdapter: ожидался PluginArtifactRegistry")
         resolved: Any = store if store is not None else getattr(registry, "_store", None)
         self._store = require_wired("artifact_registry.store", resolved)
-        if not callable(getattr(self._store, "by_digest", None)):
-            raise TypeError(
-                "ArtifactRegistryAdapter: store обязан реализовывать by_digest(digest)"
-            )
+        for method in ("by_digest_async", "get_async"):
+            if not callable(getattr(self._store, method, None)):
+                raise TypeError(
+                    "ArtifactRegistryAdapter: store must implement by_digest_async and get_async"
+                )
         # Tenant-scoped установки: глобальный immutable digest здесь НЕ хранится.
         # In-memory только для dev/тестов; кластеру нужна БД (задача A10).
         self._installations: set[tuple[str, str, str]] = set()
@@ -129,7 +131,7 @@ class ArtifactRegistryAdapter:
             # Тег, пустая строка, ':latest', верхний регистр — отказ, не поиск.
             return None
 
-        record = self._store.by_digest(digest)
+        record = await self._store.by_digest_async(digest)
         if not isinstance(record, PluginArtifactRecord):
             return None
         if not self._is_verified_published(
@@ -143,7 +145,7 @@ class ArtifactRegistryAdapter:
         # Дополнительная сверка с публичным API реестра: запись по паре
         # (plugin, version) должна быть тем же самым digest. Расхождение
         # означает, что «текущая версия» указывает в другое место — отказ.
-        by_version = self._registry.get(plugin_id, manifest_version)
+        by_version = await self._store.get_async(plugin_id, manifest_version)
         if by_version is None or by_version.digest != digest:
             return None
 
@@ -224,7 +226,24 @@ class ArtifactRegistryAdapter:
         if record.quarantine is not None:
             return False
         if record.published_at is None:
-            # Нет метки публикации = нет подтверждённой проверки evidence.
+            return False
+        if record.publication is None:
+            return False
+        evidence = record.verification
+        if evidence is None or not evidence.verified:
+            return False
+        if not evidence.identity.strip() or not evidence.issuer.strip():
+            return False
+        if evidence.artifact_digest != record.digest or evidence.image_ref != record.image_ref:
+            return False
+        if evidence.manifest_fingerprint != record.manifest_fingerprint:
+            return False
+        if not all((
+            evidence.sbom_verified,
+            evidence.provenance_verified,
+            evidence.scan_verified,
+            evidence.csp_verified,
+        )):
             return False
         return True
 

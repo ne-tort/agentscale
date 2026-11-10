@@ -27,6 +27,7 @@ class GatewayErrorCode(StrEnum):
     SESSION_REQUIRED = "PLUGIN_GATEWAY_SESSION_REQUIRED"
     EMPLOYEE_NOT_IN_COMPANY = "PLUGIN_GATEWAY_EMPLOYEE_NOT_IN_COMPANY"
     GRANT_INACTIVE = "PLUGIN_GATEWAY_GRANT_INACTIVE"
+    OPERATION_NOT_ALLOWED = "PLUGIN_GATEWAY_OPERATION_NOT_ALLOWED"
 
     # Входящие вебхуки
     WEBHOOK_HEADERS_MISSING = "PLUGIN_GATEWAY_WEBHOOK_HEADERS_MISSING"
@@ -34,6 +35,14 @@ class GatewayErrorCode(StrEnum):
     SECRET_UNAVAILABLE = "PLUGIN_GATEWAY_SECRET_UNAVAILABLE"
     REPLAY_DETECTED = "PLUGIN_GATEWAY_REPLAY_DETECTED"
     RATE_LIMITED = "PLUGIN_GATEWAY_RATE_LIMITED"
+    INVALID_TIMESTAMP = "PLUGIN_GATEWAY_INVALID_TIMESTAMP"
+    INVALID_SIGNATURE_VERSION = "PLUGIN_GATEWAY_INVALID_SIGNATURE_VERSION"
+    WEBHOOK_ROUTE_NOT_ALLOWED = "PLUGIN_GATEWAY_WEBHOOK_ROUTE_NOT_ALLOWED"
+    DELIVERY_IN_PROGRESS = "PLUGIN_GATEWAY_DELIVERY_IN_PROGRESS"
+    DELIVERY_COMMIT_FAILED = "PLUGIN_GATEWAY_DELIVERY_COMMIT_FAILED"
+    PAYLOAD_TOO_LARGE = "PLUGIN_GATEWAY_PAYLOAD_TOO_LARGE"
+    INVALID_CONTENT_LENGTH = "PLUGIN_GATEWAY_INVALID_CONTENT_LENGTH"
+    UPSTREAM_RESPONSE_TOO_LARGE = "PLUGIN_GATEWAY_UPSTREAM_RESPONSE_TOO_LARGE"
 
     # Backend / activator
     WAKE_LEASE_MISSING = "PLUGIN_GATEWAY_WAKE_LEASE_MISSING"
@@ -52,11 +61,20 @@ _DEFAULT_STATUS: dict[GatewayErrorCode, int] = {
     GatewayErrorCode.SESSION_REQUIRED: 401,
     GatewayErrorCode.EMPLOYEE_NOT_IN_COMPANY: 403,
     GatewayErrorCode.GRANT_INACTIVE: 403,
+    GatewayErrorCode.OPERATION_NOT_ALLOWED: 403,
     GatewayErrorCode.WEBHOOK_HEADERS_MISSING: 401,
     GatewayErrorCode.INVALID_SIGNATURE: 401,
     GatewayErrorCode.SECRET_UNAVAILABLE: 503,
     GatewayErrorCode.REPLAY_DETECTED: 401,
     GatewayErrorCode.RATE_LIMITED: 429,
+    GatewayErrorCode.INVALID_TIMESTAMP: 401,
+    GatewayErrorCode.INVALID_SIGNATURE_VERSION: 401,
+    GatewayErrorCode.WEBHOOK_ROUTE_NOT_ALLOWED: 403,
+    GatewayErrorCode.DELIVERY_IN_PROGRESS: 503,
+    GatewayErrorCode.DELIVERY_COMMIT_FAILED: 503,
+    GatewayErrorCode.PAYLOAD_TOO_LARGE: 413,
+    GatewayErrorCode.INVALID_CONTENT_LENGTH: 400,
+    GatewayErrorCode.UPSTREAM_RESPONSE_TOO_LARGE: 502,
     GatewayErrorCode.WAKE_LEASE_MISSING: 503,
     GatewayErrorCode.BACKEND_TIMEOUT: 504,
     GatewayErrorCode.UPSTREAM_ERROR: 502,
@@ -72,11 +90,20 @@ _TITLES: dict[GatewayErrorCode, str] = {
     GatewayErrorCode.SESSION_REQUIRED: "Session required",
     GatewayErrorCode.EMPLOYEE_NOT_IN_COMPANY: "Employee is not a company member",
     GatewayErrorCode.GRANT_INACTIVE: "Plugin grant is not active",
+    GatewayErrorCode.OPERATION_NOT_ALLOWED: "Plugin operation is not allowed",
     GatewayErrorCode.WEBHOOK_HEADERS_MISSING: "Webhook headers missing",
     GatewayErrorCode.INVALID_SIGNATURE: "Invalid webhook signature",
     GatewayErrorCode.SECRET_UNAVAILABLE: "Webhook secret unavailable",
     GatewayErrorCode.REPLAY_DETECTED: "Webhook delivery replay detected",
     GatewayErrorCode.RATE_LIMITED: "Rate limit exceeded",
+    GatewayErrorCode.INVALID_TIMESTAMP: "Webhook timestamp is invalid or stale",
+    GatewayErrorCode.INVALID_SIGNATURE_VERSION: "Unsupported webhook signature version",
+    GatewayErrorCode.WEBHOOK_ROUTE_NOT_ALLOWED: "Webhook route is not declared",
+    GatewayErrorCode.DELIVERY_IN_PROGRESS: "Webhook delivery is already in progress",
+    GatewayErrorCode.DELIVERY_COMMIT_FAILED: "Webhook delivery could not be committed",
+    GatewayErrorCode.PAYLOAD_TOO_LARGE: "Request payload too large",
+    GatewayErrorCode.INVALID_CONTENT_LENGTH: "Invalid Content-Length",
+    GatewayErrorCode.UPSTREAM_RESPONSE_TOO_LARGE: "Plugin response too large",
     GatewayErrorCode.WAKE_LEASE_MISSING: "Wake-up lease missing",
     GatewayErrorCode.BACKEND_TIMEOUT: "Plugin backend timeout",
     GatewayErrorCode.UPSTREAM_ERROR: "Plugin backend error",
@@ -110,6 +137,17 @@ class GatewayError(AppError):
         self.retry_after_seconds = retry_after_seconds
 
 
+class BackendResponseTooLargeError(GatewayError):
+    """Non-streaming upstream превысил configured cap; тело уже закрыто."""
+
+    def __init__(self, *, limit_bytes: int) -> None:
+        super().__init__(
+            GatewayErrorCode.UPSTREAM_RESPONSE_TOO_LARGE,
+            detail=f"plugin response exceeds the configured {limit_bytes} byte limit",
+        )
+        self.limit_bytes = limit_bytes
+
+
 class BackendNotReadyError(Exception):
     """Backend ещё не Ready после wake-up. Шлюз отвечает ``202 + Retry-After``.
 
@@ -132,6 +170,7 @@ class BackendTimeoutError(Exception):
 
 __all__ = [
     "BackendNotReadyError",
+    "BackendResponseTooLargeError",
     "BackendTimeoutError",
     "GatewayError",
     "GatewayErrorCode",

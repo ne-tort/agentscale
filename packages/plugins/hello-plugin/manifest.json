@@ -30,5 +30,103 @@
   "webhooks": [
     "/webhook/ping"
   ],
-  "min_platform_version": "4.0.0"
+  "min_platform_version": "4.0.0",
+  "mcp_servers": [
+    {
+      "server_id": "hello.greetings",
+      "tools": [
+        {
+          "name": "list",
+          "description": "List greetings within the introspected tenant scope.",
+          "version": "1.0.0",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "company_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "cabinet_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "project_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200
+              }
+            },
+            "required": [
+              "company_id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "greet",
+          "description": "Create a greeting within the introspected tenant scope.",
+          "version": "1.0.0",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "company_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "cabinet_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "project_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              }
+            },
+            "required": [
+              "company_id",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        }
+      ]
+    }
+  ],
+  "rpc_operations": [
+    {
+      "capability": {
+        "id": "hello.greetings",
+        "version": "1.0"
+      },
+      "operation": "list",
+      "http_method": "GET",
+      "backend_path": "/api/greetings/list",
+      "public": false
+    },
+    {
+      "capability": {
+        "id": "hello.greetings",
+        "version": "1.0"
+      },
+      "operation": "greet",
+      "http_method": "POST",
+      "backend_path": "/api/greetings",
+      "public": false
+    }
+  ]
 }

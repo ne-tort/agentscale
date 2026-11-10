@@ -57,6 +57,11 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Final, Protocol, runtime_checkable
 
+from prodavan.application.dynamic_app_registry.contracts import RegistryOutcome
+from prodavan.application.plugins.artifacts.registry import PluginArtifactRecord
+from prodavan.application.plugins.artifacts.verification import manifest_fingerprint
+from prodavan.application.plugins.gateway.canonical import canonical_raw_query
+from prodavan.application.plugins.gateway.errors import BackendResponseTooLargeError
 from prodavan.application.plugins.gateway.headers import HEADER_CAPABILITY_TOKEN, TRUSTED_HEADERS
 from prodavan.application.plugins.gateway.ports import (
     ANON_SCOPES,
@@ -66,9 +71,13 @@ from prodavan.application.plugins.gateway.ports import (
     DeliveryVerdict,
     GatewayAuditEvent,
     GatewayGrant,
+    GatewayOperation,
     GatewaySession,
     WakeLease,
+    is_valid_artifact_digest,
 )
+from prodavan.domain.dynamic_apps import AppLifecycleStatus
+from prodavan.domain.plugins.types import PluginRpcOperations, RpcOperationDeclaration
 
 from .stores import CLUSTER_BACKEND_NOTE
 
@@ -77,7 +86,11 @@ from .stores import CLUSTER_BACKEND_NOTE
 # ---------------------------------------------------------------------------
 
 HEADER_AUTHORIZATION: Final[str] = "Authorization"
+HEADER_GRANT_ID: Final[str] = "X-Plugin-Grant-ID"
 BEARER_PREFIX: Final[str] = "Bearer "
+_TRUSTED_HEADER_NAMES: Final[frozenset[str]] = (
+    frozenset(TRUSTED_HEADERS) | {HEADER_GRANT_ID}
+)
 
 #: Имена, которые клиент не имеет права передавать downstream даже если
 #: ``build_forward_headers`` по какой-то причине их пропустил (defense-in-depth).
@@ -90,7 +103,8 @@ _UNTRUSTED_REQUEST_HEADERS: Final[frozenset[str]] = frozenset(
         "set-cookie",
         "host",
         "content-length",
-        "x-prodavan-signature",
+        # X-Prodavan-* уже удалены sanitize_incoming. Сюда proxy возвращает
+        # только VerifiedWebhook после HMAC; adapter обязан их сохранить для hello.
     }
 )
 
@@ -172,9 +186,12 @@ def with_trusted_bearer(
     Возвращается НОВЫЙ dict: исходные заголовки не мутируются, поэтому
     вызывающий не может случайно «протащить» клиентское значение обратно.
     """
+    grant_id = _header_get(headers, HEADER_GRANT_ID)
+    if grant_id is not None and _SAFE_ID_RE.fullmatch(grant_id) is None:
+        raise GatewayAdapterError("trusted grant id is malformed")
     out: dict[str, str] = {}
     trusted_lower = HEADER_CAPABILITY_TOKEN.lower()
-    trusted_names_lower = {name.lower() for name in TRUSTED_HEADERS}
+    trusted_names_lower = {name.lower() for name in _TRUSTED_HEADER_NAMES}
     for name, value in headers.items():
         if not isinstance(name, str) or not isinstance(value, str) or not value:
             continue
@@ -183,10 +200,10 @@ def with_trusted_bearer(
             continue
         # Defense-in-depth: даже при прямом вызове адаптера (минуя
         # build_forward_headers) клиентские X-Plugin-* не проходят downstream.
-        # ИСКЛЮЧЕНИЕ — четыре ДОВЕРЕННЫХ заголовка из headers.py (X-Plugin-ID,
-        # X-Company-ID, X-Project-ID, X-Plugin-Capability-Token): их выставил
-        # сам шлюз из GatewayClaims/GatewayGrant, и отбрасывать их нельзя,
-        # иначе backend плагина не получит plugin_id/даже capability-токен.
+        # ИСКЛЮЧЕНИЕ — TRUSTED_HEADERS + canonical server-side grant header:
+        # tenant/plugin/instance/artifact/capability/grant значения выставил
+        # сам шлюз из GatewayClaims/GatewayGrant/WakeLease. Неизвестные X-Plugin-* и
+        # client-supplied digest никогда не признаются доверенными.
         # Клиентские значения этих имён уже удалены sanitize_incoming.
         if lowered.startswith("x-plugin-") and lowered not in trusted_names_lower:
             continue
@@ -202,7 +219,7 @@ def with_trusted_bearer(
         k
         for k in out
         if k.lower() in {HEADER_AUTHORIZATION.lower(), trusted_lower}
-        or (k.lower() in trusted_names_lower and k not in TRUSTED_HEADERS)
+        or (k.lower() in trusted_names_lower and k not in _TRUSTED_HEADER_NAMES)
     ]:
         out.pop(key, None)
 
@@ -464,6 +481,7 @@ class GrantRecord:
     grant_id: str
     plugin_id: str
     company_id: str
+    plugin_instance_id: str
     active: bool = True
     operations: frozenset[str] = frozenset()
     public_pages: frozenset[str] = frozenset()
@@ -472,10 +490,15 @@ class GrantRecord:
     egress_allowed_paths: tuple[str, ...] = ()
     egress_approved_for_full: bool = False
     artifact_digest: str = ""
+    manifest_version: str = ""
+    #: None = manifest routes недоступны; пустой tuple = webhook не объявлен.
+    webhooks: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         if not self.grant_id.strip():
             raise ValueError("grant_id must not be empty")
+        if not self.plugin_instance_id.strip():
+            raise ValueError("plugin_instance_id must not be empty")
 
 
 @runtime_checkable
@@ -524,32 +547,213 @@ class GrantAdapter:
     статики/anon токен не выдаётся вовсе.
     """
 
-    def __init__(self, store: GrantStorePort) -> None:
+    def __init__(self, store: GrantStorePort, artifact_registry: Any | None = None) -> None:
         if store is None or not callable(getattr(store, "active_grant", None)):
             raise GatewayAdapterError("GrantAdapter requires a GrantStorePort")
         self._store = store
+        self._artifact_registry = artifact_registry
         self.grant_calls: list[tuple[str, str]] = []
         self.public_calls: list[tuple[str, str]] = []
+        self.operation_calls: list[tuple[str, str]] = []
+
+    async def _load_bound_published_artifact(
+        self, record: GrantRecord
+    ) -> PluginArtifactRecord | None:
+        """Load only the published bundle bound to this exact durable grant."""
+        if self._artifact_registry is None or not record.manifest_version:
+            return None
+        getter = getattr(self._artifact_registry, "get_async", None)
+        if not callable(getter):
+            return None
+        try:
+            artifact = await getter(
+                plugin_id=record.plugin_id, version=record.manifest_version
+            )
+        except Exception:  # noqa: BLE001 — unavailable artifact evidence = deny static
+            return None
+        if not self._is_bound_published_artifact(artifact, record):
+            return None
+        return artifact
 
     async def active_grant(self, *, plugin_id: str, company_id: str) -> GatewayGrant | None:
         self.grant_calls.append((plugin_id, company_id))
-        record = await self._store.active_grant(plugin_id=plugin_id, company_id=company_id)
-        if record is None or not isinstance(record, GrantRecord) or not record.active:
+        try:
+            record = await self._store.active_grant(
+                plugin_id=plugin_id, company_id=company_id
+            )
+        except Exception:  # noqa: BLE001 — store/registry failure = no active grant
             return None
+        if (
+            not isinstance(record, GrantRecord)
+            or not record.active
+            or record.plugin_id != plugin_id
+            or record.company_id != company_id
+            or not record.plugin_instance_id.strip()
+            or not is_valid_artifact_digest(record.artifact_digest)
+        ):
+            return None
+        published_artifact = await self._load_bound_published_artifact(record)
         return GatewayGrant(
             grant_id=record.grant_id,
+            plugin_instance_id=record.plugin_instance_id,
             active=True,
             capability_token="",  # свежий токен → из WakeLease, не из БД
             operations=frozenset(record.operations),
+            artifact_digest=record.artifact_digest,
+            # Exact PluginArtifactRecord.digest (bundle), never publication.backend_digest.
+            # Absence stays explicit; forward_static turns it into typed unavailable.
+            published_artifact_digest=(
+                published_artifact.digest if published_artifact is not None else None
+            ),
         )
 
     async def public_pages(self, *, plugin_id: str, company_id: str) -> frozenset[str]:
         self.public_calls.append((plugin_id, company_id))
-        record = await self._store.active_grant(plugin_id=plugin_id, company_id=company_id)
-        if record is None or not record.active:
+        try:
+            record = await self._store.active_grant(
+                plugin_id=plugin_id, company_id=company_id
+            )
+        except Exception:  # noqa: BLE001 — no public fallback on store failure
+            return frozenset()
+        if (
+            not isinstance(record, GrantRecord)
+            or not record.active
+            or record.plugin_id != plugin_id
+            or record.company_id != company_id
+        ):
             # Пустой набор = публичных страниц нет, анонимный доступ запрещён.
             return frozenset()
         return frozenset(record.public_pages)
+
+    async def rpc_operations(
+        self, *, plugin_id: str, company_id: str
+    ) -> tuple[GatewayOperation, ...] | None:
+        """Resolve declarations only from the grant-bound signed artifact record.
+
+        The bootstrap DTO and GrantRecord.operations are not manifest proof.
+        Every lookup revalidates tenant/plugin/instance binding, immutable digest,
+        publication/quarantine state and the verification evidence fingerprint.
+        Registry failures and malformed declarations deny the anonymous registry
+        by returning None; this method never creates or activates a grant.
+        """
+        self.operation_calls.append((plugin_id, company_id))
+        try:
+            record = await self._store.active_grant(
+                plugin_id=plugin_id, company_id=company_id
+            )
+        except Exception:  # noqa: BLE001 — unavailable registry/grant = no public operations
+            return None
+        if (
+            not isinstance(record, GrantRecord)
+            or not record.active
+            or record.plugin_id != plugin_id
+            or record.company_id != company_id
+            or not record.plugin_instance_id.strip()
+            or not record.manifest_version
+            or not record.artifact_digest
+            or self._artifact_registry is None
+        ):
+            return None
+        artifact = await self._load_bound_published_artifact(record)
+        if artifact is None:
+            return None
+        return self._map_signed_operations(artifact.manifest)
+
+    @staticmethod
+    def _is_bound_published_artifact(
+        artifact: Any, record: GrantRecord
+    ) -> bool:
+        if not isinstance(artifact, PluginArtifactRecord):
+            return False
+        if (
+            artifact.plugin_id != record.plugin_id
+            or artifact.version != record.manifest_version
+            or artifact.digest != record.artifact_digest
+            or artifact.status is not AppLifecycleStatus.PUBLISHED
+            or artifact.outcome is not RegistryOutcome.APPLIED
+            or artifact.quarantine is not None
+            or artifact.published_at is None
+            or artifact.publication is None
+        ):
+            return False
+        manifest = artifact.manifest
+        if not isinstance(manifest, Mapping) or (
+            manifest.get("plugin_id") != record.plugin_id
+            or manifest.get("version") != record.manifest_version
+            or manifest.get("protocol") != "plugin-rpc/1"
+        ):
+            return False
+        evidence = artifact.verification
+        if (
+            evidence is None
+            or not evidence.verified
+            or evidence.artifact_digest != artifact.digest
+            or evidence.image_ref != artifact.image_ref
+            or not evidence.identity.strip()
+            or not evidence.issuer.strip()
+        ):
+            return False
+        try:
+            fingerprint = manifest_fingerprint(manifest)
+        except Exception:  # noqa: BLE001 — malformed signed record = deny
+            return False
+        return (
+            artifact.manifest_fingerprint == fingerprint
+            and evidence.manifest_fingerprint == fingerprint
+        )
+
+    @staticmethod
+    def _map_signed_operations(
+        manifest: Mapping[str, Any]
+    ) -> tuple[GatewayOperation, ...] | None:
+        raw = manifest.get("rpc_operations", [])
+        if not isinstance(raw, list) or len(raw) > 64:
+            return None
+        declarations: list[RpcOperationDeclaration] = []
+        try:
+            for item in raw:
+                if not isinstance(item, dict) or set(item) - {
+                    "capability", "operation", "http_method", "backend_path", "public"
+                }:
+                    return None
+                if not {"capability", "operation", "http_method", "backend_path"} <= set(item):
+                    return None
+                capability = item["capability"]
+                if not isinstance(capability, dict) or set(capability) != {"id", "version"}:
+                    return None
+                declarations.append(
+                    RpcOperationDeclaration(
+                        capability_id=capability["id"],
+                        capability_version=capability["version"],
+                        operation=item["operation"],
+                        http_method=item["http_method"],
+                        backend_path=item["backend_path"],
+                        public=item.get("public", False),
+                    )
+                )
+            signed = PluginRpcOperations(tuple(declarations))
+            return tuple(
+                GatewayOperation(
+                    capability_id=item.capability_id,
+                    capability_version=item.capability_version,
+                    operation=item.operation,
+                    http_method=item.http_method,
+                    backend_path=item.backend_path,
+                    public=item.public,
+                )
+                for item in signed.operations
+            )
+        except (TypeError, ValueError):
+            return None
+
+    async def webhook_routes(
+        self, *, plugin_id: str, company_id: str
+    ) -> frozenset[str] | None:
+        """Manifest webhook allowlist, если store действительно его содержит."""
+        record = await self._store.active_grant(plugin_id=plugin_id, company_id=company_id)
+        if record is None or not record.active or record.webhooks is None:
+            return None
+        return frozenset(record.webhooks)
 
     async def egress_policy(self, *, plugin_id: str, company_id: str) -> dict[str, Any]:
         """Egress-правила из grant'а в БД для контроллера §6.3.
@@ -814,13 +1018,80 @@ end
 return current
 """
 
+_CLAIM_DELIVERY_LEASE_LUA: Final[str] = """
+local current = redis.call('GET', KEYS[1])
+local token = ARGV[1]
+local lease_ms = tonumber(ARGV[2])
+local clock = redis.call('TIME')
+local now_ms = (tonumber(clock[1]) * 1000) + math.floor(tonumber(clock[2]) / 1000)
+if not current then
+  redis.call('SET', KEYS[1], 'processing:' .. (now_ms + lease_ms) .. ':' .. token, 'PX', lease_ms)
+  return {'first', '', 0}
+end
+if string.sub(current, 1, 5) == 'done:' then
+  return {'duplicate', string.sub(current, 6), 0}
+end
+if string.sub(current, 1, 11) == 'processing:' then
+  local rest = string.sub(current, 12)
+  local separator = string.find(rest, ':', 1, true)
+  if separator then
+    local expires_at = tonumber(string.sub(rest, 1, separator - 1))
+    local previous = string.sub(rest, separator + 1)
+    if expires_at and expires_at <= now_ms then
+      redis.call('SET', KEYS[1], 'processing:' .. (now_ms + lease_ms) .. ':' .. token, 'PX', lease_ms)
+      return {'first', previous, 0}
+    end
+    local retry = math.max(1, math.ceil((expires_at - now_ms) / 1000))
+    return {'in_progress', previous, retry}
+  end
+end
+return {'duplicate', current, 0}
+"""
+
+_COMMIT_DELIVERY_LUA: Final[str] = """
+local current = redis.call('GET', KEYS[1])
+local token = ARGV[1]
+local ttl_seconds = tonumber(ARGV[2])
+if current == 'done:' .. token then
+  redis.call('EXPIRE', KEYS[1], ttl_seconds)
+  return 1
+end
+if string.sub(current or '', 1, 11) == 'processing:' then
+  local rest = string.sub(current, 12)
+  local separator = string.find(rest, ':', 1, true)
+  if separator and string.sub(rest, separator + 1) == token then
+    redis.call('SET', KEYS[1], 'done:' .. token, 'EX', ttl_seconds)
+    return 1
+  end
+end
+return 0
+"""
+
+_RELEASE_DELIVERY_LUA: Final[str] = """
+local current = redis.call('GET', KEYS[1])
+local token = ARGV[1]
+if string.sub(current or '', 1, 11) == 'processing:' then
+  local rest = string.sub(current, 12)
+  local separator = string.find(rest, ':', 1, true)
+  if separator and string.sub(rest, separator + 1) == token then
+    return redis.call('DEL', KEYS[1])
+  end
+end
+return 0
+"""
+
 #: Namespace анонимных/публичных запросов: гарантирует ОТДЕЛЬНЫЙ bucket даже
 #: если вызывающий забыл добавить subject (§7.2 «отдельный rate limit»).
 ANON_BUCKET_PREFIX: Final[str] = "plugin-gateway:rl:anon"
 
 
 class RedisRateLimitAdapter:
-    """``RateLimitPort`` на Redis: атомарный INCR и ``SET NX`` + TTL.
+    """``RateLimitPort`` на Redis: INCR + processing/done Lua lifecycle.
+
+    GatewayAuth использует ``claim_delivery_lease``: processing истекает по
+    короткому TTL, а done создаётся только после backend 2xx (кроме 202).
+    Legacy ``claim_delivery`` оставлен для прямых старых вызовов, но новый
+    webhook flow его не использует.
 
     КЛЮЧЕВОЕ (риск повтора вебхука с чужим телом): ``claim_delivery``
     сохраняет **отпечаток ПЕРВОЙ доставки** (``token`` из
@@ -947,6 +1218,76 @@ class RedisRateLimitAdapter:
             "delivery claim is unstable: key expired concurrently; refusing webhook"
         )
 
+    async def claim_delivery_lease(
+        self,
+        *,
+        key: str,
+        ttl_seconds: int,
+        lease_seconds: int,
+        token: str,
+    ) -> DeliveryVerdict:
+        """SET NX заменён атомарной processing/done машиной состояний."""
+        if not key or ttl_seconds < 1 or lease_seconds < 1 or not token:
+            raise GatewayAdapterError("invalid delivery lease arguments")
+        try:
+            raw = await self._redis().eval(
+                _CLAIM_DELIVERY_LEASE_LUA,
+                1,
+                key,
+                token,
+                int(lease_seconds) * 1000,
+            )
+        except Exception as exc:
+            raise GatewayAdapterError(
+                f"delivery lease backend unavailable: {type(exc).__name__}"
+            ) from exc
+        if not isinstance(raw, (list, tuple)) or len(raw) != 3:
+            raise GatewayAdapterError("delivery lease backend returned malformed verdict")
+        status = self._decode(raw[0])
+        previous = self._decode(raw[1]) or None
+        retry = int(raw[2] or 0)
+        if status == DeliveryStatus.FIRST.value:
+            return DeliveryVerdict(
+                status=DeliveryStatus.FIRST,
+                first_seen_at=time.time(),
+                previous_token=previous,
+            )
+        if status == DeliveryStatus.IN_PROGRESS.value:
+            return DeliveryVerdict(
+                status=DeliveryStatus.IN_PROGRESS,
+                previous_token=previous,
+                retry_after_seconds=max(1, retry),
+            )
+        if status == DeliveryStatus.DUPLICATE.value:
+            return DeliveryVerdict(
+                status=DeliveryStatus.DUPLICATE,
+                previous_token=previous,
+            )
+        raise GatewayAdapterError("delivery lease backend returned unknown status")
+
+    async def commit_delivery(self, *, key: str, ttl_seconds: int, token: str) -> bool:
+        if not key or ttl_seconds < 1 or not token:
+            raise GatewayAdapterError("invalid delivery commit arguments")
+        try:
+            result = await self._redis().eval(
+                _COMMIT_DELIVERY_LUA, 1, key, token, int(ttl_seconds)
+            )
+        except Exception as exc:
+            raise GatewayAdapterError(
+                f"delivery commit backend unavailable: {type(exc).__name__}"
+            ) from exc
+        return bool(int(result or 0))
+
+    async def release_delivery(self, *, key: str, token: str) -> None:
+        if not key or not token:
+            raise GatewayAdapterError("invalid delivery release arguments")
+        try:
+            await self._redis().eval(_RELEASE_DELIVERY_LUA, 1, key, token)
+        except Exception as exc:
+            raise GatewayAdapterError(
+                f"delivery release backend unavailable: {type(exc).__name__}"
+            ) from exc
+
     async def allow_anon(self, *, subject: str, plugin_id: str, company_id: str, limit: int, window_seconds: int) -> bool:
         """Явный ОТДЕЛЬНЫЙ bucket для анонимной публичной страницы (§7.2)."""
         bucket = f"{self._anon_prefix}:{plugin_id}:{company_id}:{subject or 'anon'}"
@@ -1029,7 +1370,13 @@ class ActivationAdapter:
         self.wait_calls: list[tuple[str, float]] = []
         self.last_token_jti: str | None = None
 
-    async def _instance_id(self, *, plugin_id: str, company_id: str) -> str:
+    async def _instance_id(
+        self,
+        *,
+        plugin_id: str,
+        company_id: str,
+        expected_instance_id: str | None = None,
+    ) -> str:
         resolver = getattr(self._instance_resolver, "resolve", None)
         if callable(resolver):
             value = resolver(plugin_id=plugin_id, company_id=company_id)
@@ -1039,12 +1386,26 @@ class ActivationAdapter:
             value = None
         if inspect.isawaitable(value):
             value = await value
-        if not isinstance(value, str) or not value.strip():
+        mapped = value.strip() if isinstance(value, str) and value.strip() else None
+        if expected_instance_id is not None:
+            if not isinstance(expected_instance_id, str) or not expected_instance_id.strip():
+                raise GatewayAdapterError(
+                    "durable grant plugin_instance_id is empty; wake-up refused"
+                )
+            expected = expected_instance_id.strip()
+            if mapped is not None and mapped != expected:
+                raise GatewayAdapterError(
+                    "durable grant and activation resolver plugin_instance_id mismatch"
+                )
+            # The durable grant is authoritative; the resolver is only a
+            # consistency check and must never redirect to another instance.
+            return expected
+        if mapped is None:
             raise GatewayAdapterError(
                 f"no plugin instance_id for ({plugin_id!r}, {company_id!r}); "
                 "wake-up refused (fail-closed)"
             )
-        return value.strip()
+        return mapped
 
     @staticmethod
     def _expires_epoch(result: Any, *, now: float, ttl_seconds: float) -> float:
@@ -1056,19 +1417,69 @@ class ActivationAdapter:
         # Fail-closed: без достоверного exp не выпускаем «вечный» lease.
         return float(now + ttl_seconds)
 
-    async def wake(self, *, plugin_id: str, company_id: str) -> WakeLease:
-        instance_id = await self._instance_id(plugin_id=plugin_id, company_id=company_id)
+    async def wake(
+        self,
+        *,
+        plugin_id: str,
+        company_id: str,
+        plugin_instance_id: str | None = None,
+    ) -> WakeLease:
+        instance_id = await self._instance_id(
+            plugin_id=plugin_id,
+            company_id=company_id,
+            expected_instance_id=plugin_instance_id,
+        )
         self.wake_calls.append((plugin_id, company_id, instance_id))
         result = await self._activator.wake(instance_id, timeout=self._timeout)
+        result_instance = getattr(result, "plugin_instance_id", None)
+        if (
+            not isinstance(result_instance, str)
+            or not result_instance.strip()
+            or result_instance != instance_id
+        ):
+            raise GatewayAdapterError(
+                "PluginActivator returned a missing or different plugin_instance_id"
+            )
         token = getattr(result, "token", None)
         if not isinstance(token, str) or not token.strip():
             raise GatewayAdapterError("WakeResult.token is missing: refusing to forward")
+        token_claims = getattr(result, "claims", None)
+        if not isinstance(token_claims, Mapping):
+            raise GatewayAdapterError("WakeResult.claims is missing: refusing to forward")
+        artifact_digest = token_claims.get("artifact_digest")
+        if not is_valid_artifact_digest(artifact_digest):
+            raise GatewayAdapterError(
+                "WakeResult.claims.artifact_digest is missing or malformed"
+            )
+        grant_id = token_claims.get("grant_id")
+        if not isinstance(grant_id, str) or not grant_id.strip():
+            raise GatewayAdapterError("WakeResult.claims.grant_id is missing")
+        for claim_name, expected in (
+            ("plugin_instance_id", result_instance),
+            ("plugin_id", plugin_id),
+            ("company_id", company_id),
+        ):
+            bound = token_claims.get(claim_name)
+            if bound != expected:
+                raise GatewayAdapterError(
+                    "WakeResult.claims tenant/plugin/instance binding is missing or mismatched"
+                )
+        expected_sub = f"plugin:{plugin_id}:{company_id}:{result_instance}"
+        if token_claims.get("sub") != expected_sub:
+            raise GatewayAdapterError(
+                "WakeResult.claims.sub is missing or has a different identity binding"
+            )
         self.last_token_jti = getattr(result, "jti", None)
         now = float(self._clock())
         return WakeLease(
-            plugin_id=plugin_id,
-            company_id=company_id,
+            # Project only authoritative result/claims after exact validation;
+            # never reconstruct trust by copying the requested binding.
+            plugin_id=token_claims["plugin_id"],
+            company_id=token_claims["company_id"],
+            plugin_instance_id=result_instance,
             capability_token=token.strip(),
+            artifact_digest=artifact_digest,
+            grant_id=grant_id,
             expires_at=self._expires_epoch(
                 result, now=now, ttl_seconds=self._lease_ttl_seconds
             ),
@@ -1080,12 +1491,14 @@ class ActivationAdapter:
         # Просроченный lease = не годен к проксированию (§4.2 короткий TTL).
         if lease.expires_at <= float(self._clock()):
             return False
+        if not is_valid_artifact_digest(lease.artifact_digest) or not lease.grant_id:
+            return False
         if self._readiness is None:
             return bool(lease.ready)
         try:
-            instance_id = await self._instance_id(
-                plugin_id=lease.plugin_id, company_id=lease.company_id
-            )
+            instance_id = lease.plugin_instance_id
+            if not isinstance(instance_id, str) or not instance_id.strip():
+                return False
             return bool(await self._readiness.is_ready(instance_id))
         except Exception:  # noqa: BLE001 — сбой пробы Ready ≠ «готов»
             return False
@@ -1102,6 +1515,9 @@ class BackendHttpAdapter:
     * **серверный таймаут**: берётся из ``BackendRequest.timeout_seconds``
       (``GatewayLimits``, а НЕ тело запроса, §4.4) и дополнительно
       ограничивается потолком адаптера ``max_timeout_seconds``;
+    * **bounded non-SSE response**: ``client.send(stream=True)`` исключает
+      скрытую буферизацию httpx; тело читается чанками до
+      ``BackendRequest.max_response_bytes`` и закрывается при превышении;
     * **SSE без буферизации**: при ``request.stream=True`` НЕ вызывается
       ``aread()``/``.content``, ``b"".join(...)`` — возвращается живой
       ``AsyncIterator[bytes]`` из ``response.aiter_bytes()``; соединение
@@ -1160,12 +1576,17 @@ class BackendHttpAdapter:
             )
         return self._client
 
-    def _url(self, path: str) -> str:
+    def _url(self, path: str, raw_query: bytes = b"") -> str:
         if not isinstance(path, str) or not path.startswith("/"):
             raise GatewayAdapterError("backend path must start with '/'")
         if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in path):
             raise GatewayAdapterError("backend path contains control characters")
-        return f"{self._base_url}{path}"
+        try:
+            query = canonical_raw_query(raw_query).decode("ascii")
+        except (TypeError, ValueError, UnicodeDecodeError) as exc:
+            raise GatewayAdapterError("raw query is not a safe ASCII request target") from exc
+        suffix = f"?{query}" if query else ""
+        return f"{self._base_url}{path}{suffix}"
 
     def _outgoing_headers(self, request: BackendRequest) -> dict[str, str]:
         token = _header_get(request.headers, HEADER_CAPABILITY_TOKEN)
@@ -1211,15 +1632,15 @@ class BackendHttpAdapter:
         client = self._get_client()
         built = client.build_request(
             request.method.upper(),
-            self._url(request.path),
+            self._url(request.path, request.query_string),
             headers=self._outgoing_headers(request),
             content=bytes(request.body),
             timeout=timeout,
         )
         # Таймаут задаётся на build_request (httpx.AsyncClient.send не принимает
-        # ``timeout``) — серверный потолок, а не значение из тела. ``stream=True``
-        # критичен: httpx не должен читать тело до отдачи ответа вызывающей стороне.
-        raw = await client.send(built, stream=bool(request.stream))
+        # ``timeout``). stream=True нужен ДЛЯ ВСЕХ ответов: stream=False заставил
+        # бы httpx буферизовать non-SSE тело ещё до нашего configured cap.
+        raw = await client.send(built, stream=True)
         headers = self._response_headers(raw, stream=bool(request.stream))
 
         if request.stream:
@@ -1240,7 +1661,29 @@ class BackendHttpAdapter:
             )
 
         try:
-            body = await raw.aread()
+            declared_header = _header_get(raw.headers, "content-length")
+            if declared_header is not None:
+                if not declared_header.isascii() or not declared_header.isdigit():
+                    raise GatewayAdapterError("invalid upstream Content-Length")
+                try:
+                    declared = int(declared_header, 10)
+                except (TypeError, ValueError) as exc:
+                    raise GatewayAdapterError("invalid upstream Content-Length") from exc
+                if declared < 0:
+                    raise GatewayAdapterError("invalid upstream Content-Length")
+                if declared > request.max_response_bytes:
+                    raise BackendResponseTooLargeError(
+                        limit_bytes=request.max_response_bytes
+                    )
+            body = bytearray()
+            async for chunk in raw.aiter_bytes():
+                if not chunk:
+                    continue
+                if len(chunk) > request.max_response_bytes - len(body):
+                    raise BackendResponseTooLargeError(
+                        limit_bytes=request.max_response_bytes
+                    )
+                body.extend(chunk)
         finally:
             await raw.aclose()
         return BackendResponse(

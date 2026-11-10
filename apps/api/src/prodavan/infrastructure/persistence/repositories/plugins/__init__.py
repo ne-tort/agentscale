@@ -47,8 +47,11 @@ from .events import (
 )
 from .flags import DbFeatureFlagStore, SyncFeatureFlagStore, feature_flag_port
 from .grants import SqlCapabilityGrantRepository
+from .instances import SqlPluginInstanceRepository
+from .publication_approvals import SqlPluginPublicationApprovalRepository
 from .quotas import RedisPluginQuota
 from .revocation import DbGrantRevocation
+from .update_lock import PluginUpdateLockError, SqlPluginUpdateLock
 
 __all__ = [
     "A10_COLUMN_MAP",
@@ -69,6 +72,10 @@ __all__ = [
     "RedisPluginQuota",
     "SqlArtifactRegistryStore",
     "SqlCapabilityGrantRepository",
+    "SqlPluginInstanceRepository",
+    "SqlPluginPublicationApprovalRepository",
+    "SqlPluginUpdateLock",
+    "PluginUpdateLockError",
     "SyncFeatureFlagStore",
     "build_plugin_repositories",
     "canonical_digest",

@@ -547,6 +547,36 @@ def _test_needs_postgres_wipe(request: pytest.FixtureRequest) -> bool:
 
 
 @pytest.fixture(autouse=True)
+def _auth_command_bus_isolation(monkeypatch: pytest.MonkeyPatch):
+    """Configure the same signed/Redis lifecycle explicitly for local tests.
+
+    This is test setup, not a production/dev fallback. The fake client preserves
+    shared-Redis SET NX EX and GETDEL semantics for CI without a broker/service.
+    """
+
+    from tests.fixtures.auth_command_bus import (
+        TEST_AUTH_COMMAND_SECRET,
+        TEST_AUTH_EVENT_SECRET,
+        FakeCredentialRedis,
+        FakeCredentialRedisManager,
+    )
+
+    redis = FakeCredentialRedis()
+    manager = FakeCredentialRedisManager(redis)
+    monkeypatch.setattr(settings, "auth_command_signing_secret", TEST_AUTH_COMMAND_SECRET)
+    monkeypatch.setattr(settings, "auth_event_signing_secret", TEST_AUTH_EVENT_SECRET)
+    monkeypatch.setattr(
+        "prodavan.application.auth.credentials.get_redis_manager",
+        lambda: manager,
+    )
+    monkeypatch.setattr(
+        "prodavan.application.auth.event_replay.get_redis_manager",
+        lambda: manager,
+    )
+    return redis
+
+
+@pytest.fixture(autouse=True)
 def _integration_stub_runtime(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Integration tests use stub pod runtime (no k8s cluster required)."""
     path = str(getattr(request, "fspath", "")).replace("\\", "/")

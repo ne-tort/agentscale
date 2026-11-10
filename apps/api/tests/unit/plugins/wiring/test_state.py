@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 from starlette.exceptions import HTTPException
 
+from prodavan.application.plugins.artifacts.registry import InMemoryRegistryStore
 from prodavan.application.plugins.transport.deps import PluginIdentityConfig
 from prodavan.application.plugins.wiring.platform import (
     PluginPlatform,
@@ -29,6 +30,8 @@ from tests.unit.plugins.wiring.conftest import (
     FakeGrantStore,
     FakeRequest,
     FakeSettings,
+    fake_capability_overrides,
+    required_platform_port_overrides,
 )
 
 
@@ -44,6 +47,9 @@ def _platform(
         grant_store=grant_store,
         cosign=cosign,
         admin_ports=admin_ports,
+        artifact_registry_store=InMemoryRegistryStore(),
+        **required_platform_port_overrides(),
+        **fake_capability_overrides(),
     )
     assert platform is not None
     return platform

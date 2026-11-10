@@ -55,8 +55,11 @@ class PluginSurfaceGuardMiddleware(BaseHTTPMiddleware):
             token = header[len(BEARER_PREFIX) :].strip()
             if token and is_plugin_capability_token(token):
                 try:
-                    config = resolve_identity_config(request)
-                    claims = get_plugin_claims(request, config)
+                    # Both dependencies are async def: without await they return
+                    # unexecuted coroutines, so verification/surface checks never
+                    # ran and the guard failed open (200/404 instead of 403).
+                    config = await resolve_identity_config(request)
+                    claims = await get_plugin_claims(request, config)
                     # Положить проверенные claims в state: роутер всё равно
                     # перепроверит через свою зависимость, но родительские
                     # middleware/логи могут читать доверенную identity здесь.

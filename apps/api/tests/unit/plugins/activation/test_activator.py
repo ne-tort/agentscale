@@ -104,6 +104,30 @@ class Harness:
 
 
 # ---------------------------------------------------------------------------
+# Обязательный state_store: молчаливого InMemory production default больше нет
+# ---------------------------------------------------------------------------
+
+
+def test_state_store_is_required_without_in_memory_default() -> None:
+    """Без явного state_store activator не собирается (typed failure до service use)."""
+    with pytest.raises(TypeError, match="state_store"):
+        PluginActivator(  # type: ignore[call-arg]
+            scale=FakeScale(),
+            readiness=FakeReadiness(),
+            clock=FakeClock(),
+            mint=FakeMint(),
+            audit=FakeAudit(),
+            policy=_policy(),
+        )
+
+
+def test_explicit_in_memory_state_store_is_used_without_duplicate() -> None:
+    """Явный test/dev double используется как есть, второй store не создаётся."""
+    h = Harness()
+    assert h.activator._store is h.store
+
+
+# ---------------------------------------------------------------------------
 # 0→1 с ожиданием Ready (критерий 13)
 # ---------------------------------------------------------------------------
 

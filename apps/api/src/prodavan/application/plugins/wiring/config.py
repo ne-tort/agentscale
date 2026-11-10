@@ -27,16 +27,20 @@ import os
 from dataclasses import dataclass, fields, replace
 from typing import Any, Final, Mapping
 
+from prodavan.domain.plugins.origins import PluginOriginError, exact_plugin_origins
+
 # Все PLUGIN_* поля Settings (config/settings.py:112-138). Список фиксирован:
 # новое поле настроек должно быть явно добавлено сюда, иначе сборка о нём
 # «забудет» молча — это был бы тихий конфигурационный дрейф.
 PLUGIN_SETTING_FIELDS: Final[tuple[str, ...]] = (
     "plugin_platform_enabled",
     "plugin_claims_secret",
+    "plugin_event_signing_secret_ref",
     "plugin_claims_ttl_seconds",
     "plugin_claims_issuer",
     "plugin_claims_audience",
     "plugin_static_origin",
+    "plugin_shell_origin",
     "plugin_tenant_db_admin_url",
     "plugin_tenant_db_host",
     "plugin_tenant_db_port",
@@ -65,6 +69,7 @@ MAX_CLAIMS_TTL_SECONDS: Final[int] = 900
 # Формат: список секретов через запятую (старые ключи, от самого старого к
 # более новому). См. keyring.build_keyring.
 PLUGIN_CLAIMS_PREVIOUS_SECRETS_ENV: Final[str] = "PLUGIN_CLAIMS_PREVIOUS_SECRETS"
+PLUGIN_EVENT_SIGNING_SECRET_REF_SETTING: Final[str] = "PLUGIN_EVENT_SIGNING_SECRET_REF"
 
 
 class PluginPlatformConfigError(RuntimeError):
@@ -87,11 +92,13 @@ class PluginPlatformConfig:
 
     enabled: bool = False
     claims_secret: str = ""
+    event_signing_secret_ref: str = ""
     previous_claims_secrets: tuple[str, ...] = ()
     claims_ttl_seconds: int = 300
     claims_issuer: str = "agentscale-plugins"
     claims_audience: str = "capability-gateway"
     static_origin: str = ""
+    shell_origin: str = ""
     tenant_db_admin_url: str = ""
     tenant_db_host: str = "tenant-postgres"
     tenant_db_port: int = 5432
@@ -136,6 +143,7 @@ class PluginPlatformConfig:
         config = cls(
             enabled=bool(values["plugin_platform_enabled"]),
             claims_secret=str(values["plugin_claims_secret"] or ""),
+            event_signing_secret_ref=str(values["plugin_event_signing_secret_ref"] or ""),
             previous_claims_secrets=read_previous_secrets(
                 environment.get(PLUGIN_CLAIMS_PREVIOUS_SECRETS_ENV, "")
             ),
@@ -143,6 +151,7 @@ class PluginPlatformConfig:
             claims_issuer=str(values["plugin_claims_issuer"]),
             claims_audience=str(values["plugin_claims_audience"]),
             static_origin=str(values["plugin_static_origin"]),
+            shell_origin=str(values["plugin_shell_origin"]),
             tenant_db_admin_url=str(values["plugin_tenant_db_admin_url"] or ""),
             tenant_db_host=str(values["plugin_tenant_db_host"]),
             tenant_db_port=int(values["plugin_tenant_db_port"]),
@@ -229,6 +238,10 @@ class PluginPlatformConfig:
                 "PLUGIN_COSIGN_IDENTITY must not equal PLUGIN_CLAIMS_SECRET"
             )
 
+        validate_event_signing_secret_ref(
+            self.event_signing_secret_ref, required=False
+        )
+
         if not self.enabled:
             # Выключено: сборка не создаёт сервисы, секрет/origin не нужны.
             return
@@ -245,6 +258,18 @@ class PluginPlatformConfig:
                 "PLUGIN_PLATFORM_ENABLED=true requires PLUGIN_STATIC_ORIGIN "
                 "(отдельный origin для iframe, не agentscale.dev)"
             )
+        if not self.shell_origin.strip():
+            raise PluginPlatformConfigError(
+                "PLUGIN_PLATFORM_ENABLED=true requires PLUGIN_SHELL_ORIGIN "
+                "(exact server-derived HTTPS shell origin)"
+            )
+        try:
+            exact_plugin_origins(
+                static_origin=self.static_origin,
+                shell_origin=self.shell_origin,
+            )
+        except PluginOriginError as exc:
+            raise PluginPlatformConfigError(str(exc)) from exc
         if not self.cosign_identity.strip():
             # Keyless cosign: без --certificate-identity сборка verifier'а
             # возможна, но каждый артефакт ушёл бы в карантин. Честнее упасть
@@ -253,6 +278,9 @@ class PluginPlatformConfig:
                 "PLUGIN_PLATFORM_ENABLED=true requires PLUGIN_COSIGN_IDENTITY "
                 "(keyless cosign --certificate-identity)"
             )
+        validate_event_signing_secret_ref(
+            self.event_signing_secret_ref, required=True
+        )
         for index, secret in enumerate(self.previous_claims_secrets):
             if not secret.strip():
                 raise PluginPlatformConfigError(
@@ -275,11 +303,13 @@ class PluginPlatformConfig:
         return {
             "enabled": self.enabled,
             "claims_secret_configured": bool(self.claims_secret.strip()),
+            "event_signing_secret_configured": bool(self.event_signing_secret_ref.strip()),
             "previous_keys_count": len(self.previous_claims_secrets),
             "claims_ttl_seconds": self.claims_ttl_seconds,
             "claims_issuer": self.claims_issuer,
             "claims_audience": self.claims_audience,
             "static_origin": self.static_origin,
+            "shell_origin": self.shell_origin,
             "tenant_db_host": self.tenant_db_host,
             "tenant_db_port": self.tenant_db_port,
             "tenant_db_admin_url_configured": bool(self.tenant_db_admin_url.strip()),
@@ -293,6 +323,55 @@ class PluginPlatformConfig:
             "cosign_issuer": self.cosign_issuer,
             "min_platform_version": self.min_platform_version,
         }
+
+
+def validate_event_signing_secret_ref(value: Any, *, required: bool) -> str:
+    """Validate an opaque event-key reference, never a plaintext fallback."""
+
+    if not isinstance(value, str) or value != value.strip() or any(
+        ord(char) < 32 or ord(char) == 127 for char in value
+    ):
+        raise PluginPlatformConfigError(
+            "PLUGIN_EVENT_SIGNING_SECRET_REF must be a trimmed SecretStore reference"
+        )
+    if not value:
+        if required:
+            raise PluginPlatformConfigError(
+                "PLUGIN_PLATFORM_ENABLED=true requires PLUGIN_EVENT_SIGNING_SECRET_REF; "
+                "PLUGIN_CLAIMS_SECRET and AUTH_TEST_SECRET are not fallbacks"
+            )
+        return ""
+    if len(value) > 2048:
+        raise PluginPlatformConfigError("PLUGIN_EVENT_SIGNING_SECRET_REF is too long")
+    if value.startswith("k8s-secret://"):
+        parts = value[len("k8s-secret://"):].split("/")
+        name, key = parts if len(parts) == 2 else ("", "")
+        if (
+            len(name) > 253
+            or len(key) > 253
+            or not name
+            or not key
+            or any(
+                not segment
+                or len(segment) > 63
+                or not segment[0].isalnum()
+                or not segment[-1].isalnum()
+                or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789-" for char in segment)
+                for segment in name.split(".")
+            )
+            or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for char in key)
+            or key in {".", ".."}
+        ):
+            raise PluginPlatformConfigError(
+                "PLUGIN_EVENT_SIGNING_SECRET_REF must be k8s-secret://<secret-name>/<key>"
+            )
+        return value
+    if value.startswith(("vault://", "file://")) and value.split("://", 1)[1]:
+        return value
+    raise PluginPlatformConfigError(
+        "PLUGIN_EVENT_SIGNING_SECRET_REF must use vault://, file://, or "
+        "k8s-secret://<secret-name>/<key>; plaintext secrets are forbidden"
+    )
 
 
 def read_previous_secrets(raw: str | None) -> tuple[str, ...]:
@@ -312,8 +391,10 @@ __all__ = [
     "MAX_CLAIMS_TTL_SECONDS",
     "MIN_CLAIMS_TTL_SECONDS",
     "PLUGIN_CLAIMS_PREVIOUS_SECRETS_ENV",
+    "PLUGIN_EVENT_SIGNING_SECRET_REF_SETTING",
     "PLUGIN_SETTING_FIELDS",
     "PluginPlatformConfig",
     "PluginPlatformConfigError",
     "read_previous_secrets",
+    "validate_event_signing_secret_ref",
 ]

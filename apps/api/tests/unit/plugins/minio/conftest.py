@@ -19,6 +19,10 @@ ADMIN_KEY = "plugin-object-admin"
 ADMIN_SECRET = "plugin-object-admin-secret"
 PRESIGN_KEY = "plugin-object-presigner"
 PRESIGN_SECRET = "plugin-object-presigner-secret"
+ADMIN_ACCESS_REF = "vault://ai_keys/minio/admin-access"
+ADMIN_SECRET_REF = "vault://ai_keys/minio/admin-secret"
+PRESIGN_ACCESS_REF = "vault://ai_keys/minio/presign-access"
+PRESIGN_SECRET_REF = "vault://ai_keys/minio/presign-secret"
 
 
 class FakeClock:
@@ -51,15 +55,34 @@ def make_env(**overrides: Any) -> dict[str, str]:
     """Полный набор env для ``MinioPluginConfig.from_env``."""
     env: dict[str, str] = {
         "PLUGIN_MINIO_ENDPOINT": ENDPOINT,
-        "PLUGIN_MINIO_ADMIN_ACCESS_KEY": ADMIN_KEY,
-        "PLUGIN_MINIO_ADMIN_SECRET_KEY": ADMIN_SECRET,
-        "PLUGIN_MINIO_PRESIGN_ACCESS_KEY": PRESIGN_KEY,
-        "PLUGIN_MINIO_PRESIGN_SECRET_KEY": PRESIGN_SECRET,
+        "PLUGIN_MINIO_ADMIN_ACCESS_KEY_REF": ADMIN_ACCESS_REF,
+        "PLUGIN_MINIO_ADMIN_SECRET_KEY_REF": ADMIN_SECRET_REF,
+        "PLUGIN_MINIO_PRESIGN_ACCESS_KEY_REF": PRESIGN_ACCESS_REF,
+        "PLUGIN_MINIO_PRESIGN_SECRET_KEY_REF": PRESIGN_SECRET_REF,
         "PLUGIN_MINIO_STS_ENABLED": "false",
         "PLUGIN_MINIO_REGION": "us-east-1",
     }
     env.update({k: str(v) for k, v in overrides.items()})
     return env
+
+
+class FakeSecretStore:
+    def __init__(self) -> None:
+        self.values = {
+            ADMIN_ACCESS_REF: ADMIN_KEY,
+            ADMIN_SECRET_REF: ADMIN_SECRET,
+            PRESIGN_ACCESS_REF: PRESIGN_KEY,
+            PRESIGN_SECRET_REF: PRESIGN_SECRET,
+        }
+        self.get_calls: list[str] = []
+
+    def get(self, ref: str) -> str:
+        self.get_calls.append(ref)
+        return self.values[ref]
+
+
+def make_secret_store() -> FakeSecretStore:
+    return FakeSecretStore()
 
 
 @dataclass
@@ -89,6 +112,7 @@ class FakeS3Client:
     policy_calls: list[dict[str, Any]] = field(default_factory=list)
     deleted_buckets: list[str] = field(default_factory=list)
     created_buckets: list[str] = field(default_factory=list)
+    close_calls: int = 0
 
     def head_bucket(self, *, Bucket: str) -> dict[str, Any]:
         if Bucket not in self.buckets:
@@ -156,8 +180,16 @@ class FakeS3Client:
         )
         return (
             f"{self.endpoint}/{Params['Bucket']}/{Params['Key']}"
-            f"?X-Amz-Expires={ExpiresIn}"
+            "?X-Amz-Algorithm=AWS4-HMAC-SHA256"
+            f"&X-Amz-Credential={PRESIGN_KEY}%2F20260101%2Fus-east-1%2Fs3%2Faws4_request"
+            "&X-Amz-Date=20260101T000000Z"
+            f"&X-Amz-Expires={ExpiresIn}"
+            "&X-Amz-SignedHeaders=host"
+            f"&X-Amz-Signature={'ab' * 32}"
         )
+
+    def close(self) -> None:
+        self.close_calls += 1
 
 
 @dataclass
@@ -224,7 +256,7 @@ class FakeStsClient:
                     "AccessKeyId": ADMIN_KEY,
                     "SecretAccessKey": ADMIN_SECRET,
                     "SessionToken": "",
-                    "Expiration": _FakeExpiration(self.clock.time() + 900),
+                    "Expiration": _FakeExpiration(self.clock.time() + int(kwargs.get("DurationSeconds", 900))),
                 }
             }
         return {
@@ -232,7 +264,7 @@ class FakeStsClient:
                 "AccessKeyId": "ASIA_PLUGIN_TEMP",
                 "SecretAccessKey": "temporary-secret",
                 "SessionToken": "" if self.return_without_token else "temporary-session-token",
-                "Expiration": _FakeExpiration(self.clock.time() + 900),
+                "Expiration": _FakeExpiration(self.clock.time() + int(kwargs.get("DurationSeconds", 900))),
             }
         }
 
@@ -244,9 +276,15 @@ __all__ = [
     "ADMIN_SECRET",
     "PRESIGN_KEY",
     "PRESIGN_SECRET",
+    "ADMIN_ACCESS_REF",
+    "ADMIN_SECRET_REF",
+    "PRESIGN_ACCESS_REF",
+    "PRESIGN_SECRET_REF",
     "FakeClock",
     "make_config",
     "make_env",
+    "FakeSecretStore",
+    "make_secret_store",
     "FakePaginator",
     "FakeS3Client",
     "FakeQuotaAdmin",

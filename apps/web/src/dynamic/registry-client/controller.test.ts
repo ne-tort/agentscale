@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createDynamicRegistryController, type RegistryClientRequest } from "./controller";
 import { routeToSnapshotPointer } from "./route-adapter";
+import { createServerVerifiedContext } from "../protocol";
 import type { RegistryResponse, RegistryFetcher, SignedRegistrySnapshot } from "../registry";
 
 const issuedAt = "2026-10-20T00:00:00.000Z";
@@ -61,6 +62,15 @@ function fetcher(build?: (correlationId: string, etag?: string) => RegistryRespo
 
 function controller(fetchSnapshot: RegistryFetcher, now = () => Date.parse(issuedAt) + 1000) {
   return createDynamicRegistryController({ fetchSnapshot, verifySnapshot: async () => true, now });
+}
+
+function verifiedContext(input: RegistryClientRequest["context"] = request().context) {
+  return createServerVerifiedContext(input, {
+    bridge: "web-api.session",
+    attestationId: "att-registry-0001",
+    verifiedAt: issuedAt,
+    ...(input.requestId ? { requestId: input.requestId } : {}),
+  });
 }
 
 describe("DynamicRegistryController", () => {
@@ -221,5 +231,50 @@ describe("DynamicRegistryController", () => {
     expect(observed).toHaveBeenCalledWith(1, "grant_revoked");
     expect(await client.resolve(request())).toMatchObject({ state: "resolved" });
     expect(etags).toEqual([undefined, undefined]);
+  });
+
+  it("enforces authoritative scope while preserving non-authoritative reads", async () => {
+    const client = controller(fetcher());
+
+    expect(await client.resolve(request({ requiresAuthoritativeScope: true })))
+      .toMatchObject({ state: "denied", code: "unverified_context" });
+    expect(await client.resolve(request())).toMatchObject({ state: "resolved" });
+    expect(await client.resolve(request({ requiresAuthoritativeScope: false })))
+      .toMatchObject({ state: "resolved" });
+
+    expect(await client.resolve(request({
+      context: verifiedContext(),
+      requiresAuthoritativeScope: true,
+    }))).toMatchObject({
+      state: "resolved",
+      manifest: { appId: "demo-app", version: "1.2.0" },
+      route: { id: "main", path: "/demo" },
+      digest: snapshot.entries[0].artifactDigest,
+    });
+  });
+
+  it("propagates authoritative scope through route resolution", async () => {
+    const client = controller(fetcher());
+    const routeRequest = {
+      pathname: "/demo",
+      snapshotHint: snapshot,
+      effectiveCapabilities: new Set(["platform.commands"]),
+    } as const;
+
+    expect(await client.resolveRoute({
+      ...routeRequest,
+      context: request().context,
+      requiresAuthoritativeScope: true,
+    })).toMatchObject({ state: "denied", code: "unverified_context" });
+
+    expect(await client.resolveRoute({
+      ...routeRequest,
+      context: verifiedContext(),
+      requiresAuthoritativeScope: true,
+    })).toMatchObject({
+      state: "resolved",
+      route: { id: "main", path: "/demo" },
+      digest: snapshot.entries[0].artifactDigest,
+    });
   });
 });

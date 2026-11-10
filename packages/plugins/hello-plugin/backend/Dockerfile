@@ -1,68 +1,102 @@
-# syntax=docker/dockerfile:1
-# Backend-образ пилотного плагина hello_plugin (эталон v4, §5.1).
+# Backend-образ пилотного плагина hello_plugin.
+# Контекст сборки: packages/plugins/hello-plugin.
 #
-# Контекст сборки — КОРЕНЬ пакета `packages/plugins/hello-plugin`
-# (`docker build -f backend/Dockerfile .`), поэтому COPY путей ниже начинается
-# с `backend/` и `migrations/`. Так один Dockerfile видит и backend, и changelog —
-# ровно те слои, которые задача 16 упаковывает в единый OCI-артефакт.
-#
-# Собирается как СЛОЙ OCI-артефакта (backend image + frontend + migrations),
-# подписывается cosign по digest, деплоится pin'ом по digest. `:latest` ЗАПРЕЩЁН.
-# `imagePullPolicy: IfNotPresent` задаётся НЕ здесь, а в k8s Deployment (§7.4).
-#
-# Distroless-подобные практики: отдельный build-stage, в финальном слое только
-# runtime, без компилятора/пакетного менеджера, non-root UID/GID, read-only rootfs
-# совместим, явный HEALTHCHECK на /health.
+# Обязательные supply-chain inputs (без небезопасных defaults):
+#   PYTHON_BASE_IMAGE=python:3.13-slim@sha256:<проверенный digest>
+#   LIQUIBASE_SHA256=<SHA256 liquibase-4.24.0.tar.gz>
+#   backend/requirements.lock — полный direct+transitive lock с хешами.
+# В репозитории нет проверенных digest/SHA256 и полного lock, поэтому образ
+# намеренно НЕ собирается до передачи этих inputs платформенным владельцем CI.
+# Mutable syntax directive и tag-only base здесь запрещены.
 
-# ---- Stage 1: сборка зависимостей в виртуальном окружении -------------------
-FROM python:3.13-slim AS builder
+ARG PYTHON_BASE_IMAGE
+FROM ${PYTHON_BASE_IMAGE} AS python-base
+ARG PYTHON_BASE_IMAGE
+RUN set -eu; \
+    if ! printf '%s\n' "${PYTHON_BASE_IMAGE:-}" | grep -Eq '^python:3\.13-slim@sha256:[0-9a-f]{64}$'; then \
+        printf '%s\n' 'FATAL: PYTHON_BASE_IMAGE must be python:3.13-slim@sha256:<64 lowercase hex>; no tag-only or empty base is allowed.' >&2; \
+        exit 1; \
+    fi
 
+# ---- Python dependencies: только полный воспроизводимый lock -----------------
+FROM python-base AS builder
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1
-
 WORKDIR /build
-COPY backend/requirements.txt ./
-RUN python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+# requirements.txt — direct manifest; requirements.lock появится в этом COPY,
+# когда будет получен из проверенного полного resolution. Не создавать его вручную.
+COPY backend/requirements* ./
+RUN set -eu; \
+    if [ ! -f requirements.lock ]; then \
+        printf '%s\n' 'FATAL: backend/requirements.lock is required; installing from requirements.txt is forbidden.' >&2; \
+        printf '%s\n' 'Provide a reviewed direct+transitive CPython 3.13 lock with an exact version and verified SHA256 for every artifact.' >&2; \
+        exit 1; \
+    fi; \
+    python -m venv /opt/venv; \
+    /opt/venv/bin/pip install --no-cache-dir --require-hashes --no-deps -r requirements.lock
 
-# ---- Stage 2: runtime --------------------------------------------------------
-FROM python:3.13-slim AS runtime
-
-# Liquibase + JRE нужны ТОЛЬКО для `liquibase update` в entrypoint (§3).
-# Версия зафиксирована, а не latest.
+# ---- Liquibase: download и SHA256 проверка ДО распаковки ---------------------
+FROM python-base AS liquibase
 ARG LIQUIBASE_VERSION=4.24.0
+ARG LIQUIBASE_SHA256
+RUN set -eu; \
+    if [ "${LIQUIBASE_VERSION}" != '4.24.0' ]; then \
+        printf '%s\n' 'FATAL: LIQUIBASE_VERSION is pinned to 4.24.0; bump only with a newly verified SHA256.' >&2; \
+        exit 1; \
+    fi; \
+    if ! printf '%s\n' "${LIQUIBASE_SHA256:-}" | grep -Eq '^[0-9a-f]{64}$'; then \
+        printf '%s\n' 'FATAL: LIQUIBASE_SHA256 must contain the verified lowercase SHA256 of liquibase-4.24.0.tar.gz.' >&2; \
+        exit 1; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl; \
+    rm -rf /var/lib/apt/lists/*; \
+    curl -fsSL --proto '=https' --tlsv1.2 \
+      "https://github.com/liquibase/liquibase/releases/download/v${LIQUIBASE_VERSION}/liquibase-${LIQUIBASE_VERSION}.tar.gz" \
+      -o /tmp/liquibase.tar.gz; \
+    printf '%s  %s\n' "${LIQUIBASE_SHA256}" /tmp/liquibase.tar.gz | sha256sum -c -; \
+    mkdir -p /opt/liquibase; \
+    tar -xzf /tmp/liquibase.tar.gz -C /opt/liquibase; \
+    rm -f /tmp/liquibase.tar.gz; \
+    chmod 0555 /opt/liquibase/liquibase
+
+# ---- Runtime: non-root, без curl, root-owned read-only application files ------
+FROM python-base AS runtime
 ENV LIQUIBASE_HOME=/opt/liquibase \
     PATH="/opt/liquibase:/opt/venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    LIQUIBASE_ALLOW_EXECUTE_COMMAND=false
+    LIQUIBASE_ALLOW_EXECUTE_COMMAND=false \
+    HOME=/tmp \
+    TMPDIR=/tmp
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends default-jre-headless ca-certificates curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /opt/liquibase \
-    && curl -fsSL "https://github.com/liquibase/liquibase/releases/download/v${LIQUIBASE_VERSION}/liquibase-${LIQUIBASE_VERSION}.tar.gz" \
-        | tar -xz -C /opt/liquibase \
-    && chmod +x /opt/liquibase/liquibase \
-    && groupadd --gid 10001 plugin \
-    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin plugin
+# JRE нужен только Liquibase. /bin/sh необходим контейнерному entrypoint;
+# curl и другие download tools в runtime не копируются и не устанавливаются.
+RUN set -eu; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends default-jre-headless ca-certificates; \
+    rm -rf /var/lib/apt/lists/*; \
+    groupadd --gid 10001 plugin; \
+    useradd --uid 10001 --gid 10001 --no-create-home --home-dir /tmp --shell /usr/sbin/nologin plugin; \
+    chmod 1777 /tmp
 
 COPY --from=builder /opt/venv /opt/venv
+COPY --from=liquibase /opt/liquibase /opt/liquibase
 WORKDIR /app
-COPY backend/app.py backend/liquibase_url.py backend/entrypoint.sh ./
+COPY backend/app.py backend/runtime_api.py backend/liquibase_url.py backend/entrypoint.sh ./
 COPY migrations/changelog.xml /app/migrations/changelog.xml
 
-# chown ДО переключения USER: у non-root нет прав менять владельца.
-RUN chmod 0555 /app/entrypoint.sh \
-    && chown -R plugin:plugin /app /opt/liquibase
+# Файлы принадлежат root и недоступны на запись UID 10001 даже без readOnlyRootFilesystem.
+RUN chmod 0555 /app/entrypoint.sh; \
+    chmod -R a-w /app /opt/liquibase /opt/venv
 
 USER 10001:10001
 EXPOSE 8080
 
-# /health = 200 только после успешного Liquibase update (entrypoint, §11 кр. 4).
+# Совместимость: readOnlyRootFilesystem=true + /tmp как emptyDir. /health=200
+# только после успешного Liquibase update в entrypoint.
 HEALTHCHECK --interval=5s --timeout=3s --start-period=60s --retries=3 \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).status==200 else 1)"
+    CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).status==200 else 1)"]
 
-# Не bash-логика инфраструктуры: контейнерный entrypoint, см. комментарий в файле.
 ENTRYPOINT ["/app/entrypoint.sh"]

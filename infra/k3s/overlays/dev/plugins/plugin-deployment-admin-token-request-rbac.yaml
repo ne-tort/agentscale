@@ -1,0 +1,44 @@
+# Separate TokenRequest capability for the two control-plane ServiceAccounts.
+# This grants NO deployment/service/secret/configmap/pod permission and no Secret read.
+# It only lets agentscale-api and the standalone plugin-gateway request a token
+# for plugin-deployment-admin.
+# The runtime TokenRequest broker is a mandatory follow-up: it must constrain
+# audiences/expiration and must never log, persist, or return tokens to plugins.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: plugin-deployment-admin-token-request
+  namespace: agentscale-dev
+  labels:
+    app.kubernetes.io/name: plugin-deployment-admin-token-request
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-lifecycle
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames: ["plugin-deployment-admin"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: plugin-deployment-admin-token-request
+  namespace: agentscale-dev
+  labels:
+    app.kubernetes.io/name: plugin-deployment-admin-token-request
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-lifecycle
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: plugin-deployment-admin-token-request
+subjects:
+  # Only the main API and standalone gateway control planes can ask for this one
+  # lifecycle identity's short-lived token. Never add typed-RPC, plugin-runtime,
+  # modular backend, or other workload ServiceAccounts.
+  - kind: ServiceAccount
+    name: agentscale-api
+    namespace: agentscale-dev
+  - kind: ServiceAccount
+    name: plugin-gateway
+    namespace: agentscale-dev

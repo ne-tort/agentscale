@@ -6,6 +6,14 @@
 
 from __future__ import annotations
 
+from prodavan.domain.plugins.helpers import (
+    PLUGIN_INSTANCE_ID_PATTERN,
+    plugin_instance_id_for,
+)
+from prodavan.domain.plugins.scopes import (
+    SecretDeliveryRefValidator,
+    validate_plugin_instance_scopes,
+)
 from prodavan.domain.plugins.types import (
     ARTIFACT_DIGEST_PATTERN,
     CAPABILITY_ALLOWLIST,
@@ -55,6 +63,7 @@ __all__ = [
     "MANIFEST_REQUIRED_FIELDS",
     "PATH_PATTERN",
     "PLUGIN_ID_PATTERN",
+    "PLUGIN_INSTANCE_ID_PATTERN",
     "PROTOCOL_VERSION",
     "RELATIVE_PATH_PATTERN",
     "SEMVER_PATTERN",
@@ -79,8 +88,11 @@ __all__ = [
     "QuotaRef",
     "RegistryOutcome",
     "RegistryResult",
+    "SecretDeliveryRefValidator",
     "load_schema",
+    "plugin_instance_id_for",
     "validate_artifact_digest",
     "validate_manifest",
+    "validate_plugin_instance_scopes",
 ]
 

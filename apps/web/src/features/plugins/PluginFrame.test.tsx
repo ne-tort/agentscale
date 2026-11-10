@@ -20,6 +20,7 @@ import {
 import { pluginSessionRequired } from "./errors";
 
 const SAFE_SRC = "https://plugin-origin.agentscale.dev/tenant-co_123/mod_equipment/1.2.0/index.html";
+const DIGEST = `sha256:${"a".repeat(64)}`;
 
 function render(element: ReactElement): string {
   return renderToStaticMarkup(<SettingsProvider>{element}</SettingsProvider>);
@@ -30,6 +31,7 @@ function frameMarkup(props: Partial<PluginFrameProps> = {}): string {
     pluginId="mod_equipment"
     companyId="co_123"
     version="1.2.0"
+    artifactDigest={DIGEST}
     src={SAFE_SRC}
     {...props}
   />);
@@ -140,6 +142,7 @@ describe("PluginFrame: sandbox / атрибуты / состояния", () => {
       pluginId="mod_equipment"
       companyId=""
       version="1.2.0"
+      artifactDigest={DIGEST}
       src={SAFE_SRC}
     />);
     expect(markup).toContain('data-plugin-company=""');

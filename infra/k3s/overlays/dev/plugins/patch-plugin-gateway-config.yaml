@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: plugin-gateway-config
+data:
+  # Same trusted internal Service URL as the dev API overlay. DeploymentAdmin
+  # also runs in this entrypoint, so SecretProjection must receive identical config.
+  PLUGIN_RUNTIME_GATEWAY_URL: http://plugin-gateway.agentscale-dev.svc:8080

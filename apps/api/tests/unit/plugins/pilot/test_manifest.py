@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from .conftest import (
+    APP_PATH,
     CAPABILITY_ALLOWLIST,
     DOCKERFILE_PATH,
     ENTRYPOINT_PATH,
@@ -44,7 +45,11 @@ def test_manifest_is_valid_json_and_has_exact_required_keys(manifest: dict[str, 
         "plugin_id", "version", "protocol", "frontend", "backend", "capabilities",
         "migrations", "egress_ref", "public_pages", "webhooks", "min_platform_version",
     }
-    assert set(manifest) == required, "additionalProperties=false: только 11 полей контракта 01"
+    optional = {"rpc_operations", "mcp_servers"}
+    assert required <= set(manifest)
+    assert set(manifest) == required | optional, (
+        "additionalProperties=false: обязательные поля и только явные optional declarations"
+    )
 
 
 def test_manifest_identity(manifest: dict[str, Any]) -> None:
@@ -156,6 +161,32 @@ def test_manifest_validates_against_task01_schema(manifest: dict[str, Any], sche
     assert not errors, "манифест не проходит schema.json задачи 01: " + "; ".join(
         f"{list(e.path)}: {e.message}" for e in errors
     )
+
+
+def test_typed_rpc_operations_are_canonical_unique_and_match_backend(manifest: dict[str, Any]) -> None:
+    from prodavan.application.plugins.bootstrap.service import _rpc_operations
+
+    operations = _rpc_operations(manifest).operations
+    assert len(operations) == 2
+    assert {item.capability_id for item in operations} == {"hello.greetings"}
+    assert {item.capability_version for item in operations} == {"1.0"}
+    assert len({item.backend_path for item in operations}) == len(operations)
+    assert {
+        (item.operation, item.http_method, item.backend_path, item.public)
+        for item in operations
+    } == {
+        ("list", "GET", "/api/greetings/list", False),
+        ("greet", "POST", "/api/greetings", False),
+    }
+    backend = read_text(APP_PATH)
+    assert '@app.get("/api/greetings/list")' in backend
+    assert '@app.post("/api/greetings")' in backend
+
+
+def test_manifest_contains_no_webhook_secret_or_secret_reference() -> None:
+    raw = read_text(MANIFEST_PATH)
+    for forbidden in ("webhook_secret", "webhook_secret_ref", "WEBHOOK_SECRET", "PLUGIN_WEBHOOK_SECRET", "file://", "vault://"):
+        assert forbidden not in raw
 
 
 def test_schema_forbids_self_reference_when_present(schema: dict[str, Any] | None) -> None:

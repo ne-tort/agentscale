@@ -29,6 +29,7 @@
 from __future__ import annotations
 
 import dataclasses
+import inspect
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 from uuid import uuid4
@@ -49,7 +50,7 @@ from prodavan.application.plugins.transport.errors import (
 class CapabilityServiceLike(Protocol):
     """Структурный контракт ``PluginCapabilityService.invoke`` (задача 03)."""
 
-    def invoke(
+    async def invoke(
         self,
         *,
         claims: Any,
@@ -59,7 +60,7 @@ class CapabilityServiceLike(Protocol):
     ) -> Any: ...
 
 
-def get_capability_service(request: Request) -> CapabilityServiceLike:
+async def get_capability_service(request: Request) -> CapabilityServiceLike:
     """Достать сервис из ``app.state`` (родитель связывает при F11).
 
     Варианты привязки (в порядке приоритета):
@@ -88,6 +89,8 @@ def get_capability_service(request: Request) -> CapabilityServiceLike:
                 raise _service_unavailable(f"capability service factory failed: {exc}") from exc
         except Exception as exc:
             raise _service_unavailable(f"capability service factory failed: {exc}") from exc
+        if inspect.isawaitable(built):
+            built = await built
         if built is None:
             raise _service_unavailable("capability service factory returned None")
         return built  # type: ignore[return-value]
@@ -269,6 +272,21 @@ def _mcp_register(body: Any, claims: PluginClaims) -> Any:
     )
 
 
+def _mcp_invoke(body: Any, claims: PluginClaims) -> Any:
+    c = _contracts()
+    data = body.model_dump(exclude_none=True)
+    return c.McpInvokeRequest(
+        server_id=data["server_id"],
+        tool_name=data["tool_name"],
+        arguments_json=data["arguments_json"],
+        arguments_digest=data["arguments_digest"],
+        # Never accepted from the caller: the broker cross-checks this value
+        # against the exact durable grant and signed artifact below.
+        manifest_version=claims.manifest_version,
+        envelope=_envelope(claims),
+    )
+
+
 def _secrets_read(body: Any, claims: PluginClaims) -> Any:
     return _request_dataclass("SecretsReadRequest", body, claims)
 
@@ -349,7 +367,7 @@ def _decision_value(result: Any) -> Any:
     return getattr(result, "decision", None) if not isinstance(result, dict) else result.get("decision")
 
 
-def invoke_capability(
+async def invoke_capability(
     *,
     request: Request,
     claims: PluginClaims,
@@ -365,7 +383,7 @@ def invoke_capability(
     fallback для невалидного входа/непредвиденного сбоя; fail-closed.
     """
     try:
-        result = service.invoke(
+        result = await service.invoke(
             claims=claims,
             capability=capability,
             operation=operation,

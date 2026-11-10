@@ -1,9 +1,25 @@
 # Prodavan — продукт
 
-**Единственный источник правды по смыслу продукта.**  
-Всё в [`target/`](target/) и старые `docs/01…10` — **legacy**, справочно (см. [LEGACY.md](LEGACY.md)).
+**Источник правды по смыслу продукта.** Категории остальной документации —
+[current / target / accepted ADR / as-built / migration reports / history](LEGACY.md);
+принадлежность файла к каталогу `01…10` или `target/` сама по себе не отменяет
+принятый актуальный ADR.
 
-## Что это
+## Статусы: текущее, переходное и целевое
+
+| Слой | Что означает | Чем подтверждается |
+|---|---|---|
+| **ТЕКУЩИЙ S1** | Рабочий продукт: React web shell, FastAPI, project-scoped agent Pods, файлы/tools, PostgreSQL и текущие declarative modules. Независимый аудит зафиксировал S1 рабочим на audited HEAD `6ee720dd`; это не переоценка каждой UX-детали ниже. | Код S1 и [текущий статус миграции](migration/plugin-migration-status.md) |
+| **ПЕРЕХОДНЫЙ strangler** | Declarative-app остаётся работающим путём, пока plugin-контексты переносятся по одному. Наличие plugin-таблиц, роутеров, feature flag или кадра hello-plugin не означает cutover и не разрешает удалять старые таблицы/seed helpers. | [STOP-SHIP статус](migration/plugin-migration-status.md), [безопасный cutover](migration/plugin-cutover-safety.md) |
+| **ЦЕЛЕВОЙ plugin v4** | Полноценные plugin-приложения с backend + frontend bundle, tenant DB, собственными миграциями, отдельным trust/lifecycle и динамической доставкой артефактов. **Это design target, а не подтверждённый vertical slice.** | Принятые [ADR-006](architecture-migration/ADR-006-plugin-modules.md), [ADR-007](architecture-migration/ADR-007-direct-plugin-db.md), [ADR-008](architecture-migration/ADR-008-lifecycle-and-boundaries.md); [authoring matrix](PLUGIN-AUTHORING.md) |
+
+> **STOP / security audit:** plugin platform сейчас **emergency disabled**
+> (`PLUGIN_PLATFORM_ENABLED=false` в GitOps-конфиге). Ни один сквозной
+> plugin-сценарий не подтверждён live. Параллельный emergency remediation не
+> считается завершённым или проверенным этим документом. Включение, cutover и
+> удаление declarative-app запрещены до отдельного acceptance-решения.
+
+## Текущий S1: что это
 
 SaaS: **управление изолированными Pod'ами через UI**. Внутри каждого Pod — **рабочая среда агента**, не «чат с GPT».
 
@@ -18,7 +34,7 @@ SaaS: **управление изолированными Pod'ами через 
 ```text
 Пользователь (UI)
     → API (pod-service, projects, auth, agent sessions, triggers)
-    → Kubernetes Pod (prodavan-sandboxes)
+    → Kubernetes Pod (sandbox namespace контура; dev = agentscale-dev-sandboxes)
         → agent-runtime (single container): proprietary SDK adapters + Platform OpenClaw
         → workspace FS, MCP/tools, файлы проекта
 ```
@@ -39,19 +55,23 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 
 ### Chat UX (project workspace)
 
-- **Multi-chat** — несколько agent sessions на project; pin — **per employee**. Rail: **дерево проектов** — каждая ветка = **запущенный** (`active`) проект кабинета со своими чатами (пока проект не запущен — его нет в дереве; показ не зависит от выбранного проекта; `/chats/sidebar` отдаёт `projects[]` только active, старые поля `pinned`/`project_chats` сохранены для совместимости). В ветке: pinned-чаты сверху, затем по `last_message_at` desc; свёрнутость веток запоминается (`SharedPreferences`, `prodavan.chats.rail.collapsedProjects`). Новый чат: «+» в ветке проекта и muted-строка «Новый диалог» в пустой ветке (та же команда; dim/без tap при `!new_chat_enabled`; исчезает при первом чате); глобальной кнопки в tree-режиме нет — осталась только в legacy fallback (backend без `projects[]`, там чат создаётся в selected project). Ветка требует `active`+pod running (`new_chat_enabled` per project). Повторный tap по **уже открытому** диалогу не remount'ит workspace. Settings «Чат» — только при sendable (active+running). Workspace только с явным `sessionId`.
+Ниже — **продуктовый UX-контракт S1**, а не утверждение, что каждая деталь уже
+подтверждена live в React. Старые Flutter-имена не описывают текущий web shell;
+as-built реализации проверяется по `apps/web/src/` и backend-коду.
+
+- **Multi-chat** — несколько agent sessions на project; pin — **per employee**. Rail: **дерево проектов** — каждая ветка = **запущенный** (`active`) проект кабинета со своими чатами (пока проект не запущен — его нет в дереве; показ не зависит от выбранного проекта; `/chats/sidebar` отдаёт `projects[]` только active, старые поля `pinned`/`project_chats` сохранены для совместимости). В ветке: pinned-чаты сверху, затем по `last_message_at` desc; Новый чат: «+» в ветке проекта и muted-строка «Новый диалог» в пустой ветке (та же команда; dim/без tap при `!new_chat_enabled`; исчезает при первом чате); глобальной кнопки в tree-режиме нет — осталась только в legacy fallback (backend без `projects[]`, там чат создаётся в selected project). Ветка требует `active`+pod running (`new_chat_enabled` per project). Повторный tap по **уже открытому** диалогу не remount'ит workspace. Settings «Чат» — только при sendable (active+running). Workspace только с явным `sessionId`.
 - **Cabinet hubs** — «Управление» (`nav.placement: management`) и «Данные» (`data`) — страницы-хабы как peer к Projects; **скрыты**, если ни один модуль не подключил вкладку. Промпты/MCP/Файлы — preference tiles в «Управление»; **Подбор техники** (`mod_equipment`) — hub в «Данные».
-- **Live streaming** — assistant text из SSE `text_delta` без full reload после turn; ingress принимает cumulative (Cursor) или incremental (OpenClaw/Ollama) и отдаёт на wire только incremental **без** suffix/prefix overlap-merge (overlap глотал слоги). Flutter **append-only**; `tool_call` закрывает streaming-блок.
-- **Block transcript API** — `GET /chat/transcript?session_id=` → `{ blocks: [...] }` (user, assistant_markdown, tool_*, subagent, plan, thinking, usage); `after_seq` остаётся для внешних клиентов, Flutter UI грузит **весь ход** (при `turn_in_progress` сервер отдаёт события от user-промпта хода, а не только последние 500). `turn_in_progress` + `oldest_seq`/`has_more`.
+- **Live streaming** — assistant text из SSE `text_delta` без full reload после turn; ingress принимает cumulative (Cursor) или incremental (OpenClaw/Ollama) и отдаёт на wire только incremental **без** suffix/prefix overlap-merge (overlap глотал слоги). React reducer обрабатывает assistant text append-only; `tool_call` закрывает streaming-блок.
+- **Block transcript API** — `GET /chat/transcript?session_id=` → `{ blocks: [...] }` (user, assistant_markdown, tool_*, subagent, plan, thinking, usage); `after_seq` остаётся для incremental tail, React UI грузит **весь ход** (при `turn_in_progress` сервер отдаёт события от user-промпта хода, а не только последние 500). `turn_in_progress` + `oldest_seq`/`has_more`.
 - **Turn timeline** — один элемент ленты = **один ход**: промпт пользователя, **одна** свёрнутая строка «Работал 12 мин · 100 действий» (все thinking/tool calls/results/промежуточный текст) и **конечный ответ**. Раскрытие строки переживает стрим/перезагрузку. Конечный ответ помечается самим агентом тегом `<final_answer>…</final_answer>` (протокол добавляется в каждый runtime-запрос); тег вырезается из UI, fallback для старых ответов — последний assistant-текст хода. Работа и ответ не пересекаются: таблица/код в ответе не разрываются.
 - **Hover-навигация** — у правого края транскрипта невидимая полоса (проявляется при наведении мыши): по тику на каждый user-промпт, hover-превью текста, клик — прыжок к ходу (reverse-список из turn-элементов).
 - **Cursor-style rendering** — assistant inline без bubble; reasoning/tools — muted underlined lines + inset panel; tools paired by id; tool expand с path/`+N −M`.
 - **Bulk history loading** — контроллер проходит `before_seq` страницы (≤500 событий) в память и коммитит историю в UI **один раз**; никакой поэлементной автоподгрузки и перестроек по ходу. При достижении cap — ручная кнопка «Загрузить ещё». Открытие чата — один paint после полного ответа API.
-- **Selection** — `SelectionArea` на turn-элемент (drag-to-select работает внутри скролла), plain `Text` / non-selectable markdown.
+- **Selection** — текст transcript должен оставаться доступным для обычного браузерного выделения; Flutter `SelectionArea` не является реализацией текущего React shell.
 - **Markdown** — GFM **и во время стрима**: завершённые блоки текста рендерятся один раз и переиспользуются, на кадр перестраивается только текущий абзац/код; финальный ответ — один полный parse. LLM pipe-tables normalized (`||` rows, missing separators), строки внутри код-блоков не трогаются. Панель инструмента обрезается (120k символов), diff-статистика кэшируется.
 - **Reload mid-turn** — перезагрузка/навигация во время работы агента не меняет картинку: turn-модель строится из тех же блоков, а live-поллинг каждые 2.5 с **заменяет открытый ход целиком** проекцией из того же tail-эндпоинта (без incremental-merge и склейки дельт). Ключ хода — timestamp+text user-блока; раскрытие и порядок стабильны.
 - **Chat settings** — тайл «Настройки проекта» (переехал из шапки чата), быстрый model picker (пилюля в композере слева от «Отправить» → та же страница-таблица выбора модели, что в настройках чата, с inline-поиском по label/id/publisher), title rename, pin, session Tokens/Requests tiles; Enter отправляет, Shift+Enter — новая строка. Usage — **не отдельный блок**: hover-ряд под завершённым ответом (модель · вход: N · выход: N · $ · копирование), цена = runtime `cost_usd`, иначе расчёт из цен каталога; отсутствующие поля не рендерятся.
-- **Chat header module buttons** — views с `ui_json.chat_header {icon,label}` модулей, подключённых к проекту, инжектят IconButton в шапку чата (после pin) — например «Бюджетирование» из mod_equipment; открывается runtime-хост модуля со скопом активного чата (`chat_header.dart`).
+- **Chat header module buttons** — продуктовый metadata-контракт `ui_json.chat_header {icon,label}` для кнопки модуля со scope активного чата. Старая Flutter-реализация (`chat_header.dart`) не является доказательством текущей React-интеграции; as-built проверять в `apps/web/src/`.
 - **Working indicator** — при активном ходе без стримящегося текста и без pending tool внизу транскрипта «agentscale работает…» (пульсирующие точки): видно сразу после отправки и в паузах между событиями сервера.
 - **New chat / composer draft** — «Новый диалог» не создаёт session в БД сразу. Session materialize при draft ≥5 символов или первой отправке. Composer text кэшируется на backend (`employee_composer_drafts`); пустой/короткий/пробелы — не хранятся; после send draft очищается. Пустые session без draft скрываются и GC. В rail пустой чат с draft — иконка `edit_note` (как pin для закреплённых).
 - **Chat attachments** — upload → MinIO `inbox/`; on send API hot-pushes file into running Pod `/workspace/inbox/…` and prefixes the agent prompt with path. Tabular (`csv`/`tsv`/`xlsx`/`xls`/`xml`) → JSON: ≤200 rows inlined into the bridge message (UI spoiler), larger files written as `.json` in the workspace (not raw spreadsheet). UI limits are wide (`500k` chars, `32` attachments) and match API ceilings; company `max_attachment_mb` still caps blob size.
@@ -62,11 +82,11 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 
 - **k8s metrics-server** — cluster addon для CPU/RAM sandbox pod'ов; Prodavan не деплоит отдельный metrics microservice.
 - **Metrics BC** (`application/metrics/`) — Kafka-first read-model внутри `prodavan-api`: facts (`metrics.usage.turn`, `metrics.counter.delta`, `metrics.storage.snapshot`, presence heartbeat) + `relation.*` links → Redis counters. Cascade `project → cabinet → company`; **side-incr без cascade** на `session` и `employee` (кто отправил turn). Overview / dialogs / chat settings читают store overlay + SQL fallback (`agent_usage`, `user_message`). Presence: login/refresh/logout + cabinet heartbeat. Backfill: `POST /admin/metrics/rebuild` (также session/employee). Series: `GET /admin/metrics/series` / `GET /cabinets/{id}/metrics/series`. Employee: `GET /companies/{id}/employees/{eid}/metrics`.
-- **Dialogs metrics UI** — таблица «Диалоги»: колонки Tokens/Requests; pin — иконка в selection рядом с delete (не колонка). Настройки чата — `SessionMetricsWrap` (tokens + requests).
+- **Dialogs metrics UI** — таблица «Диалоги»: колонки Tokens/Requests; pin — иконка в selection рядом с delete (не колонка). Настройки чата в web UI показывают tokens + requests согласно доступному backend-контракту.
 - **Project lifecycle** — статусы `draft` | `active` | `paused` | `error` | `completed`. `error` = fatal pod failure after grace; **node/WSL flap** (`NotFound` / transient Unknown при `desired=RUNNING`) не залипает в `error` сразу — grace + reconcile **auto-reprovision**; recovery также через `POST /projects/{id}/reload`. Chat readable для `active|paused|error`; send только при `active` + `observed_state=running`; иначе composer wake (tap → resume/reload).
 - **Agent sessions** — pause **suspend** (recoverable); resume/reload reactivate ту же PG-сессию и re-register bridge. История чата в Postgres сохраняется.
 - **Chat durability** — SoT UI-транскрипта = **Postgres** (`agent_sessions` / `agent_events`), не MinIO. `user_message` коммитится сразу; stream events flush mid-turn; финальный commit на DONE. Crash mid-turn не должен съедать уже записанный user turn. После **sync/rematerialize** (bump `hydrate_generation` → recreate pod) локальный runtime-диалог в emptyDir теряется; API при следующем send **rehydrate**’ит prior turns из Postgres в bridge message (stamp `adapter_state.prodavan_hydrate_generation`), чтобы агент продолжал тот же чат.
-- **Workspace durability** — MinIO `projects/{workspace_key}/workspace/` = last-good tree; live Pod `/workspace` = emptyDir. После успешного agent turn и **перед pause** API делает **dehydrate** (pod→MinIO overwrite). Resume/reload hydrate MinIO→emptyDir. Hydrate init (API image, root) после записи делает **chown → uid агента (1000)**, иначе agent-runtime получает `EACCES` на round-trip файлах. `.openclaw-data/` (transcripts/session-map) **не** dehydrate'ится — crash-buffer; SoT чата = Postgres. Без dehydrate правки агента на диске Pod терялись при pause/reload/flap.
+- **Workspace durability** — MinIO `projects/{workspace_key}/workspace/` = last-good tree; live Pod `/workspace` = emptyDir, **не PVC**. После успешного agent turn и **перед pause** API делает **dehydrate** (pod→MinIO overwrite). Resume/reload hydrate MinIO→emptyDir. Hydrate init (API image, root) после записи делает **chown → uid агента (1000)**, иначе agent-runtime получает `EACCES` на round-trip файлах. `.openclaw-data/` (transcripts/session-map) **не** dehydrate'ится — crash-buffer; SoT чата = Postgres. Без dehydrate правки агента на диске Pod терялись при pause/reload/flap.
 - **Workspace sync (modules)** — rematerialize модулей **только** явным `POST /projects/{id}/sync` («Обновить проект») или при launch. Изменения cabinet/module data помечают `workspace_outdated_at` до sync.
 - **Trigger workflow** — `webhook.http` и `system.schedule` проходят durable project-trigger outbox, claim/lease/retry и запускают полноценный agent turn в Pod/runtime с JSON payload события; `project.prepare` остаётся lifecycle-only acknowledgement. Результат/ошибка turn fanout'ится в outgoing webhook outbox после завершения.
 
@@ -82,10 +102,10 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 | Document Store (Mongo) | `application/document_store/`, admin `/admin/document-store`, [ADR](02-architecture/ADR-document-store-mongo.md) |
 | **Documents module** (convert/read/create/fill) | `application/documents/` + `core/infra/gotenberg_manager.py`; Gotenberg (office→pdf) + offline-фолбэк; pod-surface `/projects/{pid}/documents/*` (Bridge scope `documents`): источники разрешаются по `asset_id`/`version_id` с tenant/asset ACL, клиентский `storage_key` не является доступом; локальные non-PDF маршруты остаются доступны и при включённом Gotenberg; metasyntax actions `documents.convert` / `documents.fill_template`; инфра `infra/k3s/base/platform/gotenberg.yaml` |
 | **Equipment: Бюджетирование** | `application/modules/equipment_budget.py` (заполнение КП-шаблона Commerce XML-патчем: значения+кэш формул, trim КП; standalone КП/Спецификация fill), таблица `budget_lines` (chat-scoped снапшот best-offer), экшены `equipment.budget_sync` / `equipment.budget_export` (xlsx → content asset) / `equipment.kp_export` / `equipment.spec_export` (fill → Gotenberg PDF), view `budget_lines_list` + кнопка в шапке чата (`ui_json.chat_header`), шаблоны `apps/api/templates/*.xlsx` |
-| **Equipment: таблицы/UX** | `AppEntityCollection` — per-column конфиг `ui_json.columns[]`: `max_lines` (многострочность до N строк, потом ellipsis), `max_width` (cap ширины колонки), `align`, `editable` (tap-to-edit числовая ячейка → `patchField`); горизонтальный скролл при превышении суммы ширин; `ui_json.summary {kind: budget_totals}` — сводка (закупка/продажа с НДС, маржа ₽/%, без НДС, НДС) над таблицей; `ui_json.scaffold.actions[]` — кнопки-иконки в AppBar (invoke_action + автоскачивание `file_ref`) |
+| **Equipment: таблицы/UX** | React `features/modules/ModuleRuntime.tsx` + `features/equipment/`: collection/form/detail views, typed `scaffold.actions` и `row_actions`, row navigation/action invoke и table scroll. Старые Flutter-эффекты `AppEntityCollection` (`max_lines`, `max_width`, `editable`, `budget_totals`) **не считаются автоматически реализованными в React**: конкретную визуальную поддержку проверять по web-коду |
 | **Модуль «Шаблоны» (mod_templates)** | Загружаемые xlsx-шаблоны документов: типы `budget` (двухлистовой: Бюджетирование+КП), `commercial_proposal` (одностраничный КП, значения), `specification` (Спецификация). Строки в кабинете/компании, колонки: `template_type` (enum), `title`, `file` (FileRef), `active`. Экспортёры equipment резолвят последнюю активную строку типа → байты из object store, при отсутствии/ошибке — встроенный шаблон. Nav: management (employee). Контракты layout в docstring `equipment_budget.py` |
 **Equipment: Поставщики (trusted_sellers)** — реестр поставщиков: авто-маппинг продавцов из found_offers (seller/каталог) при пайплайне с дедупликацией по имени/алиасам, флаги (Проверен / Отсрочка / Приоритетная закупка / Включён — отключённые подсвечиваются warning), маржа % (инициализирует markup бюджетной строки, ручные правки не перезаписываются), доставка ₽ (учитывается в «Закупке»), реквизиты для договоров, комментарий; уникальность имени и алиасов валидируется на записи; поиск агента (OpenSearch) и материализация офферов исключают отключённых поставщиков; приоритетные поднимаются при точном совпадении партномера.
-**Equipment WAVE7: разделение ответственности «Подбор товаров»** — ИИ выбирает, автоматика нормализует. Агент пишет только `request_lines` (позиции заказчика) и **`found_groups`** — группы-кандидаты: партномер + алиасы (`aliases_pn` — другие написания P/N, `aliases_hash` — хэши позиций) + `match_kind` (exact | analog | doubt — «есть сомнения» отдельная категория) + note. **`found_offers` материализуется платформенным пайплайном** (`equipment.pipeline`, `application/modules/equipment_offers_service.py`): OS-поиск по ключам групп (terms part_number + src_hash, чанки с пагинацией), fx-конвертация (price ₽ + price_orig/currency), `group_id`/`line_id`/`source_title` связки, `priority` (приоритетный поставщик → зелёный текст row_style), `is_best` (лучший оффер группы: живой приоритетный → мин. цена; stale уступает), «лицо группы» (`face_title/face_price/face_seller` = выбранный ?? best), best-группа позиции (`is_best` + `rank` для сортировки: точность → цена), `found_count`/статусы позиций, авто-регистрация поставщиков, снапшот бюджетирования и таблица «Закупка». Офферы, чья позиция исчезла из каталога → `is_stale` + warning (цена не трогается); цена изменилась → обновление в исходной валюте, **кроме полей из `manual`** (ручные правки UI поверх синка — валидируются на update-пути `mark_manual_overrides`). Легаси-офферы без `group_id` удаляются (данные тестовые). Триггеры: запись found_groups (materialize=True), записи request_lines/found_offers через UI (пересчёт), кнопка «Обновить цены», **`on_load {action}` хук вьюхи** (сверка при открытии таблиц «Найденные товары»/«Закупка» — Flutter вызывает экшен тихо и перечитывает rows). MCP `prodavan-equipment` **v2.0.0**: `found_groups_upsert/list/get` (валидация: line_id + хотя бы один ключ; match_kind exact|analog|doubt), `found_offers_*` инструменты удалены — инструкции ИИ в описаниях инструментов учат выбору групп, а не копированию товаров.
+**Equipment WAVE7: разделение ответственности «Подбор товаров»** — ИИ выбирает, автоматика нормализует. Агент пишет только `request_lines` (позиции заказчика) и **`found_groups`** — группы-кандидаты: партномер + алиасы (`aliases_pn` — другие написания P/N, `aliases_hash` — хэши позиций) + `match_kind` (exact | analog | doubt — «есть сомнения» отдельная категория) + note. **`found_offers` материализуется платформенным пайплайном** (`equipment.pipeline`, `application/modules/equipment_offers_service.py`): OS-поиск по ключам групп (terms part_number + src_hash, чанки с пагинацией), fx-конвертация (price ₽ + price_orig/currency), `group_id`/`line_id`/`source_title` связки, `priority` (приоритетный поставщик → зелёный текст row_style), `is_best` (лучший оффер группы: живой приоритетный → мин. цена; stale уступает), «лицо группы» (`face_title/face_price/face_seller` = выбранный ?? best), best-группа позиции (`is_best` + `rank` для сортировки: точность → цена), `found_count`/статусы позиций, авто-регистрация поставщиков, снапшот бюджетирования и таблица «Закупка». Офферы, чья позиция исчезла из каталога → `is_stale` + warning (цена не трогается); цена изменилась → обновление в исходной валюте, **кроме полей из `manual`** (ручные правки UI поверх синка — валидируются на update-пути `mark_manual_overrides`). Легаси-офферы без `group_id` удаляются (данные тестовые). Триггеры: запись found_groups (materialize=True), записи request_lines/found_offers через UI (пересчёт), кнопка «Обновить цены», metadata **`on_load {action}`** для сверки при открытии таблиц; эквивалентный React-обработчик не выводится из старой Flutter-реализации и проверяется отдельно по web-коду. MCP `prodavan-equipment` **v2.0.0**: `found_groups_upsert/list/get` (валидация: line_id + хотя бы один ключ; match_kind exact|analog|doubt), `found_offers_*` инструменты удалены — инструкции ИИ в описаниях инструментов учат выбору групп, а не копированию товаров.
 **Equipment WAVE7: «Закупка» (procurement)** — новая таблица-агрегат по поставщикам (chats=current, материализуется пайплайном): Товаров / Выбрано / Сумма ₽ (выбранных: Σ qty·price) / Маржа % (editable; из trusted_sellers.margin_pct, дефолт 10) / Включить доставку (editable bool-ячейка) / Доставка ₽ / Сумма с маржой / Маржа ₽ (с вычетом доставки при включении). row_tap → `supplier_offers` (офферы поставщика с чекбоксами выбора: `data.select_row` group_by line_id — один выбранный товар на позицию заказчика у всех поставщиков; выбор = переопределение best). `context_bind {"seller": {"field": "seller"}}` — привязка по полю контекстного ряда. Ручная правка строки закупки → `equipment.procurement_apply` (trigger row.updated): margin_pct → реестр поставщика + бюджетные строки (markup_source='seller'), доставка/суммы пересчитываются. Бюджетные строки помечают `markup_source` (default|seller|manual): 'seller' обновляется при смене margin_pct поставщика, 'manual' (UI-правка markup) не трогается. Бюджет без выбора строится из best-группы → её best-оффер; поставщики никогда не резолвятся из бренда.
 **Equipment: валюты и хэш позиций** — found_offers хранит исходную цену (``price_orig`` + ``currency``) и рублёвую ``price`` (конвертация по курсам ЦБ РФ при материализации, кеш 12ч, fallback-константы); ``src_hash`` (sha1 casefold(поставщик|товар)) пишется в OS-документы при индексации и является ключом оффера (group_id, src_hash) + идентификатором позиции без партномера (алиас хэша в группе). Сверка с каталогом — пайплайн (кнопка «Обновить цены», on_load таблиц, перед бюджетом): цена изменилась → обновляется ``price_orig`` и рублёвый пересчёт (сравнение всегда в исходной валюте, не в рублях); позиция исчезла → ``is_stale`` + warning-подсветка, цена не трогается.
 **Активный чат персистентно** — выбор чата хранится на сервере (employee_project_selections.chat_session_id, тот же механизм, что выбор проекта): переживает перезагрузки, сбрасывается при смене проекта, восстанавливается при загрузке кабинета.
@@ -93,7 +113,7 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 **Валюта каталога** — currency канонический колонка каталога (маппинг в схеме + синонимы «валюта/currency», самолечение legacy-мап без валюты) → OS-доки → хиты поиска → found_offers (MCP копирует; не-RUB конвертируется в ₽, оригинал в price_orig); «Обновить цены» лечит мислейбл RUB из OS-дока.
 **Кнопки экспорта на таб-хосте** — RuntimeDataAdapter пробрасывает invokeAction (раньше кнопки молчали: seeds был адаптером, а не контроллером).
 **Сводка Бюджетирование — таблица** — summary рендерится настоящей таблицей (показатель/значение); строки таблиц разделены разделителем + вертикальными отступами (многострочные ячейки больше не сливаются).
-**Таблицы UX** — горизонтальный скролл таблиц с видимой полосой + drag-to-scroll мышью; web-скачивание экспортов через Blob/anchor (file_picker.saveFile не работает в браузере).
+**Таблицы UX** — продуктовый контракт предусматривает горизонтальный скролл и drag-to-scroll; web-скачивание экспортов выполняется через Blob/anchor. `file_picker.saveFile` относится к старому Flutter UI и не описывает React shell.
 **Шаблоны в «Подборе техники»** — таблица templates внутри mod_equipment (хаб-тайл «Шаблоны», «Управление» больше не содержит отдельный модуль), встроенные шаблоны из пользовательского файла (3 листа: Бюджетирование/КП/Спецификация) засеяны строками builtin/*; движок экспорта адаптивен к слотам шаблона и обновляет лист Спецификации кешами формул.| Search Index (OpenSearch) | `application/search_index/`, admin `/admin/search-index`, [ADR](02-architecture/ADR-search-index-opensearch.md) |
 | Tenant Infra Gateway | `application/tenant_infra/` — Cache/Docs/UserDB/Events/Objects + module data/meta/actions via `:8001` + Bridge scopes + company quotas; first-party MCP `prodavan-modules`; [as-built](target/12-layer-docs/tenant-infra-gateway.md) |
 | Agent + chat + files | `application/agent/`, `api/v1/agent.py`, content/assets |
@@ -101,7 +121,7 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 | **Employee UI канон** | [`employee-ui/README.md`](employee-ui/README.md) |
 | As-built слои | [`target/12-layer-docs/`](target/12-layer-docs/) — **описание кода**, не закон |
 
-**Dev deployment** (`infra/k3s/overlays/dev/`): `POD_RUNTIME_MODE=k8s`, real Pod'ы в `prodavan-sandboxes`. После merge → CI Images → Argo sync.
+**Dev deployment** (`infra/k3s/overlays/dev/`): `POD_RUNTIME_MODE=k8s`, real project Pods в `agentscale-dev-sandboxes`; platform API — в `agentscale-dev`. Live `/workspace` текущего project Pod — `emptyDir`, не PVC; last-good дерево сохраняется в object storage. После merge → CI Images → Argo sync.
 
 ## Инфра (актуально)
 
@@ -117,7 +137,7 @@ GitOps, k3s, CI — не legacy: [`07-infrastructure/runbook.md`](07-infrastruct
 
 1. Новые **продуктовые** требования — дополнять **этот файл** или as-built в `12-layer-docs`, не раздувать `target/01…15`.
 2. **`docs/target/`** (кроме `12-layer-docs`, `07-infrastructure` cross-links) — **не канон**, не блокировать работу «gap map».
-3. E2E — **backend/API**; Flutter E2E не обязателен для merge.
+3. E2E — **backend/API**; browser-тесты не заменяют backend e2e.
 4. Приоритет фич: **Pod UI + agent-in-pod с файлами** > admin metrics > meta-syntax > прочий канонный шум.
 
 ## Module data model (base modules)
@@ -181,7 +201,7 @@ Orthogonal to bind local/global. Tables declare `scope.chats`:
 | `all` (default) | Shared across chats in the SoT instance |
 | `current` | Rows stamped with agent `session_id`; missing session → synthetic **`main`** |
 
-UI may opt into hiding nav/hub entries without an **active chat** (`WorkContext.selectedSessionId`) via **`scope.active_chat: required`** (default `optional` — always show). Active chat persists while browsing hubs (like selected project); not implied by `chats=current`.
+UI may opt into hiding nav/hub entries without an **active chat** (selected session id в web UI) via **`scope.active_chat: required`** (default `optional` — always show). Active chat persists while browsing hubs (like selected project); not implied by `chats=current`.
 
 Storage: `module_instance_data_rows.session_id` (+ mirror in JSON body). UI/MCP send `X-Prodavan-Session-Id`. Not a per-chat module fork.
 
@@ -227,30 +247,79 @@ Meta primitives: hub + collections, `file_ref`, `secret_ref`, `column_map`, mast
 ## Project lifecycle (employee UI)
 
 - **Create** (`draft`) — DB record + project settings only; no Pod, no workspace files.
-- **Launch** — first materialize + Pod provision (`POST /projects/{id}/launch`); requires agent provider + AI key. `resolved_ai_key_id` is authoritative: launch/runtime credential resolution must not silently substitute another key when that selection is inactive, out of scope, or not runtime-capable; fail with a clear `NO_AI_KEY` error. This keeps selected key → provider endpoint/model catalog → Pod lease/config aligned. On pod failure → `error` (not silent rollback). HTTP returns after pod create (does **not** block on Ready); Ready is observe/reconcile. Budgets: **20s** non-pull Ready, **600s** while downloading images (`observed_state=pulling`). Session bootstrap waits the same pull+Ready budget (not a hard 120s). Flutter `AppJobStore` persists across page reload, shows one progress row (title + phase subtitle), and stops on timeout.
+- **Launch** — first materialize + Pod provision (`POST /projects/{id}/launch`); requires agent provider + AI key. `resolved_ai_key_id` is authoritative: launch/runtime credential resolution must not silently substitute another key when that selection is inactive, out of scope, or not runtime-capable; fail with a clear `NO_AI_KEY` error. This keeps selected key → provider endpoint/model catalog → Pod lease/config aligned. On pod failure → `error` (not silent rollback). HTTP returns after pod create (does **not** block on Ready); Ready is observe/reconcile. Budgets: **20s** non-pull Ready, **600s** while downloading images (`observed_state=pulling`). Session bootstrap waits the same pull+Ready budget (not a hard 120s). React UI выполняет lifecycle action с последующим server readback; старый Flutter `AppJobStore` не является текущей реализацией.
 - **Reload** — restart pod workload (`POST /projects/{id}/reload`); Redis rate limit 1/min, 3/30min; available anytime (UI shows button on settings only when `error`).
 - **Container UI** — employee subpage with live `observed_state` (`GET /projects/{id}/container`, `/container/metrics`). States include `pulling` / `hydrating` / `provisioning` / `running`. **`running`** = k8s Ready (phase Running + readiness); CPU/RAM metrics are display-only (`metrics_available` flag + warning banner when absent).
 - **Workspace files** — when Pod is `running`, UI **Files** opens live `/workspace` tree (list, text preview, download) via k8s exec; no MinIO fallback when paused.
 - **Sync** — apply module binding changes to existing Pod workspace (`POST /projects/{id}/sync`); module folder prune + hydrate.
 - **Agent reset** — cancel sessions + purge chat history (`POST /projects/{id}/agent/reset`); lives in agent BC, not pod_service.
 
-## Целевая модель: plugin-модули
+## Переходный strangler: что разрешено сейчас
 
-**Конечное состояние:** declarative-app удалён полностью — `module_meta_documents`, generic runtime, `module_instance_data_rows`, `ModuleRuntime.tsx`. Модуль — это **полноценное приложение** (frontend + backend) с реальными таблицами, собственными миграциями и динамической загрузкой кода.
+Конечная цель удалить declarative-app **не является разрешением удалить его сейчас**.
+В S1 `mod_management`, equipment и их PostgreSQL-таблицы остаются действующим
+путём. Feature flag и plugin-код являются переходным экспериментальным контуром,
+а не доказательством совместимости.
 
-**Ключевые решения** (источник истины — [`ARCHITECTURE/plugin-architecture-complete.md`](ARCHITECTURE/plugin-architecture-complete.md) v4, [ADR-006](architecture-migration/ADR-006-plugin-modules.md), [ADR-007](architecture-migration/ADR-007-direct-plugin-db.md), [ADR-008](architecture-migration/ADR-008-lifecycle-and-boundaries.md)):
+До live acceptance запрещены включение plugin platform, перенос pending-ревизии
+`2026110802` в исполняемый каталог и запуск `strangler/removal.py`. Безопасный
+порядок — **code-first expand/contract A→B**: сначала работающая новая ветка и
+удаление её старых readers/writers, затем отдельное contract-решение по схеме.
+Migration-only `product_module_upsert`, product seeds и
+`management_module_merge` сохраняются для fresh/historical upgrades.
+См. [безопасный cutover](migration/plugin-cutover-safety.md).
 
-| Аспект | Решение |
+Отсутствие необходимости в backup/dual-read **dev-данных** не отменяет source
+snapshot/patch в целевом authoring-сценарии ниже: это разные виды snapshot.
+
+## Целевая модель: plugin v4 (TARGET, не as-built)
+
+**Конечное состояние target:** declarative-app удалён только после подтверждённого
+strangler-перехода — `module_meta_documents`, generic runtime,
+`module_instance_data_rows`, `ModuleRuntime.tsx`. Модуль — полноценное
+приложение с frontend bundle и backend, реальными таблицами, собственными
+миграциями и динамической доставкой подписанного кода.
+
+Канонические **принятые target-решения** — [ADR-006](architecture-migration/ADR-006-plugin-modules.md),
+[ADR-007](architecture-migration/ADR-007-direct-plugin-db.md) и
+[ADR-008](architecture-migration/ADR-008-lifecycle-and-boundaries.md). Полный
+[текст v4](ARCHITECTURE/plugin-architecture-complete.md) читается только вместе с
+его errata. Практическая матрица поддержки — [PLUGIN-AUTHORING](PLUGIN-AUTHORING.md).
+
+| Аспект | Целевое решение, не текущая доступность |
 |---|---|
-| Данные | **Прямой DSN к отдельной БД компании** `tenant_<company_id>`: реальные таблицы, полный SQL, JOIN/CTE, индексы, self-managed Liquibase-миграции. Схема `module_<module>` во владении роли плагина. Платформенная `prodavan` недоступна ([ADR-007](architecture-migration/ADR-007-direct-plugin-db.md)) |
-| Доступ к инфраструктуре | Переиспользуется **код** `CapabilityGatewayService` в отдельном trust-контуре плагинов (`PluginClaims` + `/capabilities/v1/*` в Plugin Gateway). `:8001` и `PodBridgeClaims` остаются агентам без изменений |
-| Объекты | Bucket-per-tenant / MinIO STS + scoped presigned вместо тегов в одном бакете |
-| Артефакт | OCI в GHCR + cosign keyless + SBOM/provenance, pin по digest; реестр на `AppVersion`/`RegistryOutcome` |
-| Миграции | Плагин применяет подписанный changelog **сам** при старте контейнера; безопасность = привилегии PostgreSQL + отдельная БД + `pgaudit`, а не парсер SQL |
-| Изоляция | Отдельная БД + `GRANT CONNECT` только на неё + `NOCREATEDB NOCREATEROLE` + две NP из одного генератора + отдельный static-origin для iframe без `allow-same-origin`. RLS не является границей |
-| Backend | Контейнер с вебхуками, cron, событиями (Redpanda dispatch), фоновыми задачами; внешние адреса `/webhook/{plugin}/{company}/*` и `/pluginpage/{plugin}/{company}/*`. v1 — path-based, цель — wildcard subdomain |
-| Засыпание | **Собственный activator**: Deployment `replicas: 0` + Plugin Gateway wake/hold-until-Ready + `ignoreDifferences`. `SandboxClaim` остаётся только агентам |
-| Фаерволл | Общий генератор правил и единая схема egress-аудита для плагинов и агентов; правила из `CapabilityGrant` в БД |
-| Переход | Strangler с фича-флагом **только из-за объёма кода** (~13k строк `mod_equipment`). Это dev: данные эфемерны, бэкапы/перенос данных/snapshot/dual-read не нужны |
+| Данные | Прямой `TENANT_DB_DSN` только к БД компании `tenant_<company_id>`; схема `module_<module>` принадлежит plugin role. Платформенная БД недоступна; RLS не является границей. |
+| Identity / gateway | Отдельные `PluginClaims` и Plugin Gateway `/capabilities/v1/*`; короткая per-request identity, не статический токен в pod env. Агентский `:8001` и `PodBridgeClaims` не расширяются для плагинов. |
+| Объекты | Tenant/prefix-scoped objects; **scoped presigned по умолчанию**, STS только как отдельно проверенная опция. Теги не являются IAM-границей. |
+| Миграции | Plugin role сама выполняет DDL собственного changelog до Ready. Платформа только provisioning БД/роли/схемы и проверка артефакта, не исполнение plugin DDL доверенной ролью. |
+| Артефакты | OCI и immutable digest, подпись/provenance/SBOM через trusted CI. [ADR-009](architecture-migration/ADR-009-module-source-authoring.md) **предлагает** неразрывную пару backend digest + bundle digest; до принятия это не as-built контракт. |
+| Изоляция | `NOCREATEDB NOCREATEROLE NOSUPERUSER`, `GRANT CONNECT` только к своей БД, restrictive securityContext, явные network grants, отдельный static-origin и iframe sandbox **без `allow-same-origin`**. |
+| Backend / lifecycle | Типизированные bounded APIs, webhooks/events/jobs по явным grants; собственный plugin activator `0→1` с hold-until-Ready. `SandboxClaim` и `ProjectIdlePauseService` остаются агентским lifecycle. |
+| Внешние адреса | Target `/webhook/{plugin}/{company}/*` и `/pluginpage/{plugin}/{company}/*`; публичность только по явному manifest/grant решению после проверок. |
 
-**Работа на main (dev):** сразу на `main`, без feature-веток, микрокоммиты. Правила: [`workflow/main-branch-workflow.md`](workflow/main-branch-workflow.md). Реестр ADR: [`architecture-migration/README.md`](architecture-migration/README.md).
+### Целевой self-service authoring → update/rollback
+
+Этот сценарий описывает **TARGET** предложения [ADR-009](architecture-migration/ADR-009-module-source-authoring.md)
+(статус «Предложено»), а не существующий quickstart:
+
+```text
+source
+  → private repo / template в platform org
+  → agent snapshot/patch без Git credentials в pod
+  → protected PR + human review + merge в default branch
+  → trusted reusable CI, pinned SHA + OIDC repository/ref/sha/job_workflow_ref
+  → publish проверенной backend+bundle digest pair
+  → deploy saga по immutable digests; self-migration до Ready
+  → menu / явно разрешённый public после проверок
+  → update через новый PR и digest pair / rollback saga на предыдущую pair
+```
+
+`ModuleSource` здесь — metadata об исходнике и authoring-намерении, **не второй
+runtime registry**. Runtime publication по-прежнему использует существующий
+artifact/version registry. Откат кода не является откатом БД: совместимость схемы
+обеспечивается expand/contract миграциями плагина, а не автоматическим destructive
+downgrade.
+
+**Граница факта:** на audited HEAD `6ee720dd` этот сквозной сценарий, GitHub App,
+trusted publishing и plugin vertical slice не подтверждены. Реестр решений:
+[`architecture-migration/README.md`](architecture-migration/README.md).

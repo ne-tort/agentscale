@@ -58,27 +58,21 @@ def create_app() -> FastAPI:
     # До вызова install_plugin_gateway_runtime() роутер отвечает 503 (fail-closed).
     # Внимание: GET /health этого роутера совпадает с health_routes.router выше;
     # k8s-проба использует корневую /health, зарегистрированную ПЕРВОЙ.
+    session_factory = None
     if settings.plugin_platform_enabled:
-        from prodavan.application.plugins.wiring.install import (
-            LazyRedisManager,
-            install_plugin_platform,
+        from prodavan.application.plugins.jobs.declarations import (
+            install_api_plugin_platform,
         )
-        from prodavan.infrastructure.persistence.database import get_session_factory
 
-        # ОДНА точка F11-композиции: build_plugin_platform + attach_plugin_platform
-        # + install_plugin_gateway_runtime + attach_admin_runtime + guard.
-        # Без неё все 19 ключей app.state пусты и роутеры дают 503.
-        #
-        # create_app() работает ДО lifespan.startup(): RedisManager в этот
-        # момент ещё не зарегистрирован. LazyRedisManager резолвит его в момент
-        # ПЕРВОГО обращения к любому атрибуту (.client/.eval/.enabled), уже
-        # после старта; до этого — явный отказ. НЕ in-memory подмена.
-        install_plugin_platform(
+        # The full enabled composition is shared with main_plugin_gateway:
+        # declarations/stores/tasks, the real lifespan worker hook, platform
+        # installation and scoped job-handler binding cannot diverge by process.
+        plugin_jobs = install_api_plugin_platform(
             app,
             settings,
-            session=get_session_factory(),
-            redis=LazyRedisManager(),
+            lifespan_manager=lifespan_manager,
         )
+        session_factory = plugin_jobs.session_factory
         app.include_router(plugin_gateway.router)
         try:
             from prodavan.api.v1 import plugin_capabilities
@@ -90,7 +84,59 @@ def create_app() -> FastAPI:
                 raise
             logger.error("plugin platform enabled but /capabilities/v1 router is unavailable")
         else:
+            from prodavan.api.v1 import plugin_mcp
+
+            # Authenticated per-server MCP JSON-RPC precedes capability catch-all.
+            app.include_router(plugin_mcp.router)
             app.include_router(plugin_capabilities.router)
+
+    # Managed source provisioning and trusted CI publication have separate
+    # opt-in flags and never inherit PLUGIN_PLATFORM_ENABLED. Source can be
+    # composed alone; CI additionally requires the managed source prerequisites.
+    # Both receive the same real GitHubAppClient/configuration, owned solely by
+    # the source lifespan resource. CI/GHCR borrow it; neither path enables
+    # runtime/install/deploy services.
+    from prodavan.api.internal import plugin_artifacts
+    from prodavan.application.plugins.wiring.install import (
+        install_plugin_ci_publication,
+        plugin_ci_publication_enabled,
+    )
+    from prodavan.application.plugins.wiring.module_sources import (
+        build_plugin_ci_approval_reader,
+        install_module_source_composition,
+        module_source_enabled,
+    )
+
+    ci_enabled = plugin_ci_publication_enabled()
+    source_composition = None
+    if module_source_enabled(settings) or ci_enabled:
+        if session_factory is None:
+            from prodavan.infrastructure.persistence.database import get_session_factory
+
+            session_factory = get_session_factory()
+        source_composition = install_module_source_composition(
+            app,
+            settings,
+            lifespan_manager=lifespan_manager,
+        )
+
+    if ci_enabled:
+        # This import/constructor is deliberately reached only for enabled CI.
+        # Source-only composition remains usable while the approval repository
+        # is absent; no ACTIVE grant reader is used as a compatibility fallback.
+        assert source_composition is not None
+        approval_reader = build_plugin_ci_approval_reader(session_factory)
+        install_plugin_ci_publication(
+            app,
+            settings,
+            session_factory=session_factory,
+            lifespan_manager=lifespan_manager,
+            managed_organization=source_composition.managed_organization,
+            github_app=source_composition.github_app,
+            source_config=source_composition.config,
+            approval_reader=approval_reader,
+        )
+    app.include_router(plugin_artifacts.router)
     return app
 
 

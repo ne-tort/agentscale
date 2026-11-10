@@ -1,10 +1,9 @@
 import { useMemo } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { useI18n } from "../../i18n/useT";
 import { PluginFrame, assertSafeSrc } from "./PluginFrame";
 import {
   pluginFrameStatusKey,
-  resolveStaticOrigin,
   usePluginFrame,
   type PluginChannelFactory,
   type PluginFrameConfig,
@@ -12,6 +11,11 @@ import {
   type PluginInfoPort,
 } from "./usePluginFrame";
 import type { PluginErrorCode } from "./errors";
+import { pluginRoutePathFromLocation } from "./routePath";
+import {
+  createManifestOperationBroker,
+  type PluginOperationTransport,
+} from "./operationBroker";
 
 /**
  * Страница плагина в основном web-приложении (A9, v4 §5.2/§5.3/§7.1).
@@ -21,7 +25,7 @@ import type { PluginErrorCode } from "./errors";
  * - состояние grant и `src` даёт `usePluginFrame` через `PluginInfoPort`,
  *   который реализует родитель. Страница НЕ делает прямых запросов к shared API
  *   и НЕ получает capability-токен: порт возвращает только `connected`/`granted`
- *   (и необязательный digest), а `PluginFrame` общается с плагином по
+ *   manifest_version/artifact_digest/capabilities, а `PluginFrame` общается с плагином по
  *   `plugin-rpc/1` без токена в URL и в сообщениях;
  * - iframe живёт на ОТДЕЛЬНОМ static-origin в песочнице без
  *   `allow-same-origin` (classic sandbox bypass, §13.1);
@@ -32,13 +36,7 @@ import type { PluginErrorCode } from "./errors";
  * несовпадении origin показывается ошибка, iframe НЕ монтируется вообще.
  */
 
-/**
- * Версия плагина для версионированного пути и `plugin-rpc/1` handshake.
- * Явный проп или фиксированный дефолт: версия НЕ читается из env/URL, чтобы
- * её нельзя было подменить извне. Родитель передаёт реальную версию из реестра
- * артефактов, когда она известна (v4 §5.1, pin по digest).
- */
-export const DEFAULT_PLUGIN_VERSION = "1.0.0";
+/** Версия и digest приходят только из PluginInfo/listAdminPlugins. */
 export const DEFAULT_PLUGIN_BACK_PATH = "/projects";
 
 /** Причина отказа страницы рендерить iframe. Экспортируется для тестов. */
@@ -72,11 +70,6 @@ export function pluginSrcFailure(
     if (shellOrigin && parsed.origin === shellOrigin) return "origin";
   } catch { return "unsafe"; }
   return undefined;
-}
-
-function readPluginVersion(override?: string): string {
-  if (typeof override === "string" && override.trim()) return override.trim();
-  return DEFAULT_PLUGIN_VERSION;
 }
 
 /**
@@ -137,14 +130,12 @@ const PLUGIN_PAGE_STYLES = `
 `;
 
 export interface PluginPageProps {
-  /** Версия плагина для версионированного пути и `plugin-rpc/1` handshake. */
-  readonly version?: string;
   /**
    * Реализация сведений об installation/grant. Родитель обязан её предоставить:
    * без порта `usePluginFrame` отказывает fail-closed, а не «считает подключённым».
    */
   readonly infoPort?: PluginInfoPort;
-  /** Доверенная конфигурация static-origin (`VITE_PLUGIN_STATIC_ORIGIN` по умолчанию). */
+  /** Static allowlist/legacy fallback; shell origin comes only from server bootstrap DTO. */
   readonly config?: PluginFrameConfig;
   /** Явное исключение §5.2: публичная страница не требует сессии. */
   readonly publicPage?: boolean;
@@ -155,43 +146,40 @@ export interface PluginPageProps {
    * не задаётся: `usePluginFrame` сам владеет lifecycle `plugin-rpc/1`.
    */
   readonly channelFactory?: PluginChannelFactory;
+  /** Trusted adapter for signed operations; plugin-selected URLs are impossible. */
+  readonly operationTransport?: PluginOperationTransport;
 }
 
 export function PluginPage(props: PluginPageProps = {}) {
   const { pluginId = "", companyId = "" } = useParams();
+  const location = useLocation();
+  const publicPage = props.publicPage === true;
+  const routePath = pluginRoutePathFromLocation(location.pathname, publicPage);
   const { t } = useI18n();
-  const version = readPluginVersion(props.version);
   const backTo = props.backTo ?? DEFAULT_PLUGIN_BACK_PATH;
-  const shellOrigin = typeof window === "undefined" ? undefined : window.location.origin;
-  // §5.2: static-origin НЕ должен совпадать с origin оболочки. Если вызывающий
-  // не задал `shellOrigin` явно, подставляем фактический origin окна — иначе
-  // доверенная конфигурация из env могла бы указать `agentscale.dev` и mixup
-  // прошёл бы незамеченным. Тесты задают конфигурацию полностью.
-  const effectiveConfig = useMemo<PluginFrameConfig>(() => ({
-    ...(props.config ?? {}),
-    ...(!props.config?.shellOrigin && shellOrigin ? { shellOrigin } : {}),
-  }), [props.config, shellOrigin]);
-
   const frame = usePluginFrame({
     pluginId,
     companyId,
-    version,
     ...(props.infoPort ? { infoPort: props.infoPort } : {}),
-    config: effectiveConfig,
+    config: props.config,
     ...(props.publicPage !== undefined ? { publicPage: props.publicPage } : {}),
+    routePath,
   });
 
-  // Тот же доверенный источник, что и у usePluginFrame: если конфигурации нет,
-  // expectedOrigin остаётся пустым и ЛЮБОЙ src не пройдёт сравнение (fail-closed).
-  const expectedOrigin = useMemo(() => {
-    try { return resolveStaticOrigin(effectiveConfig); }
-    catch { return ""; }
-  }, [effectiveConfig]);
+  const expectedOrigin = frame.staticOrigin;
+  const onRequest = useMemo(() => props.operationTransport
+    ? createManifestOperationBroker({
+        operations: frame.rpcOperations,
+        capabilities: frame.capabilities,
+        publicPage,
+        transport: props.operationTransport,
+      })
+    : undefined, [props.operationTransport, frame.rpcOperations, frame.capabilities, publicPage]);
 
   const failure = pluginSrcFailure(
     frame.src,
     expectedOrigin,
-    effectiveConfig.shellOrigin ?? shellOrigin,
+    frame.shellOrigin || undefined,
   );
   const errorCode = frame.error?.code ?? "loadError";
   const { phase, messageKey } = resolvePluginPagePhase({
@@ -240,13 +228,19 @@ export function PluginPage(props: PluginPageProps = {}) {
     {!blocked && !waiting && <PluginFrame
       pluginId={pluginId}
       companyId={companyId}
-      version={version}
+      version={frame.version}
+      artifactDigest={frame.artifactDigest}
+      capabilities={frame.capabilities}
+      scope={frame.scope}
+      {...(frame.grantExpiresAt ? { grantExpiresAt: frame.grantExpiresAt } : {})}
+      {...(onRequest ? { onRequest } : {})}
       src={frame.src}
-      {...(props.publicPage !== undefined ? { publicPage: props.publicPage } : {})}
+      {...(frame.shellOrigin ? { shellOrigin: frame.shellOrigin } : {})}
+      publicPage={publicPage}
       expectedOrigin={frame.expectedOrigin}
       channelFactory={props.channelFactory ?? frame.channelFactory}
       title={frameTitle}
-      className="plugin-page__frame"
+      className="plugin-frame plugin-page__frame"
     />}
   </main>;
 }

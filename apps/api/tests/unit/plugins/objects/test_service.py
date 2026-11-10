@@ -185,6 +185,24 @@ async def test_issue_credentials_returns_scoped_short_lived_creds() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("ttl_seconds", [60, 899, 3601])
+async def test_issue_credentials_rejects_invalid_sts_ttl_before_adapter(ttl_seconds: int) -> None:
+    store, _, sts, _, _, _ = build_store()
+    with pytest.raises(InvalidTtl):
+        await store.issue_credentials(COMPANY, PLUGIN, ttl_seconds=ttl_seconds)
+    assert sts.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ttl_seconds", [900, 3600])
+async def test_issue_credentials_accepts_standard_sts_ttl(ttl_seconds: int) -> None:
+    store, _, sts, _, _, clock = build_store()
+    creds = await store.issue_credentials(COMPANY, PLUGIN, ttl_seconds=ttl_seconds)
+    assert creds.expires_at == clock.time() + ttl_seconds
+    assert sts.calls[0]["ttl_seconds"] == ttl_seconds
+
+
+@pytest.mark.asyncio
 async def test_sts_call_carries_session_policy_subset_of_parent() -> None:
     store, _, sts, _, _, _ = build_store()
     await store.issue_credentials(COMPANY, PLUGIN)
@@ -555,6 +573,9 @@ class _ErrorPresigner:
         raise RuntimeError("minio unreachable")
 
     async def presign_put(self, *, bucket: str, key: str, ttl_seconds: int) -> str:
+        raise RuntimeError("minio unreachable")
+
+    async def presign_head(self, *, bucket: str, key: str, ttl_seconds: int) -> str:
         raise RuntimeError("minio unreachable")
 
 

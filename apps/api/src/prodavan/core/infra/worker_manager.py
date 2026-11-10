@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from prodavan.core.jobs import names as job_names
+from prodavan.core.jobs.plugin_worker import (
+    PluginWorkerRegistration,
+    PluginWorkerTasksFactory,
+)
 from prodavan.core.lifespan.resource import LifespanResource
+
+if TYPE_CHECKING:
+    from prodavan.application.plugins.jobs.tasks import ManifestJobTasks
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +43,34 @@ def _celery_broker_from_settings() -> str | None:
     return (settings.celery_broker_url or settings.redis_url or "").strip() or None
 
 
-def worker_manager_from_settings() -> WorkerManager:
-    """Build WorkerManager from env (shared by API lifespan and Celery CLI)."""
+def worker_manager_from_settings(
+    *,
+    plugin_tasks: ManifestJobTasks | None = None,
+    plugin_tasks_factory: PluginWorkerTasksFactory | None = None,
+    plugin_jobs_enabled: bool | None = None,
+    defer_plugin_resolution: bool = False,
+) -> WorkerManager:
+    """Build from env with optional typed plugin-job dependency injection.
+
+    Supplying a real registry/factory opts into plugin jobs. Enabled without
+    either fails at registration unless the API later binds its install-created
+    registry through registration_hook. With all plugin arguments omitted, jobs
+    stay typed-unwired. The platform kill switch always makes the hook a no-op.
+    """
     from prodavan.config.settings import settings
 
     broker = _celery_broker_from_settings()
+    if plugin_jobs_enabled is None:
+        plugin_jobs_enabled = plugin_tasks is not None or plugin_tasks_factory is not None
+    registration_kwargs: dict[str, Any] = {}
+    if defer_plugin_resolution:
+        registration_kwargs["defer_until_worker_init"] = True
+    plugin_worker = PluginWorkerRegistration(
+        enabled=bool(settings.plugin_platform_enabled and plugin_jobs_enabled),
+        tasks=plugin_tasks,
+        tasks_factory=plugin_tasks_factory,
+        **registration_kwargs,
+    )
     return WorkerManager(
         enabled=settings.celery_enabled,
         broker_url=broker,
@@ -50,10 +80,17 @@ def worker_manager_from_settings() -> WorkerManager:
         schedule_idle_pause=settings.idle_pause_worker_enabled,
         schedule_pod_reconcile=settings.pod_reconcile_worker_enabled,
         task_always_eager=settings.celery_task_always_eager,
+        plugin_worker=plugin_worker,
     )
 
 
-def bootstrap_celery_app_from_settings() -> Any:
+def bootstrap_celery_app_from_settings(
+    *,
+    plugin_tasks: ManifestJobTasks | None = None,
+    plugin_tasks_factory: PluginWorkerTasksFactory | None = None,
+    plugin_jobs_enabled: bool | None = None,
+    defer_plugin_resolution: bool = False,
+) -> Any:
     """Ensure ``celery_app`` exists without FastAPI lifespan (worker CLI / -B).
 
     When ``CELERY_ENABLED`` + broker are set, builds a full app and registers the
@@ -66,7 +103,17 @@ def bootstrap_celery_app_from_settings() -> Any:
 
     from prodavan.config.settings import settings
 
-    if celery_app is not None and get_worker_manager() is not None and get_worker_manager().enabled:
+    plugin_injected = (
+        plugin_tasks is not None
+        or plugin_tasks_factory is not None
+        or plugin_jobs_enabled is not None
+    )
+    if (
+        not plugin_injected
+        and celery_app is not None
+        and get_worker_manager() is not None
+        and get_worker_manager().enabled
+    ):
         return celery_app
 
     broker = _celery_broker_from_settings()
@@ -76,7 +123,30 @@ def bootstrap_celery_app_from_settings() -> Any:
             logger.info("worker: CLI bootstrap inert (CELERY_ENABLED=false or no broker)")
         return celery_app
 
-    mgr = worker_manager_from_settings()
+    if (
+        defer_plugin_resolution
+        and plugin_tasks is None
+        and plugin_tasks_factory is None
+        and settings.plugin_platform_enabled
+    ):
+        # Importing this module in the API allocates nothing. Only Celery's
+        # worker_process_init resolves this lazy standalone factory.
+        from prodavan.application.plugins.jobs.declarations import (
+            DeferredStandalonePluginJobComposition,
+        )
+
+        plugin_tasks_factory = DeferredStandalonePluginJobComposition(settings)
+        plugin_jobs_enabled = True
+
+    manager_kwargs: dict[str, Any] = {}
+    if defer_plugin_resolution:
+        manager_kwargs["defer_plugin_resolution"] = True
+    mgr = worker_manager_from_settings(
+        plugin_tasks=plugin_tasks,
+        plugin_tasks_factory=plugin_tasks_factory,
+        plugin_jobs_enabled=plugin_jobs_enabled,
+        **manager_kwargs,
+    )
     mgr._app = mgr._build_app()
     set_worker_manager(mgr)
     celery_app = mgr._app
@@ -111,6 +181,7 @@ class WorkerManager(LifespanResource):
         schedule_idle_pause: bool = False,
         schedule_pod_reconcile: bool = False,
         task_always_eager: bool = False,
+        plugin_worker: PluginWorkerRegistration | None = None,
     ) -> None:
         self._enabled = enabled
         self._broker_url = (broker_url or "").strip() or None
@@ -120,6 +191,7 @@ class WorkerManager(LifespanResource):
         self._schedule_idle_pause = schedule_idle_pause
         self._schedule_pod_reconcile = schedule_pod_reconcile
         self._task_always_eager = task_always_eager
+        self._plugin_worker = plugin_worker
         self._app: Any = None
 
     @property
@@ -129,6 +201,14 @@ class WorkerManager(LifespanResource):
     @property
     def enabled(self) -> bool:
         return bool(self._enabled and self._broker_url and self._app is not None)
+
+    @property
+    def plugin_job_registration(self) -> Callable[[ManifestJobTasks], None] | None:
+        """Typed API hook for the install-created ManifestJobTasks instance."""
+
+        if self._plugin_worker is None:
+            return None
+        return self._plugin_worker.registration_hook
 
     @property
     def uses_celery_executor(self) -> bool:
@@ -261,6 +341,11 @@ class WorkerManager(LifespanResource):
         }
         app.conf.beat_schedule = beat
         job_tasks.register_tasks(app)
+        if self._plugin_worker is not None:
+            # Legacy registrations/routes/beat are complete before plugin startup.
+            # Immediate API composition fails here; deferred standalone
+            # composition fails typed at worker_process_init before task execution.
+            self._plugin_worker.register(app)
         return app
 
     async def startup(self) -> None:
@@ -284,6 +369,9 @@ class WorkerManager(LifespanResource):
 
     async def shutdown(self) -> None:
         global celery_app
+        close_plugin = getattr(self._plugin_worker, "aclose", None)
+        if callable(close_plugin):
+            await close_plugin()
         self._app = None
         celery_app = None
         if get_worker_manager() is self:
@@ -313,4 +401,4 @@ class WorkerManager(LifespanResource):
 
 
 # Import-time bootstrap so ``celery -A …celery_app`` works without API lifespan.
-celery_app = bootstrap_celery_app_from_settings()
+celery_app = bootstrap_celery_app_from_settings(defer_plugin_resolution=True)

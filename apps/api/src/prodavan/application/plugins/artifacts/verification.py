@@ -55,7 +55,9 @@ from .oci import PLUGIN_PROTOCOL, OciArtifactRef, is_valid_digest
 PLATFORM_VERSION = "4.0.0"
 _SEMVER_PATTERN = re.compile(
     r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)"
-    r"(?:-(?P<pre>[0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$"
+    r"(?:-(?P<pre>(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)"
+    r"(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 
 
@@ -203,19 +205,33 @@ class CompatibilityVerdict:
             raise ValueError("positive verdict cannot carry an error")
 
 
-def _semver_key(value: str) -> tuple[int, int, int, int, str]:
-    """Ключ сравнения semver: pre-release ниже одноимённого релиза."""
+def _semver_key(value: str) -> tuple[int, int, int, int, tuple[tuple[int, Any], ...]]:
+    """Ключ полного SemVer 2.0.0 precedence; build metadata игнорируется."""
     match = _SEMVER_PATTERN.fullmatch(value)
     if match is None:
         raise ValueError("not a semver")
-    pre = match.group("pre")
-    # (major, minor, patch, 0 если pre-release иначе 1, сам pre)
+    prerelease = match.group("pre")
+    parts: list[tuple[int, Any]] = []
+    if prerelease:
+        # Числовые идентификаторы сравниваются как int и всегда младше
+        # нечисловых. Пары не дают Python сравнивать int со str.
+        for chunk in prerelease.split("."):
+            parts.append((0, int(chunk)) if chunk.isdigit() else (1, chunk))
+        # Префикс кортежа тоже соответствует SemVer: alpha < alpha.1.
+        return (
+            int(match.group("major")),
+            int(match.group("minor")),
+            int(match.group("patch")),
+            0,
+            tuple(parts),
+        )
+    # Отсутствие prerelease старше любого prerelease той же major.minor.patch.
     return (
         int(match.group("major")),
         int(match.group("minor")),
         int(match.group("patch")),
-        0 if pre else 1,
-        pre or "",
+        1,
+        (),
     )
 
 

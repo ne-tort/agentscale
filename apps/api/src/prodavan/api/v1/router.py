@@ -38,6 +38,8 @@ from prodavan.api.v1 import (
     identity,
     pod_modules,
     plugin_admin,
+    plugin_bootstrap,
+    plugin_sources,
     projects,
     resources,
     stub,
@@ -92,4 +94,6 @@ router.include_router(internal_pods.router)
 # хоста (отдельный Ingress с router.priority 120), а /capabilities/v1/* имеет
 # собственный surface и allowlist. Оба подключаются в main.py.
 router.include_router(plugin_admin.router)
+router.include_router(plugin_bootstrap.router)
+router.include_router(plugin_sources.router)
 router.include_router(resources.router)

@@ -51,6 +51,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -232,15 +233,15 @@ class CapabilityGrantRow(Base):
     artifact_digest: Mapped[str] = mapped_column(String(71), nullable=False)
     #: JSONB-список capability (allowlist §4.4 валидируется до записи задачей 12).
     capabilities: Mapped[list] = mapped_column(
-        JSONB, nullable=False, default=list, server_default="[]"
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, default=list, server_default="[]"
     )
     #: JSONB: mode / allowed_hosts / allowed_paths / max_egress_bytes (§6.3).
     egress_policy: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, default=dict, server_default="{}"
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, default=dict, server_default="{}"
     )
     #: JSONB: ops_per_minute / max_bytes / max_rows / ... (``QuotaSet`` задачи 12).
     quota: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, default=dict, server_default="{}"
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, default=dict, server_default="{}"
     )
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="active", server_default="active"
@@ -260,6 +261,8 @@ class CapabilityGrantRow(Base):
         DateTime(timezone=True), nullable=True
     )
     created_by: Mapped[str] = mapped_column(String(160), nullable=False)
+    #: Opaque per-instance webhook SecretStore reference; never plaintext material.
+    webhook_secret_ref: Mapped[str | None] = mapped_column(String(2048), nullable=True)
 
 
 # --------------------------------------------------------------------------- 2. Instance
@@ -277,6 +280,9 @@ class PluginInstanceRow(Base):
     __table_args__ = (
         UniqueConstraint(
             "company_id", "plugin_id", name="uq_plugin_instance_company_plugin"
+        ),
+        UniqueConstraint(
+            "company_id", "id", name="uq_plugin_instance_tenant_anchor"
         ),
         # Экземпляр может ссылаться только на версию, которая ЕСТЬ в реестре.
         # Требует, чтобы ``plugin_artifacts`` создавалась РАНЬШЕ в ревизии.
@@ -317,7 +323,7 @@ class PluginInstanceRow(Base):
         DateTime(timezone=True), nullable=True
     )
     active_job_ids: Mapped[list] = mapped_column(
-        JSONB, nullable=False, default=list, server_default="[]"
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, default=list, server_default="[]"
     )
     wake_in_flight: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
@@ -340,16 +346,58 @@ class PluginInstanceRow(Base):
 # --------------------------------------------------------------------------- 3. Artifact
 
 
+#: Состояния source-control metadata ModuleSource; «ready» не является grant.
+MODULE_SOURCE_STATUSES: tuple[str, ...] = ("provisioning", "ready", "disabled")
+MODULE_SOURCE_PROVIDER_SQL = "github_app"
+
+MODULE_SOURCE_FULL_NAME_SQL = "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+MODULE_SOURCE_WORKFLOW_SQL = (
+    "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/"
+    "[.]github/workflows/[A-Za-z0-9_.-]+[.]ya?ml@[0-9a-f]{40}$"
+)
+MODULE_SOURCE_SECRET_REF_SQL = (
+    "^(vault://|secret_ref://|secret://|secret_ref:)[A-Za-z0-9][A-Za-z0-9._/-]+$"
+)
+# Original length contract '[A-Za-z0-9] + {2,511}' = 3..512 chars after the
+# scheme.  PostgreSQL ARE rejects repeat counts >255 ('invalid repetition
+# count(s)'), so the upper bound is enforced via length() instead of {2,511}.
+# regexp_replace with anchored alternation strips the leftmost-longest scheme
+# prefix (secret_ref:// wins over secret_ref:), tail = 1 + original repeat.
+MODULE_SOURCE_SECRET_REF_LENGTH_SQL = (
+    "length(regexp_replace(installation_credential_ref, "
+    "'^(vault://|secret_ref://|secret://|secret_ref:)', '')) BETWEEN 3 AND 512"
+)
+MODULE_SOURCE_DEFAULT_BRANCH_SQL = "^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$"
+
+#: Полнота исходного commit'а GitHub (не сокращённый SHA).
+CI_COMMIT_SHA_SQL = "^[0-9a-f]{40}$"
+
+#: Полный digest-pinned OCI ref для backend'а. ``:latest``/тег дополнительно
+#: отсекается в приложении; в БД достаточно строгого ``@sha256:<64 hex>`` хвоста.
+CI_BACKEND_REF_SQL = "^.+@sha256:[0-9a-f]{64}$"
+
+
 class PluginArtifactRow(Base):
     """Реестр подписанных OCI-артефактов (§5.1, ``AppVersion``/``RegistryOutcome``).
 
     Установка разрешена ТОЛЬКО для ``status='published'``; ``quarantined`` и
     ``revoked`` — fail-closed отказ (критерий 18). Деплой идёт по digest,
     никогда по ``:latest``.
+
+    Колонки ``source_id``…``verification_evidence`` — аддитивные provenance
+    метаданные trusted CI (задача CI→publication). Они НЕ заменяют старые
+    pin-колонки ``oci_digest``/``image_ref`` и у исторических строк остаются
+    ``NULL``/``{}``; отдельной «второй» таблицы runtime-публикаций нет.
     """
 
     __tablename__ = "plugin_artifacts"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["source_id"],
+            ["plugin_module_sources.id"],
+            name="fk_plugin_artifact_source",
+            ondelete="RESTRICT",
+        ),
         UniqueConstraint(
             "plugin_id", "version", name="uq_plugin_artifact_plugin_version"
         ),
@@ -361,6 +409,30 @@ class PluginArtifactRow(Base):
         CheckConstraint(
             f"oci_digest ~ '{ARTIFACT_DIGEST_SQL}'",
             name="ck_plugin_artifact_digest",
+        ),
+        CheckConstraint(
+            f"commit_sha IS NULL OR commit_sha ~ '{CI_COMMIT_SHA_SQL}'",
+            name="ck_plugin_artifact_commit_sha",
+        ),
+        CheckConstraint(
+            f"backend_digest IS NULL OR backend_digest ~ '{ARTIFACT_DIGEST_SQL}'",
+            name="ck_plugin_artifact_backend_digest",
+        ),
+        CheckConstraint(
+            "backend_image_ref IS NULL OR "
+            f"(backend_image_ref ~ '{CI_BACKEND_REF_SQL}' "
+            "AND strpos(backend_image_ref, ':latest') = 0)",
+            name="ck_plugin_artifact_backend_image_ref",
+        ),
+        CheckConstraint(
+            "(backend_digest IS NULL AND backend_image_ref IS NULL) OR "
+            "(backend_digest IS NOT NULL AND backend_image_ref IS NOT NULL "
+            "AND right(backend_image_ref, 72) = '@' || backend_digest)",
+            name="ck_plugin_artifact_backend_pair",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(verification_evidence) = 'object'",
+            name="ck_plugin_artifact_evidence_object",
         ),
         # Проекция НЕ равна каноническому подписанному manifest (§5.1). Иначе
         # реестр незаметно потерял бы исходную подпись и сломал compatibility gate.
@@ -393,11 +465,11 @@ class PluginArtifactRow(Base):
     image_ref: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     #: Канонический подписанный plugin-manifest (``PluginManifest`` задачи 01).
     #: Нет ``default``: вызывающий ОБЯЗАН передать подписанную форму явно.
-    manifest: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    manifest: Mapped[dict] = mapped_column(JSONB().with_variant(JSON, "sqlite"), nullable=False)
     #: Нормализованная legacy-обёртка для ``AppVersion`` (см. функцию выше).
     #: Нет ``default``: пустая проекция равнялась бы пустому manifest и была бы
     #: отклонена ``ck_plugin_artifact_projection_differs``.
-    app_version_projection: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    app_version_projection: Mapped[dict] = mapped_column(JSONB().with_variant(JSON, "sqlite"), nullable=False)
     cosign_verified: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
@@ -411,6 +483,23 @@ class PluginArtifactRow(Base):
     lifecycle_version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    #: --- Аддитивные provenance-метаданные trusted CI -----------------------
+    #: Только source-control metadata (ADR-009), не второй runtime registry.
+    source_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    commit_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    backend_digest: Mapped[str | None] = mapped_column(String(71), nullable=True)
+    backend_image_ref: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    #: Значения берутся из ``VerificationEvidence.identity/issuer`` после
+    #: проверки cosign, а не из тела запроса.
+    signer_identity: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    issuer: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    #: HTML run URL строго GitHub-домена/репозитория; не внутренний URL.
+    run_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    #: Only safe allowlisted JSONB: ни токена, ни полного непроверенного
+    #: манифеста, ни внутренних ссылок. Пустой объект = legacy-строка.
+    verification_evidence: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, default=dict, server_default="{}"
+    )
     #: Признак текущей версии для set_current (CAS через lifecycle_version).
     #: Partial UNIQUE по plugin_id выше гарантирует не более одной true-строки.
     is_current: Mapped[bool] = mapped_column(
@@ -423,6 +512,207 @@ class PluginArtifactRow(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+# --------------------------------------------------------------------------- 3a. Module source
+
+
+class ModuleSourceRow(Base):
+    """Source-control metadata компании/плагина (ADR-009), НЕ runtime registry.
+
+    Хранится только привязка GitHub App к immutable репозиторию и trust-рефам.
+    Здесь нет GitHub token'а, секретных значений, CapabilityGrant, install/
+    deploy состояния или артефактов: только ``installation_credential_ref`` —
+    непрозрачный secret REF. ``repo_id`` и ``full_name`` после создания не
+    переписываются; смена репозитория требует новой source-строки.
+    """
+
+    __tablename__ = "plugin_module_sources"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id", "plugin_id", name="uq_plugin_module_source_company_plugin"
+        ),
+        UniqueConstraint(
+            "provider", "repo_id", name="uq_plugin_module_source_provider_repo"
+        ),
+        CheckConstraint(
+            f"provider = '{MODULE_SOURCE_PROVIDER_SQL}'",
+            name="ck_plugin_module_source_provider",
+        ),
+        CheckConstraint(
+            f"full_name ~ '{MODULE_SOURCE_FULL_NAME_SQL}'",
+            name="ck_plugin_module_source_full_name",
+        ),
+        CheckConstraint(
+            f"default_branch ~ '{MODULE_SOURCE_DEFAULT_BRANCH_SQL}'",
+            name="ck_plugin_module_source_default_branch",
+        ),
+        CheckConstraint(
+            f"trusted_workflow_ref ~ '{MODULE_SOURCE_WORKFLOW_SQL}'",
+            name="ck_plugin_module_source_workflow_ref",
+        ),
+        CheckConstraint(
+            f"installation_credential_ref ~ '{MODULE_SOURCE_SECRET_REF_SQL}' "
+            f"AND {MODULE_SOURCE_SECRET_REF_LENGTH_SQL}",
+            name="ck_plugin_module_source_credential_ref",
+        ),
+        CheckConstraint(
+            f"status IN {_in_clause(MODULE_SOURCE_STATUSES)}",
+            name="ck_plugin_module_source_status",
+        ),
+        CheckConstraint(
+            "(cabinet_id IS NULL AND project_id IS NULL) OR "
+            "(cabinet_id IS NOT NULL AND project_id IS NOT NULL)",
+            name="ck_plugin_module_source_scope_pair",
+        ),
+        ForeignKeyConstraint(
+            ["project_id", "company_id", "cabinet_id"],
+            ["projects.id", "projects.company_id", "projects.cabinet_id"],
+            name="fk_plugin_module_source_project_scope",
+            ondelete="RESTRICT",
+        ),
+        Index("ix_plugin_module_sources_company", "company_id"),
+        Index("ix_plugin_module_sources_plugin", "plugin_id"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(80), primary_key=True, default=lambda: _id("psrc")
+    )
+    company_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    plugin_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    #: Nullable only for legacy sources. New trusted scope bindings are paired.
+    cabinet_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    project_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    #: Единственный поддерживаемый source provider; неизвестное значение
+    #: отвергается и в домене, и в БД (fail-closed).
+    provider: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="github_app", server_default="github_app"
+    )
+    #: GitHub immutable repository id; не owner/repo slug.
+    repo_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    private: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    #: Имя ветки (или полный ``refs/heads/...``); OIDC-claim сравнивается с
+    #: каноническим ``expected_ref`` из application-типа.
+    default_branch: Mapped[str] = mapped_column(String(255), nullable=False)
+    installation_credential_ref: Mapped[str] = mapped_column(String(512), nullable=False)
+    #: Центральный reusable workflow строго ``path@40 hex`` (без mutable ref).
+    trusted_workflow_ref: Mapped[str] = mapped_column(String(1024), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="provisioning",
+        server_default="provisioning",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class PluginSourceReservationRow(Base):
+    """Pre-provider distributed reservation without a placeholder repo_id.
+
+    GitHub assigns the immutable numeric id only after create. Until then the
+    deterministic full name and trust binding are reserved in a short SQL
+    transaction; ModuleSourceRow receives the actual id after confirmation.
+    """
+
+    __tablename__ = "plugin_source_reservations"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id", "plugin_id", name="uq_plugin_source_reservation_company_plugin"
+        ),
+        UniqueConstraint(
+            "provider",
+            "expected_full_name",
+            name="uq_plugin_source_reservation_provider_full_name",
+        ),
+        CheckConstraint(
+            f"provider = '{MODULE_SOURCE_PROVIDER_SQL}'",
+            name="ck_plugin_source_reservation_provider",
+        ),
+        CheckConstraint(
+            f"expected_full_name ~ '{MODULE_SOURCE_FULL_NAME_SQL}'",
+            name="ck_plugin_source_reservation_full_name",
+        ),
+        CheckConstraint(
+            "expected_private = true",
+            name="ck_plugin_source_reservation_private",
+        ),
+        CheckConstraint(
+            f"expected_default_branch ~ '{MODULE_SOURCE_DEFAULT_BRANCH_SQL}'",
+            name="ck_plugin_source_reservation_default_branch",
+        ),
+        CheckConstraint(
+            f"trusted_workflow_ref ~ '{MODULE_SOURCE_WORKFLOW_SQL}'",
+            name="ck_plugin_source_reservation_workflow_ref",
+        ),
+        CheckConstraint(
+            f"installation_credential_ref ~ '{MODULE_SOURCE_SECRET_REF_SQL}' "
+            f"AND {MODULE_SOURCE_SECRET_REF_LENGTH_SQL}",
+            name="ck_plugin_source_reservation_credential_ref",
+        ),
+        CheckConstraint(
+            f"status IN {_in_clause(MODULE_SOURCE_STATUSES)}",
+            name="ck_plugin_source_reservation_status",
+        ),
+        CheckConstraint(
+            "status = 'provisioning' OR create_in_progress = false",
+            name="ck_plugin_source_reservation_completed_attempt",
+        ),
+        CheckConstraint(
+            "(cabinet_id IS NULL AND project_id IS NULL) OR "
+            "(cabinet_id IS NOT NULL AND project_id IS NOT NULL)",
+            name="ck_plugin_source_reservation_scope_pair",
+        ),
+        ForeignKeyConstraint(
+            ["project_id", "company_id", "cabinet_id"],
+            ["projects.id", "projects.company_id", "projects.cabinet_id"],
+            name="fk_plugin_source_reservation_project_scope",
+            ondelete="RESTRICT",
+        ),
+        Index("ix_plugin_source_reservations_company", "company_id"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(80), primary_key=True, default=lambda: _id("psr")
+    )
+    company_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    plugin_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    cabinet_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    project_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    provider: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="github_app", server_default="github_app"
+    )
+    expected_full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    expected_private: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    expected_default_branch: Mapped[str] = mapped_column(String(255), nullable=False)
+    installation_credential_ref: Mapped[str] = mapped_column(String(512), nullable=False)
+    trusted_workflow_ref: Mapped[str] = mapped_column(String(1024), nullable=False)
+    attempt_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    create_in_progress: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="provisioning", server_default="provisioning"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
@@ -581,7 +871,7 @@ class PluginFeatureFlagRow(Base):
     #: company_id одновременно PK и уникальный ключ: строго одна строка на компанию.
     company_id: Mapped[str] = mapped_column(String(40), primary_key=True)
     enabled_modules: Mapped[list] = mapped_column(
-        JSONB, nullable=False, default=list, server_default="[]"
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, default=list, server_default="[]"
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -594,14 +884,25 @@ class PluginFeatureFlagRow(Base):
 __all__ = [
     "ARTIFACT_DIGEST_SQL",
     "ARTIFACT_STATUSES",
+    "CI_BACKEND_REF_SQL",
+    "CI_COMMIT_SHA_SQL",
+    "MODULE_SOURCE_DEFAULT_BRANCH_SQL",
+    "MODULE_SOURCE_FULL_NAME_SQL",
+    "MODULE_SOURCE_PROVIDER_SQL",
+    "MODULE_SOURCE_SECRET_REF_LENGTH_SQL",
+    "MODULE_SOURCE_SECRET_REF_SQL",
+    "MODULE_SOURCE_STATUSES",
+    "MODULE_SOURCE_WORKFLOW_SQL",
     "AUDIT_FORBIDDEN_RAW_COLUMNS",
     "GRANT_STATUSES",
     "INSTANCE_STATUSES",
     "CapabilityGrantRow",
+    "ModuleSourceRow",
     "PluginArtifactRow",
     "PluginAuditEventRow",
     "PluginEventDeliveryRow",
     "PluginFeatureFlagRow",
     "PluginInstanceRow",
+    "PluginSourceReservationRow",
     "build_app_version_projection",
 ]

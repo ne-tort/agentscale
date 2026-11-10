@@ -33,15 +33,23 @@ def test_build_rejects_invalid_session_type() -> None:
 
 
 def test_build_returns_complete_bundle() -> None:
-    """Все 12 полей связки заполнены, ни одного ``None``."""
+    """Все 13 полей связки заполнены, ни одного ``None``."""
     bundle = build_plugin_repositories(FakeSessionFactory(), FakeRedis())
     assert isinstance(bundle, PluginRepositories)
     for field_name in (
-        "grant_store", "grant_revocation", "quota", "feature_flags",
+        "grant_store", "publication_approvals", "instance_store", "grant_revocation", "quota", "feature_flags",
         "feature_flags_sync", "artifact_store", "subscription_store",
         "idempotency_store", "published_event_store", "dlq_store", "audit",
     ):
         assert getattr(bundle, field_name) is not None
+
+
+def test_approval_repository_uses_shared_process_session_factory() -> None:
+    factory = FakeSessionFactory()
+    bundle = build_plugin_repositories(factory, FakeRedis())
+    assert bundle.publication_approvals._session_factory is factory
+    assert bundle.grant_store._session_factory is factory
+    assert bundle.publication_approvals._session is None
 
 
 def test_feature_flag_store_is_shared_between_admin_and_strangler() -> None:
@@ -64,12 +72,16 @@ def test_build_with_bound_session() -> None:
     """Готовая AsyncSession тоже допустима (транзакция — вызывающего)."""
     bundle = build_plugin_repositories(FakeSession(), FakeRedis())
     assert bundle.grant_store._session is not None  # не коммитим чужую сессию
+    assert bundle.instance_store._session is not None
+    assert bundle.publication_approvals._session is not None
     assert bundle.audit._session is not None
 
 
-def test_quota_in_bundle_denies_when_redis_unavailable() -> None:
+@pytest.mark.asyncio
+async def test_quota_in_bundle_denies_when_redis_unavailable() -> None:
     """Связка собрана, но Redis упал во время запроса → deny, не allow."""
     from prodavan.application.plugins.capabilities.quotas import (
+        PluginQuota,
         PluginQuotaKey,
         QuotaOp,
         QuotaReason,
@@ -81,6 +93,6 @@ def test_quota_in_bundle_denies_when_redis_unavailable() -> None:
         plugin_instance_id="inst_abc",
         artifact_digest="sha256:" + "a" * 64,
     )
-    decision = bundle.quota.enforce(key, QuotaOp.OPS, 1)
+    decision = await bundle.quota.enforce(key, QuotaOp.OPS, 1, PluginQuota())
     assert decision.allowed is False
     assert decision.code is QuotaReason.QUOTA_EXCEEDED

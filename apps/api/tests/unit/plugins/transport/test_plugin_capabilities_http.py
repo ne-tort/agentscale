@@ -218,6 +218,16 @@ def test_unknown_capability_is_503(client: TestClient, token: str, service) -> N
     assert resp.status_code == 503
 
 
+
+def test_outcome_unknown_decision_is_503(client: TestClient, token: str, service) -> None:
+    service.result = FakeDecision(
+        "deny", "OUTCOME_UNKNOWN", reason="outcome_unknown_audit_append_failed"
+    )
+    resp = client.post(CACHE_GET, json=CACHE_BODY, headers=auth(token))
+    assert resp.status_code == 503
+    assert resp.json()["code"] == "OUTCOME_UNKNOWN"
+
+
 def test_service_not_configured_is_503(app, token: str) -> None:
     """Fail-closed: нет привязанного сервиса = явная ошибка, не allow."""
     del app.state.plugin_capability_service
@@ -305,14 +315,29 @@ def test_incoming_x_company_id_is_ignored(client: TestClient, token: str, servic
     assert call["request"].envelope.grant_id == call["claims"].grant_id
 
 
-def test_health_uses_company_from_claims(client: TestClient, token: str) -> None:
+def test_health_returns_exact_safe_introspection_contract(client: TestClient, token: str) -> None:
     resp = client.get(
         "/capabilities/v1/health",
         headers={**auth(token), "X-Company-ID": "evil"},
     )
     assert resp.status_code == 200
-    assert resp.json()["company_id"] == TEST_COMPANY
-    assert resp.json()["surface"] == "plugin-capabilities"
+    payload = resp.json()
+    assert set(payload) == {
+        "plugin_id", "company_id", "cabinet_id", "project_id",
+        "grant_id", "artifact_digest", "scopes", "exp",
+    }
+    claims = peek(token)
+    assert payload["plugin_id"] == "mod_equipment"
+    assert payload["company_id"] == TEST_COMPANY
+    assert payload["cabinet_id"] == "cab_456"
+    assert payload["project_id"] is None
+    assert payload["grant_id"] == "grant_01"
+    assert payload["artifact_digest"] == TEST_DIGEST
+    assert payload["scopes"] == sorted(ALL_SCOPES)
+    assert payload["exp"] == claims["exp"]
+    assert token not in resp.text
+    assert TEST_SECRET not in resp.text
+    assert "status" not in payload and "surface" not in payload
 
 
 def test_health_without_token_is_401(client: TestClient) -> None:

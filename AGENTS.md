@@ -3,20 +3,27 @@
 Работаешь в репозитории **ne-tort/agentscale** (локальная директория подмодуля — `prodavan/`) — SaaS **управления Pod'ами через UI**; внутри Pod — **AI-агенты с файлами и инструментами**, не чат-обёртка.  
 **Не** Telegram Commerce-бот, **не** закупочный пайплайн из корня Commerce.
 
-Legacy AI-канон: [`docs/target/`](docs/target/) (кроме as-built) — см. [`docs/LEGACY.md`](docs/LEGACY.md). Ориентир: [`docs/PRODUCT.md`](docs/PRODUCT.md) + код + тесты.
+Категории документации — [`docs/LEGACY.md`](docs/LEGACY.md): current product,
+target design, accepted ADR, as-built, migration reports и history. Каталог сам
+по себе не делает документ legacy. Ориентир: [`docs/PRODUCT.md`](docs/PRODUCT.md)
++ код + проверенные результаты.
 
-## Документация (актуальная)
+## Документация (актуальная навигация)
 
-| Что | Где | Когда читать |
+| Категория | Где | Когда читать |
 |-----|-----|--------------|
-| **Продукт** | [`docs/PRODUCT.md`](docs/PRODUCT.md) | Старт любой задачи |
-| As-built | [`docs/target/12-layer-docs/`](docs/target/12-layer-docs/) | Что уже в коде |
-| Infra / e2e | [`docs/07-infrastructure/`](docs/07-infrastructure/) | GitOps, k3s, CI |
+| **Current product / S1** | [`docs/PRODUCT.md`](docs/PRODUCT.md) | Старт любой задачи |
+| **Current as-built** | Код + манифесты + [`docs/migration/plugin-migration-status.md`](docs/migration/plugin-migration-status.md) | Что реально есть; plugin status сейчас STOP-SHIP |
+| Target design / ADR | [`docs/architecture-migration/README.md`](docs/architecture-migration/README.md), [`docs/PLUGIN-AUTHORING.md`](docs/PLUGIN-AUTHORING.md) | Цель и предложения, не доказательство live |
+| Infra / e2e | [`docs/07-infrastructure/`](docs/07-infrastructure/) | GitOps, k3s, CI; актуальные ops, не legacy |
 | Pod runtime | [`pod_service/`](apps/api/src/prodavan/application/pod_service/), [`tests/e2e/k8s/`](apps/api/tests/e2e/k8s/) | Real k8s lifecycle |
 | Agent + files | [`application/agent/`](apps/api/src/prodavan/application/agent/) | Агент в Pod |
-| ~~Канон BC~~ legacy | [`docs/target/01…15`](docs/target/) | Справка, не блокер |
+| Исторический as-built snapshot | [`docs/target/12-layer-docs/`](docs/target/12-layer-docs/) | Только до перерасчёта; не текущая приёмка |
+| History / старый AI-канон | [`docs/target/01…15`](docs/target/) | Справка, не блокер; файлы не удалять |
 
-**Правило:** PRODUCT.md + код > gap map. E2E — backend API, не браузерный UI.
+**Правило:** PRODUCT.md + код + свежие evidence > gap map и старые quality scores.
+E2E — backend API, не браузерный UI. Актуальные Document Store / OpenSearch /
+agent-runtime ADR не объявляются legacy по каталогу; см. LEGACY.md.
 
 ## Git / CI / кластер (GitOps)
 
@@ -141,7 +148,7 @@ ORM-модель → autogenerate в PR → CI (upgrade + alembic check) → mer
 ## Язык и границы
 
 - Ответы — на русском, если не сказано иное.
-- Новые продуктовые требования — только в `docs/PRODUCT.md` (as-built — `12-layer-docs`).
+- Новые продуктовые требования — только в `docs/PRODUCT.md`; current as-built — код и `docs/migration/plugin-migration-status.md`, а `12-layer-docs` — исторический snapshot.
 - Infra не ломать без явной задачи; не добавлять bash.
 
 ## Migration-stage work protocol (current override)

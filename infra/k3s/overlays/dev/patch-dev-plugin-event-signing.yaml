@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentscale-api
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          env:
+            # Opaque SecretStore reference only; no plaintext event HMAC key.
+            - name: PLUGIN_EVENT_SIGNING_SECRET_REF
+              value: k8s-secret://agentscale-plugin-events/signing-key
+          volumeMounts:
+            - name: plugin-event-signing
+              mountPath: /var/run/secrets/agentscale-plugin-events
+              readOnly: true
+      volumes:
+        - name: plugin-event-signing
+          secret:
+            secretName: agentscale-plugin-events
+            defaultMode: 0400
+            # Optional only so the default disabled platform does not block dev.
+            # Enabled composition still fails closed if the key cannot be read.
+            optional: true
+            items:
+              - key: signing-key
+                path: signing-key

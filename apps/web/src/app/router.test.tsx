@@ -140,6 +140,93 @@ describe("AppRouter workspace integration", () => {
     expect(harness.api && (harness.api as ApiClient).getProject).not.toHaveBeenCalled();
   });
 
+  it("denies private plugin route without session before bootstrap", async () => {
+    const getPluginBootstrap = vi.fn();
+    const getPublicPluginBootstrap = vi.fn();
+    harness.api = { ...harness.api as ApiClient, getPluginBootstrap, getPublicPluginBootstrap };
+    harness.auth = { ...auth, isAuthenticated: false, tokens: undefined };
+    await mount("/plugins/mod_equipment/co_123/docs/private");
+    await waitFor(() => host?.querySelector("[data-testid='page-login']") !== null);
+    expect(getPluginBootstrap).not.toHaveBeenCalled();
+    expect(getPublicPluginBootstrap).not.toHaveBeenCalled();
+  });
+
+  it("serves nested public plugin route without session and never falls back to private/admin bootstrap", async () => {
+    const getPluginBootstrap = vi.fn();
+    const me = vi.fn();
+    const listAdminPlugins = vi.fn();
+    const getPublicPluginBootstrap = vi.fn(async (_company: string, _plugin: string, routePath: string) => ({
+      plugin_id: "mod_equipment",
+      manifest_version: "1.2.0",
+      artifact_digest: `sha256:${"a".repeat(64)}`,
+      static_origin: "https://plugin-origin.agentscale.dev",
+      plugin_shell_origin: "https://agentscale.dev",
+      frontend_entry: "shell.html",
+      frontend_base_path: "/signed/public",
+      route_path: routePath,
+      capabilities: ["hello.greetings@1.0"],
+      rpc_operations: [{
+        capability_id: "hello.greetings",
+        capability_version: "1.0",
+        operation: "list",
+        http_method: "GET",
+        backend_path: "/api/greetings/list",
+        public: true,
+      }],
+      public_pages: ["/docs/welcome"],
+      scope: { company_id: "co_123" },
+      grant_expires_at: null,
+    }));
+    harness.api = {
+      ...harness.api as ApiClient,
+      getPluginBootstrap,
+      getPublicPluginBootstrap,
+      me,
+      listAdminPlugins,
+    };
+    harness.auth = { ...auth, isAuthenticated: false, tokens: undefined };
+    await mount("/public/plugins/co_123/mod_equipment/docs/welcome");
+    await waitFor(() => host?.querySelector("iframe")?.getAttribute("src")
+      === "https://plugin-origin.agentscale.dev/signed/public/shell.html");
+    expect(getPublicPluginBootstrap).toHaveBeenCalledWith("co_123", "mod_equipment", "/docs/welcome");
+    expect(getPluginBootstrap).not.toHaveBeenCalled();
+    expect(me).not.toHaveBeenCalled();
+    expect(listAdminPlugins).not.toHaveBeenCalled();
+    expect(host?.querySelector("[data-testid='page-login']")).toBeNull();
+    expect(host?.querySelector(".plugin-frame")?.getAttribute("data-plugin-public")).toBe("true");
+  });
+
+  it("keeps private nested plugin route on authenticated private bootstrap", async () => {
+    const getPublicPluginBootstrap = vi.fn();
+    const getPluginBootstrap = vi.fn(async (_company: string, _plugin: string, routePath: string) => ({
+      plugin_id: "mod_equipment",
+      manifest_version: "1.2.0",
+      artifact_digest: `sha256:${"a".repeat(64)}`,
+      static_origin: "https://plugin-origin.agentscale.dev",
+      plugin_shell_origin: "https://agentscale.dev",
+      frontend_entry: "index.html",
+      frontend_base_path: "/signed/private",
+      route_path: routePath,
+      capabilities: [],
+      rpc_operations: [],
+      public_pages: [],
+      scope: { company_id: "co_123" },
+      grant_expires_at: null,
+    }));
+    harness.api = { ...harness.api as ApiClient, getPluginBootstrap, getPublicPluginBootstrap };
+    harness.auth = {
+      ...auth,
+      isAuthenticated: true,
+      tokens: { access_token: "private-access", refresh_token: "private-refresh" },
+    };
+    await mount("/plugins/mod_equipment/co_123/docs/private");
+    await waitFor(() => host?.querySelector("iframe")?.getAttribute("src")
+      === "https://plugin-origin.agentscale.dev/signed/private/index.html");
+    expect(getPluginBootstrap).toHaveBeenCalledWith("co_123", "mod_equipment", "/docs/private");
+    expect(getPublicPluginBootstrap).not.toHaveBeenCalled();
+    expect(host?.querySelector(".plugin-frame")?.getAttribute("data-plugin-public")).toBe("false");
+  });
+
   it("leaves the company application route under the existing application header", async () => {
     await mount("/company/modules");
     await waitFor(() => host?.querySelector("[data-testid='page-company']") !== null);

@@ -209,6 +209,42 @@ export interface ApiClient {
   /** Compatibility alias used by the existing project overview feature. */ lifecycle(projectId: Id, action: "launch" | "pause" | "resume" | "complete" | "reload"): Promise<void>;
   /** Plugin-платформа (дизайн v4): установленные плагины компании + фича-флаг. */
   listAdminPlugins(companyId: Id): Promise<AdminPluginsResponse>;
+  /** Employee/public runtime bootstrap (task01). */
+  getPluginBootstrap(companyId: Id, pluginId: Id, routePath?: string): Promise<PluginBootstrapResponse>;
+  getPublicPluginBootstrap(companyId: Id, pluginId: Id, routePath?: string): Promise<PluginBootstrapResponse>;
+}
+
+export interface RpcOperationResponse {
+  capability_id: string;
+  capability_version: string;
+  operation: string;
+  http_method: "GET" | "POST";
+  backend_path: string;
+  public: boolean;
+}
+
+export interface PluginScopeResponse {
+  company_id: string;
+  cabinet_id?: string;
+  project_id?: string;
+  session_id?: string;
+}
+
+export interface PluginBootstrapResponse {
+  plugin_id: string;
+  manifest_version: string;
+  artifact_digest: string;
+  static_origin: string;
+  /** Exact server-derived shell origin for iframe.name and static frame-ancestors. */
+  plugin_shell_origin: string;
+  frontend_entry: string;
+  frontend_base_path: string;
+  route_path: string;
+  capabilities: string[];
+  rpc_operations: RpcOperationResponse[];
+  public_pages: string[];
+  scope: PluginScopeResponse;
+  grant_expires_at?: string;
 }
 
 /** Ответ `GET /api/v1/admin/plugins/?company_id=...` (plugin_admin.py). */

@@ -21,6 +21,7 @@ from prodavan.infrastructure.persistence.models.plugin_platform import (
     GRANT_STATUSES,
     INSTANCE_STATUSES,
     CapabilityGrantRow,
+    ModuleSourceRow,
     PluginArtifactRow,
     PluginAuditEventRow,
     PluginEventDeliveryRow,
@@ -68,7 +69,7 @@ def _indexes(row: type) -> dict[str, Index]:
                 "id", "company_id", "plugin_id", "plugin_instance_id",
                 "manifest_version", "artifact_digest", "capabilities",
                 "egress_policy", "quota", "status", "issued_at", "expires_at",
-                "revoked_at", "created_by",
+                "revoked_at", "created_by", "webhook_secret_ref",
             },
         ),
         (
@@ -86,7 +87,18 @@ def _indexes(row: type) -> dict[str, Index]:
                 "id", "plugin_id", "version", "oci_digest", "image_ref", "manifest",
                 "app_version_projection", "cosign_verified", "sbom_digest", "status",
                 "quarantine_reason", "lifecycle_version", "is_current",
-                "published_at", "created_at",
+                "published_at", "created_at", "source_id", "commit_sha",
+                "backend_digest", "backend_image_ref", "signer_identity", "issuer",
+                "run_url", "verification_evidence",
+            },
+        ),
+        (
+            ModuleSourceRow,
+            {
+                "id", "company_id", "plugin_id", "provider", "repo_id", "full_name",
+                "private", "default_branch", "installation_credential_ref",
+                "trusted_workflow_ref", "status", "created_at", "updated_at",
+                "cabinet_id", "project_id",
             },
         ),
         (
@@ -113,6 +125,11 @@ def test_model_has_exact_expected_columns(row: type, expected: set[str]) -> None
     """Модель создаётся с обязательными полями, без лишних/недокументированных."""
 
     assert _column_names(row) == expected
+
+
+def test_module_source_scope_columns_are_nullable_for_legacy_rows() -> None:
+    assert ModuleSourceRow.__table__.c.cabinet_id.nullable is True
+    assert ModuleSourceRow.__table__.c.project_id.nullable is True
 
 
 def test_audit_event_has_no_raw_columns() -> None:

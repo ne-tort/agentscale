@@ -42,7 +42,8 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 rules:
-  # MINIMUM для activator'а (§7.4): МЕНЯТЬ можно ТОЛЬКО scale-подресурс.
+  # REQUIRED для activator'а (§7.4): менять можно ТОЛЬКО scale-подресурс.
+  # Это НЕ least privilege по namespace — отдельный blocker ниже.
   # `resourceNames` намеренно отсутствует: имена Deployment'ов плагинов
   # создаются динамически при grant (§5.1) и заранее не перечислимы.
   # PATCH `deployments` (не scale) НЕ выдан — Gateway не может подменить образ,
@@ -54,13 +55,26 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "watch"]
-  # Межпроцессный CAS состояния activator'а (задача runtime-адаптеров):
-  # `ConfigMapStateStore` сравнивает resourceVersion, чтобы две реплики Gateway
-  # не сделали два PATCH 0→1. Имя фиксировано — сужаем через resourceNames.
+  # STOP-ENABLED: deployments/scale остаётся namespace-wide, потому что dynamic
+  # имена нельзя перечислить в resourceNames. Это НЕ least privilege. Минимальный
+  # следующий этап изоляции: выделенный namespace ТОЛЬКО для plugin runtime и
+  # отдельный RoleBinding activator'а в нём; Gateway/control-plane остаются в
+  # agentscale-dev. Переезд требует согласованной смены NetworkPolicy, Service DNS,
+  # Argo destination и ConfigMap namespace и НЕ выполняется этим срезом.
+  #
+  # Межпроцессный CAS: чтение/запись существующего activation ConfigMap сужены
+  # resourceNames до одного объекта.
   - apiGroups: [""]
     resources: ["configmaps"]
     resourceNames: ["plugin-activation-state"]
-    verbs: ["get", "create", "update", "patch"]
+    verbs: ["get", "update", "patch"]
+  # Kubernetes RBAC НЕ применяет resourceNames к create. Create вынесен отдельно,
+  # чтобы named rule не создавал ложное ощущение ограничения. Runtime формирует
+  # POST только для plugin-activation-state, но RBAC technically разрешает create
+  # любого ConfigMap в namespace: это дополнительный STOP-ENABLED blocker.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
   # Controller-managed данные (задача controllers): pg_hba / userlist / Envoy.
   # Имена фиксированы; patch только /data, чтение для идемпотентного sync.
   - apiGroups: [""]
@@ -110,7 +124,9 @@ data:
   # PLUGIN_COSIGN_IDENTITY приносит Secret (НЕ ConfigMap), как и в
   # base/agentscale-api/configmap.yaml:109-110. Отсутствие секрета = отказ
   # старта (fail-closed), а не «dev-фолбэк» (§4.2, ADR-008).
-  PLUGIN_PLATFORM_ENABLED: "true"
+  # EMERGENCY FAIL-CLOSED: включение запрещено до завершения
+  # security/lifecycle remediation.
+  PLUGIN_PLATFORM_ENABLED: "false"
   PLUGIN_CLAIMS_TTL_SECONDS: "300"
   PLUGIN_CLAIMS_ISSUER: "agentscale-plugins"
   PLUGIN_CLAIMS_AUDIENCE: "capability-gateway"
@@ -138,7 +154,8 @@ data:
   # Activator (§7.4): 0→1 через deployments/scale, удержание до Ready.
   # Реестр активных job_id блокирует усыпление посреди фоновой задачи (§7.3).
   PLUGIN_IDLE_TTL_SECONDS: "300"
-  PLUGIN_READY_TIMEOUT_SECONDS: "120"
+  # Согласовано с startupProbe plugin template: 5s × 60 = 300s.
+  PLUGIN_READY_TIMEOUT_SECONDS: "300"
   PLUGIN_MAX_CONCURRENT_WAKES: "2"
   PLUGIN_ACTIVATOR_TARGET_LABEL: "app=plugin"
   # Namespace k3s для ScalePort/ReadinessPort/ConfigMapStateStore. Без этого
@@ -189,6 +206,8 @@ stringData:
   # В dev это тот же хост, что и shell, но отдельное имя; при переходе на
   # wildcard subdomain (§5.3) заменить на точный https-origin плагинов.
   PLUGIN_STATIC_ORIGIN: "https://plugin-origin.agentscale.dev"
+  # Server-derived exact shell origin shared with bootstrap DTO and static CSP.
+  PLUGIN_SHELL_ORIGIN: "https://agentscale.dev"
   # keyless cosign: ожидаемый certificate identity GitHub Actions.
   # Пусто = wiring/config.py откажет в сборке (все артефакты ушли бы в
   # карантин молча). Dev-значение ниже совпадает с workflow, который
@@ -236,7 +255,7 @@ spec:
         # RuntimeConfigError после добавления PLUGIN_RUNTIME_NAMESPACE).
         # Менять вручную вместе с конфигом; configMapGenerator с хешем здесь
         # неприменим — ConfigMap статический и используется Sync-хуками.
-        agentscale.io/plugin-config-revision: "5"
+        agentscale.io/plugin-config-revision: "6"
     spec:
       serviceAccountName: plugin-gateway
       automountServiceAccountToken: true

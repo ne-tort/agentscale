@@ -34,6 +34,7 @@ from prodavan.application.plugins.capabilities.audit import (
 
 DIGEST = "sha256:" + "a" * 64
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
+pytestmark = pytest.mark.asyncio
 
 
 def envelope() -> object:
@@ -58,7 +59,7 @@ def envelope() -> object:
 # ---------------------------------------------------------------------------
 
 
-def test_redact_removes_password_token_sql_and_body_values() -> None:
+async def test_redact_removes_password_token_sql_and_body_values() -> None:
     """Кр. 11: ни одного raw значения; только ``<key>_digest`` и маркер."""
     result = redact(
         {
@@ -89,7 +90,7 @@ def test_redact_removes_password_token_sql_and_body_values() -> None:
         assert leaked not in serialized
 
 
-def test_redact_handles_nested_and_varied_key_names() -> None:
+async def test_redact_handles_nested_and_varied_key_names() -> None:
     """Вложенные структуры и ``db_password``/``Authorization``/``payload``."""
     result = redact(
         {
@@ -111,7 +112,7 @@ def test_redact_handles_nested_and_varied_key_names() -> None:
         assert leaked not in serialized
 
 
-def test_redact_replaces_secret_like_strings_even_under_safe_keys() -> None:
+async def test_redact_replaces_secret_like_strings_even_under_safe_keys() -> None:
     """Даже под «безопасным» ключом Bearer/JWT/DSN заменяется digest'ом.
 
     По контракту redaction (docs/08-migration/audit-append-shape-decision.md:13-19,
@@ -138,14 +139,14 @@ def test_redact_replaces_secret_like_strings_even_under_safe_keys() -> None:
         assert leaked not in serialized
 
 
-def test_canonical_digest_is_stable_and_sha256() -> None:
+async def test_canonical_digest_is_stable_and_sha256() -> None:
     first = canonical_digest({"a": 1, "b": [2, 3]})
     second = canonical_digest({"b": [2, 3], "a": 1})
     assert first == second
     assert first.startswith("sha256:") and len(first) == 71
 
 
-def test_audit_event_redacted_contains_no_raw_content() -> None:
+async def test_audit_event_redacted_contains_no_raw_content() -> None:
     """Даже если resource/reason пытаются пронести данные — redact их убирает."""
     event = PluginAuditEvent(
         request_id="req-1", company_id="co_123", subject_id="sub-1",
@@ -163,7 +164,7 @@ def test_audit_event_redacted_contains_no_raw_content() -> None:
     assert row["event_kind"] == AuditEventKind.AUTHORIZATION.value
 
 
-def test_plugin_audit_event_has_full_plugin_identity() -> None:
+async def test_plugin_audit_event_has_full_plugin_identity() -> None:
     """§4.5: все обязательные поля идентичности присутствуют в redacted-проекции."""
     event = PluginAuditEvent(
         request_id="req-1", run_id="run-1", correlation_id="corr-1",
@@ -182,7 +183,7 @@ def test_plugin_audit_event_has_full_plugin_identity() -> None:
         assert name in row, name
 
 
-def test_event_rejects_long_freeform_reason() -> None:
+async def test_event_rejects_long_freeform_reason() -> None:
     """reason — канонический код, а не произвольный текст с данными."""
     with pytest.raises(ValueError):
         PluginAuditEvent(
@@ -198,7 +199,7 @@ def test_event_rejects_long_freeform_reason() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_success_audit_is_a_separate_event_from_authorization() -> None:
+async def test_success_audit_is_a_separate_event_from_authorization() -> None:
     """Успех адаптера ≠ allow: два РАЗНЫХ события, связанные linked_event_id."""
     sink = InMemoryAudit()
     env = envelope()
@@ -207,14 +208,14 @@ def test_success_audit_is_a_separate_event_from_authorization() -> None:
         resource="key", decision=CapabilityDecision.ALLOW,
         code=DecisionCode.ALLOWED, grant_id="grant_1", reason=None, occurred_at=NOW,
     )
-    sink.append(authorization)
+    await sink.append(authorization)
     success = invocation_event(
         envelope=env, capability="cache", operation="cache.get",
         resource="key", decision=AuditDecision.SUCCESS, code=DecisionCode.ALLOWED,
         grant_id="grant_1", reason="adapter_invocation_succeeded",
         occurred_at=NOW, linked_event_id=authorization.event_id, result_digest=DIGEST,
     )
-    sink.append(success)
+    await sink.append(success)
 
     assert len(sink.events) == 2
     assert sink.events[0].event_kind is AuditEventKind.AUTHORIZATION
@@ -229,7 +230,7 @@ def test_success_audit_is_a_separate_event_from_authorization() -> None:
     assert len(sink.rows) == 2
 
 
-def test_append_failure_is_not_silent_allow() -> None:
+async def test_append_failure_is_not_silent_allow() -> None:
     """Append failure позитивной мутации = deny/system failure (§4.5)."""
     sink = FailingAudit()
     event = PluginAuditEvent(
@@ -238,4 +239,4 @@ def test_append_failure_is_not_silent_allow() -> None:
         capability="cache", operation="cache.get", resource="key", occurred_at=NOW,
     )
     with pytest.raises(RuntimeError):
-        sink.append(event)
+        await sink.append(event)

@@ -1,6 +1,6 @@
 """Сборка ``PluginAdminPorts`` из РЕАЛЬНЫХ реализаций (F11, родитель).
 
-Главное правило (по заданию): **отсутствие ЛЮБОЙ из 10 реализаций = явная
+Главное правило (по заданию): **отсутствие ЛЮБОЙ из 11 реализаций = явная
 ошибка, а не заглушка «успех»**. ``build_plugin_admin_ports`` не имеет ни
 одного значения по умолчанию для портов и не подставляет «no-op» адаптеры:
 недособранная связка просто не создаётся, а значит ``PluginAdminService``
@@ -15,12 +15,14 @@
 ``tenant_db``                 ``TenantDbAdapter(TenantDatabaseService)``
 ``object_store``              ``ObjectStoreAdapter(PluginObjectStore, BucketAdminPort)``
 ``artifact_registry``         ``ArtifactRegistryAdapter(PluginArtifactRegistry, store)``
-``grant_store``               ``InMemoryGrantStore`` (в кластере — БД, A10)
+``instance_store``            SQL ``PluginInstanceRow`` (durable saga)
+``grant_store``               явный ``GrantStorePort`` (SQL в кластере, A10)
+``publication_approvals``     durable SQL exact pre-approval + consumption
 ``revocation``                ``IdentityRevocationAdapter(GrantRevocation/InMemoryRevocation)``
 ``mint``                      ``IdentityMintAdapter(secret=...)``
 ``activation``                ``AdminActivationAdapter(PluginActivator, resolver, deployments)``
-``routes``                    ``InMemoryRouteRegistry`` (в кластере — БД/Redis, A10)
-``audit``                     ``InMemoryAdminAudit`` (в кластере — append-only sink)
+``routes``                    обязательный durable ``RouteRegistryPort`` (SQL в production)
+``audit``                     явный ``AuditPort`` (append-only sink в кластере)
 ``platform_admin``            реальная auth родителя ИЛИ ``StaticPlatformAdmin`` ТОЛЬКО для тестов
 ============================  ==================================================
 
@@ -44,8 +46,11 @@ from typing import Any
 from prodavan.application.plugins.admin.ports import (
     AuditPort,
     GrantStorePort,
+    InstallationScopeStorePort,
     PlatformAdminPort,
     PluginAdminPorts,
+    PluginUpdateLockPort,
+    PublicationApprovalStorePort,
     RouteRegistryPort,
 )
 from prodavan.application.plugins.admin.service import PluginAdminService
@@ -59,11 +64,6 @@ from .artifacts_adapter import ArtifactRegistryAdapter
 from .errors import require_wired
 from .identity_adapter import IdentityMintAdapter, IdentityRevocationAdapter
 from .objects_adapter import ObjectStoreAdapter
-from .stores import (
-    InMemoryAdminAudit,
-    InMemoryGrantStore,
-    InMemoryRouteRegistry,
-)
 from .tenantdb_adapter import TenantDbAdapter
 
 
@@ -86,7 +86,12 @@ class AdapterDependencies:
     mint_secret: str | bytes
     activator: Any
     instance_resolver: Any
+    instance_store: Any
+    webhook_secrets: Any
     deployment_admin: Any
+    publication_approvals: PublicationApprovalStorePort
+    installation_scopes: InstallationScopeStorePort
+    update_lock: PluginUpdateLockPort
 
 
 def build_plugin_admin_ports(
@@ -100,19 +105,26 @@ def build_plugin_admin_ports(
     mint_secret: str | bytes,
     activator: Any,
     instance_resolver: Any,
+    instance_store: Any,
+    webhook_secrets: Any,
     deployment_admin: Any,
+    publication_approvals: PublicationApprovalStorePort,
+    installation_scopes: InstallationScopeStorePort,
+    update_lock: PluginUpdateLockPort,
     artifact_store: Any | None = None,
     grant_store: GrantStorePort | None = None,
     routes: RouteRegistryPort | None = None,
     audit: AuditPort | None = None,
     resolver_registrar: Any | None = None,
 ) -> PluginAdminPorts:
-    """Собрать ВСЕ 10 портов ``PluginAdminService``.
+    """Собрать ВСЕ 12 портов ``PluginAdminService``.
 
-    ``platform`` и 10 зависимостей обязательны. ``grant_store``/``routes``/
-    ``audit`` по умолчанию — in-memory реализации ТОЛЬКО для dev/тестов;
-    в кластере родитель ДОЛЖЕН передать реализации поверх БД/Redis
-    (задача A10). Явная пометка здесь и в ``stores.py`` — часть контракта.
+    ``platform`` и остальные зависимости обязательны. ``routes`` не имеет
+    default: production builder требует явный durable RouteRegistryPort.
+    ``grant_store``/``audit`` тоже ОБЯЗАТЕЛЬНЫ: legacy InMemory defaults
+    удалены, отсутствие = ``ValueError`` через ``require_wired`` до сборки
+    сервиса. ``InMemoryGrantStore``/``InMemoryAdminAudit`` допустимы ТОЛЬКО
+    как явно переданные test/dev constructor overrides.
 
     Отсутствие ЛЮБОЙ обязательной реализации → ``ValueError`` с именем порта.
     Никаких «заглушек успеха»: если адаптер не собран, сервис не существует.
@@ -129,7 +141,15 @@ def build_plugin_admin_ports(
         "mint_secret": mint_secret,
         "activator": activator,
         "instance_resolver": instance_resolver,
+        "instance_store": instance_store,
+        "webhook_secrets": webhook_secrets,
         "deployment_admin": deployment_admin,
+        "publication_approvals": publication_approvals,
+        "installation_scopes": installation_scopes,
+        "update_lock": update_lock,
+        "grant_store": grant_store,
+        "audit": audit,
+        "routes": routes,
     }
     for name, value in required.items():
         require_wired(name, value)
@@ -167,26 +187,31 @@ def build_plugin_admin_ports(
         resolver_registrar=resolver_registrar,
     )
 
-    # --- 3. Чистые контракты: in-memory ТОЛЬКО для dev/тестов ---------------
-    # В кластере заменить на БД/Redis (задача A10). Передача None допустима
-    # ЗДЕСЬ, потому что это ЯВНЫЕ реализации, а не «отсутствие порта».
-    grant_store_impl = grant_store if grant_store is not None else InMemoryGrantStore()
-    routes_impl = routes if routes is not None else InMemoryRouteRegistry()
-    audit_impl = audit if audit is not None else InMemoryAdminAudit()
+    # --- 3. Чистые контракты -------------------------------------------------
+    # routes/grant_store/audit уже проверены выше через require_wired:
+    # отсутствие durable порта — config error, никогда не скрытый process-local
+    # fallback. InMemory* остаются доступны ТОЛЬКО как явно переданные test/dev
+    # constructor dependencies, а не как молчаливый default.
+    assert routes is not None and grant_store is not None and audit is not None
 
     ports = PluginAdminPorts(
         tenant_db=tenant_db,
         object_store=objects,
         artifact_registry=artifacts,
-        grant_store=grant_store_impl,
+        instance_store=instance_store,
+        grant_store=grant_store,
+        webhook_secrets=webhook_secrets,
         revocation=revocation,
         mint=mint,
         activation=activation,
-        routes=routes_impl,
-        audit=audit_impl,
+        routes=routes,
+        audit=audit,
         platform_admin=platform,
+        publication_approvals=publication_approvals,
+        installation_scopes=installation_scopes,
+        update_lock=update_lock,
     )
-    # Дополнительная страховка: у связки ровно 10 полей, все не None.
+    # Дополнительная страховка: у связки ровно 12 полей, все не None.
     _assert_all_ports_wired(ports)
     return ports
 
@@ -202,7 +227,12 @@ def build_plugin_admin_service(
     mint_secret: str | bytes,
     activator: Any,
     instance_resolver: Any,
+    instance_store: Any,
+    webhook_secrets: Any,
     deployment_admin: Any,
+    publication_approvals: PublicationApprovalStorePort,
+    installation_scopes: InstallationScopeStorePort,
+    update_lock: PluginUpdateLockPort,
     artifact_store: Any | None = None,
     grant_store: GrantStorePort | None = None,
     routes: RouteRegistryPort | None = None,
@@ -222,7 +252,12 @@ def build_plugin_admin_service(
             mint_secret=mint_secret,
             activator=activator,
             instance_resolver=instance_resolver,
+            instance_store=instance_store,
+            webhook_secrets=webhook_secrets,
             deployment_admin=deployment_admin,
+            publication_approvals=publication_approvals,
+            installation_scopes=installation_scopes,
+            update_lock=update_lock,
             artifact_store=artifact_store,
             grant_store=grant_store,
             routes=routes,
@@ -233,19 +268,24 @@ def build_plugin_admin_service(
 
 
 def _assert_all_ports_wired(ports: PluginAdminPorts) -> None:
-    """Перепроверить 10 полей связки (защита от будущего «ослабления»)."""
+    """Перепроверить 12 полей связки (защита от будущего «ослабления»)."""
 
     names = (
         "tenant_db",
         "object_store",
         "artifact_registry",
+        "instance_store",
         "grant_store",
+        "webhook_secrets",
         "revocation",
         "mint",
         "activation",
         "routes",
         "audit",
         "platform_admin",
+        "publication_approvals",
+        "installation_scopes",
+        "update_lock",
     )
     for name in names:
         require_wired(name, getattr(ports, name, None))

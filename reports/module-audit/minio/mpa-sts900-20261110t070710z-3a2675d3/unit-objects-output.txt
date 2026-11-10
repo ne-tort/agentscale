@@ -1,0 +1,4 @@
+........................................................................ [ 59%]
+.................................................                        [100%]
+- generated xml file: C:\Users\qwerty\git\agentscale\wt-migration\.agents\worktrees\audit-plugin-modules\reports\module-audit\minio\mpa-sts900-20261110t070710z-3a2675d3\unit-objects-junit.xml -
+121 passed in 0.19s

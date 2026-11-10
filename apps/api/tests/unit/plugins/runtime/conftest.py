@@ -33,7 +33,7 @@ TEST_IDENTITY = (
 )
 TEST_ISSUER = "https://token.actions.githubusercontent.com"
 TEST_INSTANCE = "inst_equipment_001"
-TEST_DEPLOYMENT = "plugin-inst-equipment-001"
+TEST_DEPLOYMENT = "plugin-mod-equipment-inst-equipment-001"
 TEST_KMS_REF = "gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k/versions/1"
 
 
@@ -76,7 +76,9 @@ def cosign_json(payload: Any = None) -> str:
 
 
 class FakeK8sApi:
-    """In-memory k8s REST: журнал запросов + программируемые ответы/сбои."""
+    """In-memory scoped k8s REST: журнал запросов + ответы/сбои без IO."""
+
+    scoped_identity = True
 
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []

@@ -5,6 +5,7 @@ resources:
   - ../../base
   - postgres.yaml
   - userdb-init.yaml
+  - plugin-sts-canary-init.yaml
   # The dev HTTPS route: two Ingresses so `/api` and `/` can carry different
   # Traefik priorities. See ingress-https-api.yaml for why.
   - ingress-https-api.yaml
@@ -20,6 +21,8 @@ patches:
   # такое стерпел бы, но `prodavan-ops validate` — штатная пост-установочная
   # проверка — рендерит именно хостовым kubectl и на этом падал.
   - path: patch-dev-api.yaml
+  - path: patch-dev-minio-secret-files.yaml
+  - path: patch-dev-plugin-event-signing.yaml
   - path: patch-dev-web.yaml
   - path: patch-dev-celery-worker.yaml
   - path: patch-dev-celery-beat.yaml

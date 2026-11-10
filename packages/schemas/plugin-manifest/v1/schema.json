@@ -21,51 +21,96 @@
   "$comment": "Явный запрет самореференции (artifact_digest/signature) и встроенного egress allowlist. Список должен совпадать с SELF_REFERENCE_FIELDS | EMBEDDED_EGRESS_FIELDS из domain/plugins/types.py и MANIFEST_ALLOWED_FIELDS из validation.py.",
   "not": {
     "anyOf": [
-      { "required": ["artifact_digest"] },
-      { "required": ["signature"] },
-      { "required": ["egress"] },
-      { "required": ["egress_policy"] },
-      { "required": ["allowed_hosts"] },
-      { "required": ["allowed_paths"] }
+      {
+        "required": [
+          "artifact_digest"
+        ]
+      },
+      {
+        "required": [
+          "signature"
+        ]
+      },
+      {
+        "required": [
+          "egress"
+        ]
+      },
+      {
+        "required": [
+          "egress_policy"
+        ]
+      },
+      {
+        "required": [
+          "allowed_hosts"
+        ]
+      },
+      {
+        "required": [
+          "allowed_paths"
+        ]
+      }
     ]
   },
   "properties": {
     "plugin_id": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]*$",
-      "$comment": "Строгий нижний регистр; нормализация применяется валидатором к уже прошедшему проверку значению."
+      "$comment": "Canonical regex для API и CI: только нижний регистр, первый символ — буква; leading digit и hyphen запрещены. Валидатор не исправляет идентификатор нормализацией."
     },
-    "version": { "type": "string", "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$" },
-    "protocol": { "const": "plugin-rpc/1" },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+    },
+    "protocol": {
+      "const": "plugin-rpc/1"
+    },
     "frontend": {
       "type": "object",
-      "required": ["entry", "base_path"],
+      "required": [
+        "entry",
+        "base_path"
+      ],
       "additionalProperties": false,
       "properties": {
         "entry": {
           "type": "string",
           "pattern": "^[A-Za-z0-9._/-]+$",
-          "not": { "pattern": "\\.\\." },
+          "not": {
+            "pattern": "\\.\\."
+          },
           "$comment": "Относительный путь внутри версионированной статики плагина."
         },
         "base_path": {
           "type": "string",
           "pattern": "^/[A-Za-z0-9._/-]*$",
-          "not": { "pattern": "\\.\\." },
+          "not": {
+            "pattern": "\\.\\."
+          },
           "$comment": "Абсолютный путь на отдельном static-origin; без cookie и API."
         }
       }
     },
     "backend": {
       "type": "object",
-      "required": ["port", "health"],
+      "required": [
+        "port",
+        "health"
+      ],
       "additionalProperties": false,
       "properties": {
-        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
         "health": {
           "type": "string",
           "pattern": "^/[A-Za-z0-9._/-]*$",
-          "not": { "pattern": "\\.\\." }
+          "not": {
+            "pattern": "\\.\\."
+          }
         }
       }
     },
@@ -74,20 +119,41 @@
       "uniqueItems": true,
       "items": {
         "type": "string",
-        "enum": ["cache", "objects", "docs", "events", "jobs", "pods", "mcp", "secrets", "network"]
+        "enum": [
+          "cache",
+          "objects",
+          "docs",
+          "events",
+          "jobs",
+          "pods",
+          "mcp",
+          "secrets",
+          "network"
+        ]
       },
       "$comment": "db.direct и db.migrations намеренно отсутствуют: БД плагина доступна по прямому DSN (§2 v4), остальная инфраструктура — через типизированные адаптеры gateway."
     },
     "migrations": {
       "type": "object",
-      "required": ["engine", "path"],
+      "required": [
+        "engine",
+        "path"
+      ],
       "additionalProperties": false,
       "properties": {
-        "engine": { "enum": ["liquibase", "flyway", "alembic"] },
+        "engine": {
+          "enum": [
+            "liquibase",
+            "flyway",
+            "alembic"
+          ]
+        },
         "path": {
           "type": "string",
           "pattern": "^[A-Za-z0-9._/-]+$",
-          "not": { "pattern": "\\.\\." }
+          "not": {
+            "pattern": "\\.\\."
+          }
         }
       }
     },
@@ -101,8 +167,10 @@
       "uniqueItems": true,
       "items": {
         "type": "string",
-        "pattern": "^/[A-Za-z0-9._/-]+$",
-        "not": { "pattern": "\\.\\." }
+        "pattern": "^(?!.*//)/[A-Za-z0-9._/-]*$",
+        "not": {
+          "pattern": "\\.\\."
+        }
       },
       "$comment": "Явно объявленные страницы без сессии; пустой массив означает «публичных страниц нет»."
     },
@@ -112,11 +180,76 @@
       "items": {
         "type": "string",
         "pattern": "^/[A-Za-z0-9._/-]+$",
-        "not": { "pattern": "\\.\\." }
+        "not": {
+          "pattern": "\\.\\."
+        }
       },
       "$comment": "Входящие webhook-маршруты; по умолчанию регистрируются под /webhook/*."
     },
-    "min_platform_version": { "type": "string", "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$" }
+    "min_platform_version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+    },
+    "rpc_operations": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/rpcOperation"
+      },
+      "$comment": "Typed allowlist broker RPC. Не является infra capability или повышением grant'а. Не generic proxy: только безопасные /api/ пути."
+    },
+    "mcp_servers": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/mcpServer"
+      },
+      "$comment": "Optional signed data-only discovery declarations. Не меняет capability mcp, grant или transport. Python дополнительно требует unique server_id/tool name и canonical byte/node limits; uniqueItems здесь ловит только полностью одинаковые элементы."
+    },
+    "pods": {
+      "type": "object",
+      "required": [
+        "allowlist"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "allowlist": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/podAllowlistEntry"
+          }
+        }
+      },
+      "$comment": "Optional exact plugin-instance/project/job scopes of the fixed pod executor. Нет arbitrary pod ids, wildcards, commands или args; отсутствие declaration не даёт pod access."
+    },
+    "secret_delivery": {
+      "type": "object",
+      "required": [
+        "mode",
+        "allowlist"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "k8s_secret"
+        },
+        "allowlist": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/secretRef"
+          }
+        }
+      },
+      "$comment": "Optional reference-only delivery declaration. Содержит только canonical vault:// или file:// refs; Secret names/data и plaintext values запрещены."
+    }
   },
   "$defs": {
     "forbiddenSelfReference": {
@@ -124,6 +257,431 @@
     },
     "dbAccess": {
       "$comment": "Прямой DSN к БД tenant_<company> — привилегия PostgreSQL, а не capability gateway."
+    },
+    "capabilityRef": {
+      "type": "object",
+      "required": [
+        "id",
+        "version"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{1,63}(\\.[a-z][a-z0-9_-]{1,63})?$"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+$"
+        }
+      }
+    },
+    "rpcOperation": {
+      "type": "object",
+      "required": [
+        "capability",
+        "operation",
+        "http_method",
+        "backend_path"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "$ref": "#/$defs/capabilityRef"
+        },
+        "operation": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+        },
+        "http_method": {
+          "enum": [
+            "GET",
+            "POST"
+          ]
+        },
+        "backend_path": {
+          "type": "string",
+          "pattern": "^/api/[A-Za-z0-9._/-]+$",
+          "not": {
+            "pattern": "(?:^|/)\\.\\.(?:/|$)"
+          },
+          "$comment": "Относительный backend path внутри /pluginpage/<plugin>/<company>/. Не URL: запрещены host/scheme/query/fragment."
+        },
+        "public": {
+          "type": "boolean",
+          "default": false,
+          "$comment": "Анонимный вызов разрешён только при точном route_path из public_pages."
+        }
+      }
+    },
+    "podScope": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$",
+      "$comment": "Exact bounded identifier; separators /, whitespace, wildcard, query и traversal не допускаются."
+    },
+    "podAllowlistEntry": {
+      "type": "object",
+      "required": [
+        "plugin_instance_id",
+        "project_id",
+        "job_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "plugin_instance_id": {
+          "$ref": "#/$defs/podScope"
+        },
+        "project_id": {
+          "$ref": "#/$defs/podScope"
+        },
+        "job_id": {
+          "$ref": "#/$defs/podScope"
+        }
+      },
+      "$comment": "Exact current executor scope tuple. Four fixed actions и job/digest target binding остаются runtime enforcement."
+    },
+    "secretRef": {
+      "type": "string",
+      "minLength": 9,
+      "maxLength": 512,
+      "pattern": "^(?:vault|file)://[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$",
+      "$comment": "Canonical exact reference: схема только vault/file; каждый path segment начинается с alphanumeric, поэтому empty/dot/dot-dot segments, traversal, query, fragment, wildcard и plaintext исключены."
+    },
+    "mcpSafeString": {
+      "type": "string",
+      "maxLength": 1024,
+      "pattern": "^[^\\u0000-\\u001F\\u007F]*$",
+      "not": {
+        "pattern": "(?:[A-Za-z][A-Za-z0-9+.-]*://|\\b[Ww][Ww][Ww]\\.|-----BEGIN [A-Za-z ]*PRIVATE KEY-----|\\b(?:[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii]_[Kk][Ee][Yy]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee]_[Kk][Ee][Yy]|[Dd][Ss][Nn])\\s*[:=])"
+      }
+    },
+    "mcpSafeScalar": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/mcpSafeString"
+        },
+        {
+          "type": [
+            "number",
+            "boolean",
+            "null"
+          ]
+        }
+      ]
+    },
+    "mcpPropertyName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "not": {
+        "enum": [
+          "command",
+          "script",
+          "handler",
+          "executable",
+          "entrypoint",
+          "endpoint",
+          "url",
+          "uri",
+          "env",
+          "secret",
+          "secrets",
+          "token",
+          "access_token",
+          "session_token",
+          "webhook_secret",
+          "password",
+          "api_key",
+          "private_key",
+          "credentials",
+          "authorization",
+          "dsn"
+        ]
+      }
+    },
+    "mcpToolDescription": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/mcpSafeString"
+        }
+      ],
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^\\S(?:[\\s\\S]*\\S)?$"
+    },
+    "mcpSchemaBase": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "integer",
+            "boolean",
+            "null"
+          ]
+        },
+        "title": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/mcpSafeString"
+            }
+          ],
+          "maxLength": 128
+        },
+        "description": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/mcpSafeString"
+            }
+          ],
+          "maxLength": 512
+        },
+        "required": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/mcpPropertyName"
+          }
+        },
+        "additionalProperties": {
+          "type": "boolean"
+        },
+        "minProperties": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "maxProperties": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "minItems": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1024
+        },
+        "maxItems": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1024
+        },
+        "uniqueItems": {
+          "type": "boolean"
+        },
+        "minLength": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096
+        },
+        "pattern": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/mcpSafeString"
+            }
+          ],
+          "maxLength": 256
+        },
+        "minimum": {
+          "type": "number"
+        },
+        "maximum": {
+          "type": "number"
+        },
+        "exclusiveMinimum": {
+          "type": "number"
+        },
+        "exclusiveMaximum": {
+          "type": "number"
+        },
+        "enum": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/mcpSafeScalar"
+          }
+        },
+        "const": {
+          "$ref": "#/$defs/mcpSafeScalar"
+        }
+      }
+    },
+    "mcpSchema0": {
+      "allOf": [{"$ref": "#/$defs/mcpSchemaBase"}],
+      "properties": {
+        "properties": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {"$ref": "#/$defs/mcpPropertyName"},
+          "additionalProperties": {"$ref": "#/$defs/mcpSchema1"}
+        },
+        "items": {"$ref": "#/$defs/mcpSchema1"}
+      },
+      "unevaluatedProperties": false
+    },
+    "mcpSchema1": {
+      "allOf": [{"$ref": "#/$defs/mcpSchemaBase"}],
+      "properties": {
+        "properties": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {"$ref": "#/$defs/mcpPropertyName"},
+          "additionalProperties": {"$ref": "#/$defs/mcpSchema2"}
+        },
+        "items": {"$ref": "#/$defs/mcpSchema2"}
+      },
+      "unevaluatedProperties": false
+    },
+    "mcpSchema2": {
+      "allOf": [{"$ref": "#/$defs/mcpSchemaBase"}],
+      "properties": {
+        "properties": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {"$ref": "#/$defs/mcpPropertyName"},
+          "additionalProperties": {"$ref": "#/$defs/mcpSchema3"}
+        },
+        "items": {"$ref": "#/$defs/mcpSchema3"}
+      },
+      "unevaluatedProperties": false
+    },
+    "mcpSchema3": {
+      "allOf": [{"$ref": "#/$defs/mcpSchemaBase"}],
+      "properties": {
+        "properties": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {"$ref": "#/$defs/mcpPropertyName"},
+          "additionalProperties": {"$ref": "#/$defs/mcpSchema4"}
+        },
+        "items": {"$ref": "#/$defs/mcpSchema4"}
+      },
+      "unevaluatedProperties": false
+    },
+    "mcpSchema4": {
+      "allOf": [{"$ref": "#/$defs/mcpSchemaBase"}],
+      "properties": {
+        "properties": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {"$ref": "#/$defs/mcpPropertyName"},
+          "additionalProperties": {"$ref": "#/$defs/mcpSchema5"}
+        },
+        "items": {"$ref": "#/$defs/mcpSchema5"}
+      },
+      "unevaluatedProperties": false
+    },
+    "mcpSchema5": {
+      "allOf": [{"$ref": "#/$defs/mcpSchemaBase"}],
+      "properties": {
+        "properties": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {"$ref": "#/$defs/mcpPropertyName"},
+          "additionalProperties": {"$ref": "#/$defs/mcpSchema6"}
+        },
+        "items": {"$ref": "#/$defs/mcpSchema6"}
+      },
+      "unevaluatedProperties": false
+    },
+    "mcpSchema6": {
+      "allOf": [{"$ref": "#/$defs/mcpSchemaBase"}],
+      "properties": {
+        "properties": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {"$ref": "#/$defs/mcpPropertyName"},
+          "additionalProperties": {"$ref": "#/$defs/mcpSchema7"}
+        },
+        "items": {"$ref": "#/$defs/mcpSchema7"}
+      },
+      "unevaluatedProperties": false
+    },
+    "mcpSchema7": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/mcpSchemaBase"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "mcpInputSchema": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/mcpSchema0"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "object"
+            }
+          }
+        }
+      ]
+    },
+    "mcpTool": {
+      "type": "object",
+      "required": [
+        "name",
+        "description",
+        "version",
+        "input_schema"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "description": {
+          "$ref": "#/$defs/mcpToolDescription"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/mcpInputSchema"
+        }
+      }
+    },
+    "mcpServer": {
+      "type": "object",
+      "required": [
+        "server_id",
+        "tools"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "server_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+        },
+        "tools": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/mcpTool"
+          }
+        }
+      }
     }
   }
 }

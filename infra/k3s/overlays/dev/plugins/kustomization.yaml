@@ -7,10 +7,16 @@ kind: Kustomization
 resources:
   - ../../../base/plugins
   - ingress-plugins.yaml
+  - plugin-lifecycle-rbac.yaml
+  - plugin-deployment-admin-token-request-rbac.yaml
 
 # В base-манифестах metadata.namespace намеренно не задан (паттерн
 # guards/app-budget.yaml): пространство имён подставляется трансформером.
 namespace: agentscale-dev
+
+patches:
+  - path: patch-plugin-gateway-config.yaml
+  - path: patch-plugin-event-signing.yaml
 
 # Динамические Deployment'ы плагинов создаёт admin API при grant, а НЕ Git.
 # Они живут под ignoreDifferences /spec/replicas в plugin-platform.yaml.

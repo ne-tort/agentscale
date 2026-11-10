@@ -10,8 +10,9 @@
 свой guard, свой KeyRing, свои capability-адаптеры. Смешивать их в одном
 приложении — ровно та ошибка, которую мы устраняли в v4.
 
-Композиция ОДНА на оба процесса (``install_plugin_platform``), поэтому гранты,
-отзывы, ключи и аудит не расходятся между API и шлюзом.
+Композиция ОДНА на оба процесса (``install_api_plugin_platform`` внутри вызывает
+``install_plugin_platform``), поэтому jobs, гранты, отзывы, ключи и аудит не
+расходятся между API и шлюзом.
 """
 
 from __future__ import annotations
@@ -66,20 +67,19 @@ def create_app() -> FastAPI:
     app.include_router(plugin_gateway.router)
 
     if settings.plugin_platform_enabled:
-        from prodavan.application.plugins.wiring.install import (
-            LazyRedisManager,
-            install_plugin_platform,
+        from prodavan.application.plugins.jobs.declarations import (
+            install_api_plugin_platform,
         )
-        from prodavan.infrastructure.persistence.database import get_session_factory
 
-        install_plugin_platform(
+        install_api_plugin_platform(
             app,
             settings,
-            session=get_session_factory(),
-            redis=LazyRedisManager(),
+            lifespan_manager=lifespan_manager,
         )
-        from prodavan.api.v1 import plugin_capabilities
+        from prodavan.api.v1 import plugin_capabilities, plugin_mcp
 
+        # Authenticated per-server MCP JSON-RPC precedes capability catch-all.
+        app.include_router(plugin_mcp.router)
         app.include_router(plugin_capabilities.router)
 
     return app

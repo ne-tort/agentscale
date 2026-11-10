@@ -1,0 +1,6 @@
+OPERATION=head_canary RESULT=success STATUS=200 COUNT=0
+OPERATION=head_fixed RESULT=success STATUS=200 COUNT=0
+OPERATION=head_missing_key RESULT=error STATUS=403 CODE=403
+OPERATION=head_foreign RESULT=error STATUS=403 CODE=403
+OPERATION=list_foreign RESULT=error STATUS=403 CODE=AccessDenied
+OPERATION=head_missing_bucket RESULT=error STATUS=403 CODE=403

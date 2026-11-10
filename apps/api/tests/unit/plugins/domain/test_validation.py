@@ -81,11 +81,49 @@ def test_valid_manifest_accepts_empty_capabilities() -> None:
     assert validate_manifest(with_patch(capabilities=[])).capabilities == ()
 
 
+@pytest.mark.parametrize("path", ["/", "/public", "/docs/getting-started", "/docs/"])
+def test_public_pages_accept_root_and_nested_paths(path: str) -> None:
+    assert validate_manifest(with_patch(public_pages=[path])).public_pages == (path,)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "",
+        "//",
+        "/public//docs",
+        "relative",
+        "../escape",
+        "/../escape",
+        "https://example.test/public",
+    ],
+)
+def test_public_pages_reject_empty_repeated_separator_and_unsafe_paths(path: str) -> None:
+    _expect_code(
+        with_patch(public_pages=[path]),
+        ManifestValidationErrorCode.PUBLIC_PAGES_INVALID,
+    )
+
+
 # ───────────────────────── semver ─────────────────────────
 
 @pytest.mark.parametrize(
     "bad_version",
-    ["1.2", "1.2.3.4", "01.2.3", "v1.2.3", "1.2.3-", "1.2.3+", "", 123, None],
+    [
+        "1.2",
+        "1.2.3.4",
+        "01.2.3",
+        "v1.2.3",
+        "1.2.3-",
+        "1.2.3+",
+        "1.2.3-01",
+        "1.2.3-alpha.01",
+        "1.2.3-alpha..1",
+        "1.2.3+build..1",
+        "",
+        123,
+        None,
+    ],
 )
 def test_invalid_semver_rejected(bad_version: Any) -> None:
     _expect_code(with_patch(version=bad_version), ManifestValidationErrorCode.VERSION_INVALID)
@@ -213,7 +251,9 @@ def test_not_an_object_rejected() -> None:
 
 
 def test_allowed_fields_are_exactly_the_schema_properties() -> None:
-    assert MANIFEST_ALLOWED_FIELDS == frozenset(MANIFEST_REQUIRED_FIELDS)
+    assert MANIFEST_ALLOWED_FIELDS == frozenset(MANIFEST_REQUIRED_FIELDS) | {
+        "rpc_operations", "mcp_servers", "pods", "secret_delivery",
+    }
 
 
 def test_protocol_must_be_plugin_rpc_1() -> None:

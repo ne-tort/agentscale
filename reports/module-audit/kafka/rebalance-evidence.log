@@ -1,0 +1,43 @@
+.                                                                        [100%]
+=================================== PASSES ====================================
+_ test_rebalance_after_wake_before_handler_blocks_stale_delivery_then_recovers _
+----------------------------- Captured log setup ------------------------------
+INFO     aiokafka.consumer.subscription_state:subscription_state.py:110 Updating subscribed topics to: frozenset({'agentscale.plugin.acceptance.acccbd5d2bd606d.testrebalanceafter'})
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:594 Discovered coordinator 0 for group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:415 Revoking previously assigned partitions set() for group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:1281 (Re-)joining group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:1360 Joined group 'tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2' (generation 1) with member_id prodavan-plugin-events-consumer-49cd562a-adfb-48af-b76a-3000b2084643
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:1368 Elected group leader -- performing partition assignments using roundrobin
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:1519 Successfully synced group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2 with generation 1
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:506 Setting newly assigned partitions {TopicPartition(topic='agentscale.plugin.acceptance.acccbd5d2bd606d.testrebalanceafter', partition=0)} for group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2
+------------------------------ Captured log call ------------------------------
+INFO     aiokafka.consumer.subscription_state:subscription_state.py:110 Updating subscribed topics to: frozenset({'agentscale.plugin.acceptance.acccbd5d2bd606d.testrebalanceafter'})
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:594 Discovered coordinator 0 for group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:415 Revoking previously assigned partitions set() for group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:1281 (Re-)joining group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2
+WARNING  aiokafka.consumer.group_coordinator:group_coordinator.py:842 Heartbeat failed for group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2 because it is rebalancing
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:415 Revoking previously assigned partitions frozenset({TopicPartition(topic='agentscale.plugin.acceptance.acccbd5d2bd606d.testrebalanceafter', partition=0)}) for group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:1281 (Re-)joining group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:1360 Joined group 'tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2' (generation 2) with member_id prodavan-plugin-events-consumer-6428512e-793f-46f5-987f-9a298515e860
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:1360 Joined group 'tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2' (generation 2) with member_id prodavan-plugin-events-consumer-49cd562a-adfb-48af-b76a-3000b2084643
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:1368 Elected group leader -- performing partition assignments using roundrobin
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:1519 Successfully synced group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2 with generation 2
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:506 Setting newly assigned partitions set() for group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:1519 Successfully synced group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2 with generation 2
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:506 Setting newly assigned partitions {TopicPartition(topic='agentscale.plugin.acceptance.acccbd5d2bd606d.testrebalanceafter', partition=0)} for group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:390 LeaveGroup request succeeded
+WARNING  aiokafka.consumer.group_coordinator:group_coordinator.py:842 Heartbeat failed for group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2 because it is rebalancing
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:415 Revoking previously assigned partitions frozenset() for group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:1281 (Re-)joining group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:1360 Joined group 'tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2' (generation 3) with member_id prodavan-plugin-events-consumer-6428512e-793f-46f5-987f-9a298515e860
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:1368 Elected group leader -- performing partition assignments using roundrobin
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:1519 Successfully synced group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2 with generation 3
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:506 Setting newly assigned partitions {TopicPartition(topic='agentscale.plugin.acceptance.acccbd5d2bd606d.testrebalanceafter', partition=0)} for group tenant:coacccbd5d2bd606d:plugin:modacccbd5d2bd606d:instacccbd5d2bd606d:group:testrebalanceaftercbd5d2
+INFO     prodavan.application.plugins.events.dispatch:dispatch.py:1149 plugin event: ownership seek failed offset=0 error=KafkaAdapterError
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:60655/events/acceptance.created "HTTP/1.1 204 No Content"
+---------------------------- Captured log teardown ----------------------------
+INFO     aiokafka.consumer.group_coordinator:group_coordinator.py:390 LeaveGroup request succeeded
+- generated xml file: C:\Users\qwerty\git\agentscale\wt-migration\.agents\worktrees\audit-plugin-modules\apps\api\artifacts\kafka_plugin_acceptance\kpa-mwa8vha6-ae192c8ebb57\rebalance-evidence.xml -
+=========================== short test summary info ===========================
+PASSED tests/integration/kafka_plugin_acceptance/test_retry_and_rebalance.py::test_rebalance_after_wake_before_handler_blocks_stale_delivery_then_recovers
+1 passed in 8.39s

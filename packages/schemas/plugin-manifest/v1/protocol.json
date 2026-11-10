@@ -2,44 +2,33 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://prodavan.dev/schemas/plugin-manifest/v1/protocol.json",
   "title": "Agentscale plugin-rpc/1 Message Contract",
-  "description": "Контракт сообщений iframe ↔ shell (§5.2 v4, dynamic-ui-implementation-contract.md §4.2). Все сообщения — закрытые конверты с проверкой event.origin и WindowProxy; capability token никогда не попадает во frontend и не передаётся в URL query.",
-  "$comment": "Требования к handshake: (1) хост принимает сообщения только от точного зарегистрированного origin и точного WindowProxy iframe; (2) plugin.ready должен совпасть с plugin_id/version/artifact_digest из реестра; (3) nonce привязан к экземпляру iframe против stale-window reuse; (4) timeout/расхождение уничтожает iframe и пишет redacted failure event; (5) navigation/visibility/logout инвалидируют instance и grant; (6) capability token остаётся в backend и приходит коротким TTL через handshake, never in URL.",
+  "description": "Единый двунаправленный контракт iframe ↔ shell. Дискриминатор — только type; transport origin проверяется отдельно через MessageEvent.origin и точный WindowProxy и никогда не принимается из payload.",
+  "$comment": "Opaque origin \"null\" допустим только как transport condition sandboxed iframe: обязательны точный WindowProxy, обязательные nonce/instance_id и digest из реестра. Wildcard targetOrigin при отправке в opaque frame не является доверием. Данные сообщения не содержат origin, capability token или URL broker/proxy.",
   "oneOf": [
+    { "$ref": "#/$defs/hostReady" },
     { "$ref": "#/$defs/pluginReady" },
+    { "$ref": "#/$defs/grantReady" },
     { "$ref": "#/$defs/pluginRpcRequest" },
     { "$ref": "#/$defs/pluginRpcResponse" },
     { "$ref": "#/$defs/pluginError" }
   ],
   "$defs": {
     "protocol": { "const": "plugin-rpc/1" },
-    "pluginId": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
-    "semver": { "type": "string", "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$" },
+    "pluginId": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "maxLength": 128 },
+    "semver": { "type": "string", "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$", "maxLength": 64 },
     "artifactDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
-    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "instanceToken": { "type": "string", "pattern": "^[A-Za-z0-9_-]{16,128}$" },
+    "requestId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$" },
+    "scopeId": { "type": "string", "minLength": 1, "maxLength": 128 },
     "jsonValue": {},
-    "eventOrigin": {
-      "type": "object",
-      "required": ["origin"],
-      "additionalProperties": false,
-      "$comment": "Проверка event.origin: точное совпадение с зарегистрированным static-origin плагина. Обработка сообщения до этой проверки запрещена. origin НЕ берётся из payload как доверительное значение — сверяется с MessageEvent.origin.",
-      "properties": {
-        "origin": {
-          "type": "string",
-          "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?$",
-          "$comment": "Отдельный origin, не agentscale.dev; opaque origin iframe без allow-same-origin даёт \"null\" — такое сообщение отклоняется."
-        },
-        "source": { "const": "iframe" }
-      }
-    },
     "requestContext": {
       "type": "object",
       "additionalProperties": false,
-      "$comment": "Только поля внутри выданного grant scope; неизвестные поля отклоняются.",
       "properties": {
-        "company_id": { "$ref": "#/$defs/nonEmptyString" },
-        "cabinet_id": { "$ref": "#/$defs/nonEmptyString" },
-        "project_id": { "$ref": "#/$defs/nonEmptyString" },
-        "session_id": { "$ref": "#/$defs/nonEmptyString" }
+        "company_id": { "$ref": "#/$defs/scopeId" },
+        "cabinet_id": { "$ref": "#/$defs/scopeId" },
+        "project_id": { "$ref": "#/$defs/scopeId" },
+        "session_id": { "$ref": "#/$defs/scopeId" }
       }
     },
     "capabilityRef": {
@@ -47,8 +36,34 @@
       "required": ["id", "version"],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/nonEmptyString" },
-        "version": { "$ref": "#/$defs/nonEmptyString" }
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{0,127}$" },
+        "version": { "type": "string", "pattern": "^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$" }
+      }
+    },
+    "grantCapabilities": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{0,127}(?:@[0-9A-Za-z][0-9A-Za-z._+-]{0,63})?$" }
+    },
+    "hostNavigateInput": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^/(?!/)[A-Za-z0-9._/-]{0,511}$",
+          "not": { "pattern": "(?:^|/)\\.\\.(?:/|$)" }
+        }
+      }
+    },
+    "hostResizeInput": {
+      "type": "object",
+      "required": ["height"],
+      "additionalProperties": false,
+      "properties": {
+        "height": { "type": "number", "minimum": 0, "maximum": 10000 }
       }
     },
     "rpcError": {
@@ -69,16 +84,33 @@
             "PAYLOAD_TOO_LARGE",
             "SCOPE_DENIED",
             "GRANT_EXPIRED",
-            "INVALID_ENVELOPE"
+            "INVALID_ENVELOPE",
+            "REQUEST_FAILED",
+            "REQUEST_TIMEOUT"
           ]
         },
         "message": { "type": "string", "minLength": 1, "maxLength": 500 },
-        "trace_id": { "$ref": "#/$defs/nonEmptyString" }
+        "trace_id": { "$ref": "#/$defs/requestId" }
+      }
+    },
+    "hostReady": {
+      "type": "object",
+      "$comment": "host -> plugin, только после первого iframe load.",
+      "required": ["protocol", "type", "plugin_id", "version", "artifact_digest", "instance_id", "nonce"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "type": { "const": "host.ready" },
+        "plugin_id": { "$ref": "#/$defs/pluginId" },
+        "version": { "$ref": "#/$defs/semver" },
+        "artifact_digest": { "$ref": "#/$defs/artifactDigest" },
+        "instance_id": { "$ref": "#/$defs/instanceToken" },
+        "nonce": { "$ref": "#/$defs/instanceToken" }
       }
     },
     "pluginReady": {
       "type": "object",
-      "$comment": "plugin -> host: первое сообщение handshake. Совпадение plugin_id/version/artifact_digest с реестром обязательно; расхождение = QUARANTINED + уничтожение iframe.",
+      "$comment": "plugin -> host: обязательное эхо identity/digest/instance/nonce из host.ready.",
       "required": ["protocol", "type", "plugin_id", "version", "artifact_digest", "instance_id", "nonce"],
       "additionalProperties": false,
       "properties": {
@@ -87,14 +119,31 @@
         "plugin_id": { "$ref": "#/$defs/pluginId" },
         "version": { "$ref": "#/$defs/semver" },
         "artifact_digest": { "$ref": "#/$defs/artifactDigest" },
-        "instance_id": { "$ref": "#/$defs/nonEmptyString" },
-        "nonce": { "$ref": "#/$defs/nonEmptyString" },
-        "event": { "$ref": "#/$defs/eventOrigin" }
+        "instance_id": { "$ref": "#/$defs/instanceToken" },
+        "nonce": { "$ref": "#/$defs/instanceToken" }
+      }
+    },
+    "grantReady": {
+      "type": "object",
+      "$comment": "host -> plugin после валидного plugin.ready. capabilities/scope/expires_at — effective grant этого канала, не capability token.",
+      "required": ["protocol", "type", "plugin_id", "version", "artifact_digest", "instance_id", "nonce", "capabilities", "scope", "expires_at"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "type": { "const": "grant.ready" },
+        "plugin_id": { "$ref": "#/$defs/pluginId" },
+        "version": { "$ref": "#/$defs/semver" },
+        "artifact_digest": { "$ref": "#/$defs/artifactDigest" },
+        "instance_id": { "$ref": "#/$defs/instanceToken" },
+        "nonce": { "$ref": "#/$defs/instanceToken" },
+        "capabilities": { "$ref": "#/$defs/grantCapabilities" },
+        "scope": { "$ref": "#/$defs/requestContext" },
+        "expires_at": { "type": "string", "format": "date-time" }
       }
     },
     "pluginRpcRequest": {
       "type": "object",
-      "$comment": "host -> plugin (и ответные вызовы): только объявленные typed-методы; без generic fetch/RPC/proxy URL и без capability token.",
+      "$comment": "Двунаправленный typed request. capability.call требует versioned capability и idempotency_key; host.navigate принимает только внутренний path, generic proxy/fetch URL отсутствует.",
       "required": ["protocol", "type", "plugin_id", "version", "artifact_digest", "instance_id", "nonce", "request_id", "method", "context", "input"],
       "additionalProperties": false,
       "properties": {
@@ -103,20 +152,38 @@
         "plugin_id": { "$ref": "#/$defs/pluginId" },
         "version": { "$ref": "#/$defs/semver" },
         "artifact_digest": { "$ref": "#/$defs/artifactDigest" },
-        "instance_id": { "$ref": "#/$defs/nonEmptyString" },
-        "nonce": { "$ref": "#/$defs/nonEmptyString" },
-        "event": { "$ref": "#/$defs/eventOrigin" },
-        "request_id": { "$ref": "#/$defs/nonEmptyString" },
+        "instance_id": { "$ref": "#/$defs/instanceToken" },
+        "nonce": { "$ref": "#/$defs/instanceToken" },
+        "request_id": { "$ref": "#/$defs/requestId" },
         "method": { "enum": ["capability.call", "host.navigate", "host.resize"] },
         "capability": { "$ref": "#/$defs/capabilityRef" },
         "context": { "$ref": "#/$defs/requestContext" },
-        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" },
+        "idempotency_key": { "$ref": "#/$defs/requestId" },
         "input": { "$ref": "#/$defs/jsonValue" }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "method": { "const": "capability.call" } }, "required": ["method"] },
+          "then": { "required": ["capability", "idempotency_key"] }
+        },
+        {
+          "if": { "properties": { "method": { "const": "host.navigate" } }, "required": ["method"] },
+          "then": {
+            "properties": { "input": { "$ref": "#/$defs/hostNavigateInput" } },
+            "not": { "required": ["capability"] }
+          }
+        },
+        {
+          "if": { "properties": { "method": { "const": "host.resize" } }, "required": ["method"] },
+          "then": {
+            "properties": { "input": { "$ref": "#/$defs/hostResizeInput" } },
+            "not": { "required": ["capability"] }
+          }
+        }
+      ]
     },
     "pluginRpcResponse": {
       "type": "object",
-      "$comment": "Ответ строго на существующий request_id; ok=false обязан сопровождаться error, ok=true — не должен его содержать.",
       "required": ["protocol", "type", "plugin_id", "version", "artifact_digest", "instance_id", "nonce", "request_id", "ok"],
       "additionalProperties": false,
       "properties": {
@@ -125,21 +192,20 @@
         "plugin_id": { "$ref": "#/$defs/pluginId" },
         "version": { "$ref": "#/$defs/semver" },
         "artifact_digest": { "$ref": "#/$defs/artifactDigest" },
-        "instance_id": { "$ref": "#/$defs/nonEmptyString" },
-        "nonce": { "$ref": "#/$defs/nonEmptyString" },
-        "event": { "$ref": "#/$defs/eventOrigin" },
-        "request_id": { "$ref": "#/$defs/nonEmptyString" },
+        "instance_id": { "$ref": "#/$defs/instanceToken" },
+        "nonce": { "$ref": "#/$defs/instanceToken" },
+        "request_id": { "$ref": "#/$defs/requestId" },
         "ok": { "type": "boolean" },
         "result": { "$ref": "#/$defs/jsonValue" },
         "error": { "$ref": "#/$defs/rpcError" }
       },
       "if": { "properties": { "ok": { "const": false } }, "required": ["ok"] },
-      "then": { "required": ["error"] },
-      "else": { "not": { "required": ["error"] } }
+      "then": { "required": ["error"], "not": { "required": ["result"] } },
+      "else": { "required": ["result"], "not": { "required": ["error"] } }
     },
     "pluginError": {
       "type": "object",
-      "$comment": "Ошибка уровня протокола (mismatch/timeout/неизвестный метод/дубликат request_id/oversized payload). Тексты не содержат токенов, SQL, внутренних URL и stack traces.",
+      "$comment": "Fatal protocol error. Текст фиксированный/redacted, без stack, секретов и внутренних URL.",
       "required": ["protocol", "type", "plugin_id", "version", "artifact_digest", "instance_id", "nonce", "error"],
       "additionalProperties": false,
       "properties": {
@@ -148,10 +214,9 @@
         "plugin_id": { "$ref": "#/$defs/pluginId" },
         "version": { "$ref": "#/$defs/semver" },
         "artifact_digest": { "$ref": "#/$defs/artifactDigest" },
-        "instance_id": { "$ref": "#/$defs/nonEmptyString" },
-        "nonce": { "$ref": "#/$defs/nonEmptyString" },
-        "event": { "$ref": "#/$defs/eventOrigin" },
-        "request_id": { "$ref": "#/$defs/nonEmptyString" },
+        "instance_id": { "$ref": "#/$defs/instanceToken" },
+        "nonce": { "$ref": "#/$defs/instanceToken" },
+        "request_id": { "$ref": "#/$defs/requestId" },
         "error": { "$ref": "#/$defs/rpcError" }
       }
     }

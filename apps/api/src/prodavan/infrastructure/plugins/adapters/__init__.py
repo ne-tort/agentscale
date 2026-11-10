@@ -74,6 +74,7 @@ from .kafka_adapters import (
     KafkaTopicAdminAdapter,
     consumer_settings_from_contract,
 )
+from .redis_event_claims import RedisDeliveryClaimStore
 from .stores import (
     CLUSTER_BACKEND_NOTE,
     InMemoryAudit,
@@ -123,6 +124,8 @@ __all__ = [
     "KafkaDlqAdapter",
     "KafkaTopicAdminAdapter",
     "consumer_settings_from_contract",
+    # durable Redis delivery ownership
+    "RedisDeliveryClaimStore",
     # in-memory stores (dev/тесты; кластер → БД/Redis, задача A10)
     "CLUSTER_BACKEND_NOTE",
     "InMemoryAudit",

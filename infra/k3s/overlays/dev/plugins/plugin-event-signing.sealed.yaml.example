@@ -1,0 +1,21 @@
+# DEV-ONLY EXAMPLE — do not add this .example file to kustomization resources.
+# Create an Opaque Secret named agentscale-plugin-events with key signing-key,
+# then seal it using the dev controller certificate and namespace/name scope.
+# Commit only kubeseal output as plugin-event-signing.sealed.yaml and add THAT
+# file to the dev overlay. Never commit the source Secret, plaintext/base64 key,
+# PLUGIN_CLAIMS_SECRET, AUTH_TEST_SECRET, or any real credential value.
+# Runtime reference: k8s-secret://agentscale-plugin-events/signing-key
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: agentscale-plugin-events
+  namespace: agentscale-dev
+spec:
+  encryptedData:
+    # Placeholder only: replace with kubeseal ciphertext for signing-key.
+    signing-key: SEALED_CIPHERTEXT_REQUIRED
+  template:
+    metadata:
+      name: agentscale-plugin-events
+      namespace: agentscale-dev
+    type: Opaque

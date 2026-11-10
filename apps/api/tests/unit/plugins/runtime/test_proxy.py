@@ -8,21 +8,25 @@ Authorization/Cookie/X-Plugin-*, Release не в forward, отказ при ис
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from prodavan.application.plugins.activation.errors import NotReady
 from prodavan.application.plugins.activation.ports import MintedClaims, ProxyPort
-from prodavan.application.plugins.gateway.ports import BackendResponse
+from prodavan.application.plugins.gateway.ports import BackendRequest, BackendResponse
 from prodavan.infrastructure.plugins.runtime.proxy import (
     HEADER_AUTHORIZATION,
     HttpProxyPort,
     ProxyConfigurationError,
     build_backend_request,
     build_outgoing_headers,
+    plugin_service_url,
 )
 from tests.unit.plugins.runtime.conftest import (
+    TEST_DEPLOYMENT,
+    TEST_DIGEST,
     TEST_INSTANCE,
     FakeBackendSender,
     fresh_claims,
@@ -49,12 +53,26 @@ def _request(**over):  # type: ignore[no-untyped-def]
             "X-Company-ID": "evil-company",
             "X-Forwarded-For": "1.2.3.4",
             "X-Plugin-Capability-Token": "client-token",
+            "X-Plugin-Instance-ID": "inst-client-spoof",
+            "X-Plugin-Grant-ID": "grant-client-spoof",
+            "X-Plugin-Artifact-Digest": "sha256:" + "f" * 64,
         },
         "body": b"",
         "stream": True,
     }
     base.update(over)
     return base
+
+
+def _claims_with(changes: dict[str, object]):  # type: ignore[no-untyped-def]
+    claims = fresh_claims()
+    payload = dict(claims.claims)
+    for name, value in changes.items():
+        if value is None:
+            payload.pop(name, None)
+        else:
+            payload[name] = value
+    return replace(claims, claims=payload)
 
 
 def _header(request, name: str):  # type: ignore[no-untyped-def]
@@ -79,6 +97,10 @@ def test_authorization_uses_fresh_token_not_client_value() -> None:
     )
     assert _header(request, HEADER_AUTHORIZATION) == "Bearer fresh-token-abc"
     assert _header(request, "X-Plugin-Capability-Token") == "fresh-token-abc"
+    assert _header(request, "X-Plugin-Instance-ID") == TEST_INSTANCE
+    assert _header(request, "X-Plugin-Grant-ID") == "grant_01"
+    assert _header(request, "X-Plugin-Artifact-Digest") == TEST_DIGEST
+    assert request.plugin_instance_id == TEST_INSTANCE
     assert "CLIENT_STOLEN_TOKEN" not in str(request.headers)
     assert "client-token" not in str(request.headers)
 
@@ -93,10 +115,14 @@ def test_trusted_x_plugin_headers_come_from_claims() -> None:
     assert headers["X-Project-ID"] == "proj_1"
     assert headers["X-Plugin-Grant-ID"] == "grant_01"
     assert headers["X-Plugin-Instance-ID"] == TEST_INSTANCE
+    assert headers["X-Plugin-Artifact-Digest"] == TEST_DIGEST
     assert headers["Accept"] == "text/event-stream"  # безобидный заголовок сохранён
     # Клиентские недоверенные значения удалены до доверенной перезаписи.
     assert "evil-plugin" not in str(headers)
     assert "evil-company" not in str(headers)
+    assert "inst-client-spoof" not in str(headers)
+    assert "grant-client-spoof" not in str(headers)
+    assert "sha256:" + "f" * 64 not in str(headers)
     assert "X-Forwarded-For" not in headers
     assert "Cookie" not in headers
 
@@ -224,6 +250,83 @@ async def test_expired_token_is_refused(config) -> None:  # type: ignore[no-unty
     assert backend.sent == []
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("grant_id", None),
+        ("grant_id", ""),
+        ("company_id", None),
+        ("company_id", ""),
+        ("company_id", "co_other"),
+        ("plugin_id", None),
+        ("plugin_id", ""),
+        ("plugin_id", "other_plugin"),
+        ("plugin_instance_id", None),
+        ("plugin_instance_id", "inst_other"),
+        ("artifact_digest", None),
+        ("artifact_digest", "not-a-digest"),
+        ("sub", None),
+        ("sub", ""),
+        ("sub", "plugin:other:co_123:" + TEST_INSTANCE),
+    ),
+)
+def test_runtime_claims_missing_or_mismatched_identity_is_refused(
+    field: str, value: str | None
+) -> None:
+    claims = _claims_with({field: value})
+    with pytest.raises(ProxyConfigurationError):
+        build_outgoing_headers({}, claims, plugin_instance_id=TEST_INSTANCE)
+
+
+def test_runtime_expected_instance_mismatch_is_refused() -> None:
+    with pytest.raises(ProxyConfigurationError, match="expected durable instance"):
+        build_outgoing_headers(
+            {}, fresh_claims(), plugin_instance_id="inst_other"
+        )
+
+
+def test_runtime_missing_payload_and_missing_grant_have_no_fallback() -> None:
+    claims = replace(fresh_claims(), claims=None)  # type: ignore[arg-type]
+    with pytest.raises(ProxyConfigurationError, match="payload"):
+        build_outgoing_headers({}, claims, plugin_instance_id=TEST_INSTANCE)
+    claims = _claims_with({"grant_id": None})
+    with pytest.raises(ProxyConfigurationError, match="grant_id"):
+        build_outgoing_headers({}, claims, plugin_instance_id=TEST_INSTANCE)
+
+
+def test_runtime_expired_claims_are_refused_before_headers() -> None:
+    now = datetime.now(UTC)
+    claims = MintedClaims(
+        token="expired-token",
+        jti="jti-expired",
+        issued_at=now - timedelta(seconds=600),
+        expires_at=now - timedelta(seconds=1),
+        claims=dict(fresh_claims().claims),
+    )
+    with pytest.raises(ProxyConfigurationError, match="expired"):
+        build_outgoing_headers({}, claims, plugin_instance_id=TEST_INSTANCE)
+
+
+async def test_gateway_delegation_validates_identity_before_forward(config) -> None:  # type: ignore[no-untyped-def]
+    class Mapper:
+        def __init__(self) -> None:
+            self.called = False
+
+        async def forward(self, **kwargs):  # type: ignore[no-untyped-def]
+            self.called = True
+            return {}
+
+    mapper = Mapper()
+    port = HttpProxyPort(config=config, gateway_forward=mapper)
+    with pytest.raises(ProxyConfigurationError):
+        await port.forward(
+            plugin_instance_id=TEST_INSTANCE,
+            request=_request(),
+            claims=replace(fresh_claims(), claims=None),  # type: ignore[arg-type]
+        )
+    assert mapper.called is False
+
+
 async def test_empty_token_is_refused(config) -> None:  # type: ignore[no-untyped-def]
     claims = fresh_claims("   ")
     with pytest.raises(NotReady):
@@ -266,3 +369,60 @@ def test_unknown_request_shape_is_refused() -> None:
             backend_timeout_seconds=30.0,
             stream_timeout_seconds=300.0,
         )
+
+
+# --------------------------------------------------------------------------- per-instance routing
+def test_service_url_is_canonical_per_instance(config) -> None:  # type: ignore[no-untyped-def]
+    first = plugin_service_url(TEST_INSTANCE, config, plugin_id="mod_equipment")
+    second = plugin_service_url("other_instance", config, plugin_id="mod_equipment")
+    assert first == f"http://{TEST_DEPLOYMENT}.{config.namespace}.svc:8080"
+    assert first != second
+    assert "plugin-runtime." not in first and "plugin-runtime." not in second
+
+
+async def test_default_factory_uses_canonical_service_url(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from prodavan.infrastructure.plugins.adapters import gateway_adapters
+
+    seen: dict[str, object] = {}
+
+    class Adapter(FakeBackendSender):
+        def __init__(self, *, base_url: str, **_kwargs) -> None:
+            super().__init__()
+            seen["base_url"] = base_url
+
+    monkeypatch.setattr(gateway_adapters, "BackendHttpAdapter", Adapter)
+    port = HttpProxyPort(config=config)
+    await port.forward(
+        plugin_instance_id=TEST_INSTANCE,
+        request=_request(stream=False),
+        claims=fresh_claims(),
+    )
+    assert seen["base_url"] == f"http://{TEST_DEPLOYMENT}.{config.namespace}.svc:8080"
+
+
+async def test_gateway_send_requires_trusted_instance_identity(config) -> None:  # type: ignore[no-untyped-def]
+    port = HttpProxyPort(config=config)
+    request = BackendRequest(
+        path="/",
+        method="GET",
+        headers={"X-Plugin-ID": "mod_equipment"},
+    )
+    with pytest.raises(ProxyConfigurationError, match="X-Plugin-Instance-ID"):
+        await port.send(request)
+
+
+async def test_gateway_send_routes_trusted_identity_to_factory(config) -> None:  # type: ignore[no-untyped-def]
+    backend = FakeBackendSender()
+    captured: list[str] = []
+    port = HttpProxyPort(
+        config=config,
+        backend_http_factory=lambda instance: captured.append(instance) or backend,
+    )
+    request = BackendRequest(
+        path="/",
+        method="GET",
+        headers={"X-Plugin-ID": "mod_equipment", "X-Plugin-Instance-ID": TEST_INSTANCE},
+    )
+    await port.send(request)
+    assert captured == [TEST_INSTANCE]
+    assert len(backend.sent) == 1

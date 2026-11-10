@@ -1,29 +1,27 @@
-"""План cutover'а strangler'а (F10, §8 «Путь миграции»).
+"""Compatibility metadata sequence для historical strangler plan, НЕ runbook.
 
-Последовательность шагов — ровно по §8:
+CutoverStepKind, step ids, CUTOVER_STEPS order и FinalState fields сохранены как
+публичный compatibility API. Последовательность infrastructure → pilot → frontend
+→ context:<id> → cutover → remove_declarative_app описывает только metadata
+progression и не разрешает включение plugin platform или destructive cleanup.
 
-1. ``infrastructure`` — tenant PostgreSQL, PluginClaims, Gateway, OCI/cosign и т.д.;
-   declarative-app работает как прежде.
-2. ``pilot`` — первый плагин за фича-флагом ``plugin_enabled_modules[]``.
-3. ``frontend`` — страница плагина в iframe, backend-логика пока в API.
-4. ``context:<id>`` — по одному bounded context'у, в порядке §8 этап 4:
-   offers → prices → budget → documents → tenders, затем ``mod_management``
-   последним (§8 этап 6).
-5. ``cutover`` — переключение флага.
-6. ``remove_declarative_app`` — удаление declarative-app, дропание ``module_*``
-   таблиц ревизией Alembic без переноса содержимого.
+REMOVAL step — inert historical/target inventory, а не approved executable action.
+``2026110802`` dormant/not active. Никакого runtime/startup/deploy cutover или
+удаления declarative-app/module_* этот модуль не выполняет.
 
-``advance()`` **не пропускает шаги**: перейти к следующему можно только после
-явной отметки текущего шага завершённым (``complete_current_step()``). Попытка
-продвинуться мимо незавершённого шага — типизированная ``CutoverOrderError``.
-Строгая последовательность исключает «перескочить пилот и сразу удалить
-declarative-app».
+``advance()`` и ``complete_current_step()`` изменяют только metadata compatibility
+cursor/completion flags. Они не выполняют DB, DML, drop, remove, Alembic, deploy или
+feature-flag operations. Строгий order остаётся behavior contract: нельзя перейти
+к следующему шагу без завершения текущего.
 
-ЧЕГО ЗДЕСЬ НЕТ (§8, §13.1, план §4): метрик парности, сверки контрольных сумм,
-dual-read/dual-write, «N недель наблюдения», snapshot/бэкапов, переноса данных.
-Данные dev эфемерны; откат = выключить флаг (§10 «Сломанный cutover»).
-``final_state()`` фиксирует КОНЕЧНОЕ СОСТОЯНИЕ («всё под нож»): что именно
-должно исчезнуть после шага 6.
+``FinalState`` и ``declarative_app_removed=True`` — inert compatibility semantics
+для historical/target inventory, а не evidence или side effect фактического
+удаления. FINAL_STATE_ARTIFACTS сохранён без изменения.
+
+Любая будущая destructive revision требует завершённого code-first S4 и
+отдельного S5 ADR/review/acceptance, создаётся заново от тогдашней current head,
+имеет schema-only downgrade и не использует env guard. Никакой cutover не
+происходит автоматически из exports или metadata transitions.
 """
 
 from __future__ import annotations
@@ -35,7 +33,7 @@ from .contexts import CONTEXT_ORDER
 
 
 class CutoverStepKind(StrEnum):
-    """Класс шага плана (для отчётов и проверок последовательности)."""
+    """Compatibility step kind; REMOVAL — inert inventory, не executable action."""
 
     INFRASTRUCTURE = "infrastructure"
     PILOT = "pilot"
@@ -47,7 +45,7 @@ class CutoverStepKind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class CutoverStep:
-    """Один шаг плана. ``completed`` выставляется только ``complete_current_step``."""
+    """Metadata step; ``completed`` не означает фактический deploy/removal."""
 
     step_id: str
     kind: CutoverStepKind
@@ -67,11 +65,11 @@ class CutoverOrderError(RuntimeError):
 
 
 class CutoverPlanComplete(RuntimeError):
-    """План уже завершён: ``advance()``/``complete_current_step()`` нечего делать."""
+    """Metadata cursor исчерпан; это не статус фактического cutover."""
 
 
-# Пять артефактов, которые должны исчезнуть в конечном состоянии (§8, §13.1).
-# Имена зафиксированы задачей и являются частью публичного контракта.
+# Historical/target compatibility inventory, НЕ approved deletion list.
+# Пять имён и их порядок остаются частью публичного контракта.
 ARTIFACT_MODULE_META_DOCUMENTS = "module_meta_documents"
 ARTIFACT_MODULE_RUNTIME_TSX = "ModuleRuntime.tsx"
 ARTIFACT_MODULE_INSTANCE_DATA_ROWS = "module_instance_data_rows"
@@ -88,7 +86,7 @@ FINAL_STATE_ARTIFACTS: tuple[str, ...] = (
 
 
 def _build_steps() -> tuple[CutoverStep, ...]:
-    """Собрать последовательность §8. Context-шаги берутся из ``contexts.py``."""
+    """Собрать compatibility sequence из historical contexts; не runbook."""
     steps: list[CutoverStep] = [
         CutoverStep(
             step_id="infrastructure",
@@ -126,8 +124,10 @@ def _build_steps() -> tuple[CutoverStep, ...]:
             step_id="remove_declarative_app",
             kind=CutoverStepKind.REMOVAL,
             description=(
-                "Удаление declarative-app, mod_management на plugin, дроп module_* "
-                "таблиц ревизией Alembic без переноса содержимого (§8 этап 6)"
+                "Inert historical/target inventory only: no runtime/startup/deploy "
+                "cutover or declarative-app/module_* removal; code-first S4 + "
+                "separate S5 ADR/review/acceptance; new revision from then-current "
+                "head with schema-only downgrade and no env guard"
             ),
         )
     )
@@ -139,12 +139,11 @@ CUTOVER_STEPS: tuple[CutoverStep, ...] = _build_steps()
 
 @dataclass(slots=True)
 class FinalState:
-    """Конечное состояние «всё под нож» (результат ``final_state()``).
+    """Inert historical/target inventory, возвращаемый ``final_state()``.
 
-    ``removed_artifacts`` — ровно пять артефактов из задания. Метрик парности и
-    «недель наблюдения» здесь НЕТ не «со значением 0/False», а **вовсе**: в
-    классе отсутствуют соответствующие поля (§8, §13.1). Равно как нет snapshot,
-    бэкапов, dual-read/dual-write и переноса данных.
+    ``removed_artifacts`` и ``declarative_app_removed=True`` сохраняют compatibility
+    semantics, но не доказывают и не выполняют удаление. Нет runtime/startup/deploy
+    side effects. Schema cleanup требует code-first S4 и отдельного S5 review.
     """
 
     removed_artifacts: tuple[str, ...] = FINAL_STATE_ARTIFACTS
@@ -155,7 +154,7 @@ class FinalState:
         return artifact in self.removed_artifacts
 
     def __iter__(self):
-        """Итерация по удаляемым артефактам (список как «список того, что исчезнет»)."""
+        """Итерация по inert historical/target artifact inventory."""
         return iter(self.removed_artifacts)
 
     def __len__(self) -> int:
@@ -163,11 +162,11 @@ class FinalState:
 
 
 class CutoverPlan:
-    """Строго последовательный план перехода (§8).
+    """Metadata-only compatibility state machine, а не executable cutover.
 
-    Экземпляр не разделяется между компаниями: это описание **порядка работ**,
-    а не рантайм-состояние фича-флага (флаг хранится в ``GrantStorePort`` и
-    читается ``EnabledModulesPolicy``).
+    Экземпляр не разделяется между компаниями и не является runtime-состоянием
+    фича-флага. Cursor/completion transitions не выполняют DB/DML/drop/remove и
+    не запускают startup/deploy actions.
     """
 
     def __init__(self, steps: tuple[CutoverStep, ...] = CUTOVER_STEPS) -> None:
@@ -207,7 +206,10 @@ class CutoverPlan:
         return tuple(item.step.step_id for item in self._steps if item.completed)
 
     def complete_current_step(self) -> CutoverStep:
-        """Отметить текущий шаг завершённым. Идемпотентно в рамках шага."""
+        """Только metadata compatibility completion; идемпотентно в рамках шага.
+
+        Метод не выполняет DB, DML, drop, remove, Alembic, deploy или flag writes.
+        """
         if self._index >= len(self._steps):
             raise CutoverPlanComplete("план уже завершён: отмечать нечего")
         current = self._steps[self._index]
@@ -215,7 +217,7 @@ class CutoverPlan:
         return current.step
 
     def advance(self) -> CutoverStep | None:
-        """Перейти к следующему шагу, проверив завершение предыдущего.
+        """Сдвинуть только metadata compatibility cursor, проверив completion.
 
         * текущий шаг не отмечен завершённым → ``CutoverOrderError`` (шаги не
           пропускаются);
@@ -223,6 +225,7 @@ class CutoverPlan:
         * иначе курсор сдвигается ровно на одну позицию.
 
         Возвращает новый ``current_step`` (``None`` после последнего шага).
+        Метод не выполняет DB, DML, drop, remove, Alembic, deploy или flag writes.
         """
         if self._index >= len(self._steps):
             raise CutoverPlanComplete("план уже завершён: advance невозможен")
@@ -235,12 +238,11 @@ class CutoverPlan:
         return self.current_step
 
     def final_state(self) -> FinalState:
-        """Конечное состояние: список артефактов, которые должны исчезнуть.
+        """Вернуть inert historical/target inventory без side effects.
 
-        Список не зависит от текущего шага — это **цель**, а не прогресс. Пять
-        артефактов: ``module_meta_documents``, ``ModuleRuntime.tsx``,
-        ``module_instance_data_rows``, ``generic runtime``,
-        ``routes/pages.tsx::EquipmentProcurementPage``.
+        Результат не зависит от текущего шага — compatibility target, а не прогресс
+        или доказательство удаления. Пять артефактов и declarative_app_removed=True
+        сохранены как публичная семантика; никакого DDL/DML/remove не выполняется.
         """
         return FinalState()
 

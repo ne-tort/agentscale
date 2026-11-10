@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import jwt
 import pytest
 from fastapi import FastAPI
@@ -43,6 +45,18 @@ def _app() -> FastAPI:
     async def webhook(plugin: str, company: str):  # type: ignore[no-untyped-def]
         return {"webhook": "ok"}
 
+    @app.get("/pluginpage/{plugin}/{company}/{path:path}")
+    async def pluginpage(plugin: str, company: str, path: str):  # type: ignore[no-untyped-def]
+        return {"pluginpage": "ok"}
+
+    @app.get("/api/v1/agent/events")
+    async def api_agent_events():  # type: ignore[no-untyped-def]
+        return {"agent": "ok"}
+
+    @app.get("/api/v1/internal/pods/{pod_id}/workspace-archive")
+    async def internal_workspace_archive(pod_id: str):  # type: ignore[no-untyped-def]
+        return {"internal": "ok"}
+
     app.include_router(capabilities_router)
     return app
 
@@ -70,6 +84,40 @@ def test_plugin_token_on_webhook_is_403(client: TestClient, plugin_token: str) -
     resp = client.post("/webhook/mod_equipment/co_123", headers=auth(plugin_token))
     assert resp.status_code == 403
     assert resp.json()["code"] == "FORBIDDEN_SURFACE"
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/agent/events"),
+        ("GET", "/api/v1/agent/events"),
+        ("POST", "/webhook/mod_equipment/co_123"),
+        ("GET", "/pluginpage/mod_equipment/co_123/api/x"),
+        ("GET", "/api/v1/internal/pods/pod-1/workspace-archive"),
+    ],
+)
+def test_plugin_token_on_non_capability_surfaces_is_403_before_route(
+    client: TestClient, plugin_token: str, method: str, path: str
+) -> None:
+    """Every non-capability surface is denied by the guard BEFORE routing.
+
+    The stub routes would return 200 if reached, so 403 proves the middleware
+    actually awaited its async identity/claims verification (no fail-open).
+    RuntimeWarning is escalated to an error: a coroutine-never-awaited bug
+    cannot silently pass this regression again.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        resp = client.request(method, path, headers=auth(plugin_token))
+    assert resp.status_code == 403
+    assert resp.json()["code"] == "FORBIDDEN_SURFACE"
+    assert resp.headers["content-type"].startswith("application/problem+json")
+
+
+def test_anonymous_agent_surface_is_not_broken_by_guard(client: TestClient) -> None:
+    resp = client.get("/agent/events")
+    assert resp.status_code == 200
+    assert resp.json() == {"agent": "ok"}
 
 
 def test_agent_bridge_token_is_not_touched_by_plugin_guard(client: TestClient) -> None:

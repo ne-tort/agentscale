@@ -123,7 +123,7 @@ async def test_page_with_valid_session_passes_auth_and_wakes_backend() -> None:
             headers={"Authorization": "Bearer good-session"},
         )
     assert response.status_code == 200
-    assert h.activation.wake_calls == [("mod_equipment", "co-123")]
+    assert h.activation.wake_calls == [("mod_equipment", "co-123", "inst-alpha-1")]
     assert len(h.backend_http.requests) == 1
 
 
@@ -157,7 +157,11 @@ async def test_public_page_allows_anonymous_with_reduced_scope() -> None:
     assert result.claims.anonymous is True
     assert result.claims.scopes == ANON_SCOPES
     assert result.claims.project_id is None
+    assert result.claims.artifact_digest == h.grants.artifact_digest
+    assert result.grant.artifact_digest == h.grants.artifact_digest
+    assert result.grant.published_artifact_digest == h.grants.published_artifact_digest
     assert result.grant.capability_token == ""
+    assert result.grant.operations == frozenset()
     # Проверяем, что урезанный scope действительно «урезан»: он не содержит
     # ни одного capability-scope обычной страницы и меньше по мощности.
     assert not (result.claims.scopes & SESSION_SCOPES)
@@ -354,7 +358,7 @@ async def test_replay_same_delivery_with_different_body_is_401() -> None:
 
 @pytest.mark.asyncio
 async def test_webhook_rate_limit_is_per_plugin_company() -> None:
-    h = build_harness(rate_allow=False)
+    h = build_harness(rate_deny_bucket=":webhook:mod_equipment:co-123")
     body = b"{}"
     async with h.client as client:
         response = await client.post(
@@ -366,7 +370,14 @@ async def test_webhook_rate_limit_is_per_plugin_company() -> None:
     assert response.json()["code"] == GatewayErrorCode.RATE_LIMITED.value
     assert response.headers.get("Retry-After") is not None
     buckets = [c["bucket"] for c in h.rate_limit.allow_calls]
-    assert all(":webhook:mod_equipment:co-123" in b for b in buckets)
+    assert any("webhook_preauth_ip" in b for b in buckets)
+    assert any("webhook_preauth_global" in b for b in buckets)
+    assert buckets[-1].endswith(":webhook:mod_equipment:co-123")
+    # Pre-HMAC buckets пропустили запрос; отклонён именно installation bucket.
+    assert all(
+        ":webhook:mod_equipment:co-123" not in c["bucket"]
+        for c in h.rate_limit.allow_calls[:-1]
+    )
 
 
 @pytest.mark.asyncio

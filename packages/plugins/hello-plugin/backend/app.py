@@ -1,75 +1,102 @@
-"""Backend пилотного плагина ``hello_plugin`` (эталон v4).
+"""Backend пилотного плагина hello_plugin (эталон v4).
 
-Контур (§2, §5.1, §7.2–7.5 архитектуры):
-  * контейнер стартует через ``entrypoint.sh``: Liquibase ``update`` (своя БД
-    компании по ``TENANT_DB_DSN``) -> только после успеха
-    ``exec python -m uvicorn app:app``;
-  * ``/health`` = 200/Ready ТОЛЬКО после успешного ``update``, иначе 503
-    (§11 критерий 4, checksum mismatch не даёт стать Ready);
-  * остальная инфраструктура — НЕ напрямую, а через Plugin Gateway по
-    ``GATEWAY_URL`` и ``plugin-rpc/1``/``PluginClaims``. Обращений к
-    pod-gateway agent-surface НЕТ и быть не может: это trust-контур агентов
-    (§4.1, §13.3), плагин company-scoped;
-  * все env (``GATEWAY_URL``, ``PLUGIN_ID``, ``TENANT_DB_DSN``,
-    ``PLUGIN_CLAIMS``, ``PLUGIN_WEBHOOK_SECRET``) приходят из k8s Secret,
-    plaintext в манифесте/коде запрещён (§5.5);
-  * ``:latest`` запрещён — образ пинится по digest задачей 16.
+Доверие строится заново на КАЖДОМ API-запросе:
 
-Fail-closed: отсутствие Secret, невалидный claims, отсутствие DSN или ошибка
-БД = явная ошибка, а не «молчаливый успех» с дефолтами.
+* Gateway передаёт короткоживущий capability token только в
+  X-Plugin-Capability-Token; backend не декодирует JWT и не хранит его в env;
+* protected GET {GATEWAY_URL}/capabilities/v1/health с
+  Authorization: Bearer <token> выполняет introspection и возвращает строго
+  типизированный tenant/capability scope;
+* только этот scope используется в SQL. Query/body company_id,
+  cabinet_id и project_id — лишь утверждения вызывающей стороны,
+  которые обязаны совпасть с introspection (иначе 403);
+* X-Company-ID и остальные identity-заголовки клиента не читаются;
+* signing secret платформы плагину не нужен и не передаётся.
+
+Локальный /health остаётся readiness после Liquibase update. Webhook имеет
+отдельный HMAC-контракт, описанный в backend/CONTRACT.md; его in-memory
+идемпотентность является демонстрационной, НЕ durable production-механизмом.
 """
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import json
+import math
 import os
 import uuid
+from contextvars import ContextVar
+from pathlib import Path
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
+import httpx
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
-# ---------------------------------------------------------------------------
-# Конфигурация из Secret. Никаких dev-фолбэков с секретами: пусто => отказ.
-# ---------------------------------------------------------------------------
+from runtime_api import RemoteRuntimeProviderClient, install_runtime_api
 
+# Статический capability token здесь намеренно отсутствует: он существует
+# только в конкретном request и никогда не становится env/state.
 PLUGIN_ID = os.environ.get("PLUGIN_ID", "")
 GATEWAY_URL = os.environ.get("GATEWAY_URL", "")
 TENANT_DB_DSN = os.environ.get("TENANT_DB_DSN", "")
-PLUGIN_CLAIMS_RAW = os.environ.get("PLUGIN_CLAIMS", "")
-WEBHOOK_SECRET = os.environ.get("PLUGIN_WEBHOOK_SECRET", "")
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 
-# Идентификатор протокола frontend handshake — одна и та же константа в manifest,
-# frontend и здесь (§5.2, dynamic-ui-implementation-contract.md 4.2).
 PROTOCOL = "plugin-rpc/1"
+CAPABILITY_TOKEN_HEADER = "X-Plugin-Capability-Token"
+INTROSPECTION_PATH = "/capabilities/v1/health"
+INTROSPECTION_FIELDS = frozenset(
+    {
+        "plugin_id",
+        "company_id",
+        "cabinet_id",
+        "project_id",
+        "grant_id",
+        "artifact_digest",
+        "scopes",
+        "exp",
+    }
+)
 
 app = FastAPI(title="hello_plugin", version="0.1.0", docs_url=None, redoc_url=None)
 
-# Признак готовности выставляет entrypoint ТОЛЬКО после успешного Liquibase update.
-# В самом процессе приложения он не переключается: если контейнер запущен, значит
-# миграция уже прошла. Оставлен явным флагом для unit-тестов контракта /health.
 _MIGRATIONS_OK = os.environ.get("LIQUIBASE_UPDATE_OK", "") == "1"
 
-# Пул соединений и in-memory реестр доставок (демо-идемпотентность). В проде
-# идемпотентность webhook'ов — outbox ``webhook_deliveries`` + ``X-Prodavan-Delivery``
-# как ключ (§7.5), без дублирования обработки при повторе.
 _pool: asyncpg.Pool | None = None
+# Demo only: процессная память теряется при рестарте и не общая между репликами.
 _seen_deliveries: dict[str, dict[str, Any]] = {}
 
 
+@dataclass(frozen=True, slots=True)
+class CapabilityScope:
+    """Проверенный introspection scope; единственный источник tenant identity."""
+
+    plugin_id: str
+    company_id: str
+    cabinet_id: str | None
+    project_id: str | None
+    grant_id: str
+    artifact_digest: str
+    scopes: tuple[str, ...]
+    exp: float
+
+
+def _current_timestamp() -> float:
+    return datetime.now(tz=UTC).timestamp()
+
+
 def _require_secret_env() -> None:
-    """Проверка обязательных env из Secret. Fail-closed, без plaintext-фолбэков."""
+    """Проверка статической конфигурации; request token сюда НЕ входит."""
     missing = [
         name
         for name, value in (
             ("GATEWAY_URL", GATEWAY_URL),
             ("PLUGIN_ID", PLUGIN_ID),
             ("TENANT_DB_DSN", TENANT_DB_DSN),
-            ("PLUGIN_CLAIMS", PLUGIN_CLAIMS_RAW),
         )
         if not value
     ]
@@ -77,68 +104,185 @@ def _require_secret_env() -> None:
         raise RuntimeError(f"не заданы обязательные переменные из Secret: {', '.join(missing)}")
 
 
-def _b64url_decode(value: str) -> bytes:
-    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+def _unauthorized(detail: str) -> HTTPException:
+    return HTTPException(status_code=401, detail=detail)
 
 
-def verify_plugin_claims(raw: str | None = None) -> dict[str, Any]:
-    """Проверить ``PluginClaims`` (§4.2, §7.2: backend обязан проверить JWT).
-
-    Пилот не изобретает криптографию: подпись/JWKS/revocation ведёт задача 02,
-    а здесь проверяется структурный контракт (iss/aud/typ/sub/plugin_id, exp,
-    grant_id, scopes) и совпадение ``plugin_id`` с нашим ``PLUGIN_ID``.
-    Невалидный/просроченный/чужой claims -> ValueError (fail-closed).
-    """
-    token = raw if raw is not None else PLUGIN_CLAIMS_RAW
-    if not token:
-        raise ValueError("PLUGIN_CLAIMS отсутствует в Secret")
-    parts = token.split(".")
-    if len(parts) != 3:
-        raise ValueError("PLUGIN_CLAIMS не является JWT")
-    try:
-        claims = json.loads(_b64url_decode(parts[1]).decode("utf-8"))
-    except (ValueError, UnicodeDecodeError) as exc:
-        raise ValueError("payload PLUGIN_CLAIMS не разбирается") from exc
-    if not isinstance(claims, dict):
-        raise ValueError("payload PLUGIN_CLAIMS не объект")
-
-    required = ("iss", "aud", "typ", "sub", "plugin_id", "grant_id", "exp", "scopes")
-    if any(key not in claims for key in required):
-        raise ValueError("PLUGIN_CLAIMS не содержит обязательных полей")
-    if claims["iss"] != "agentscale-plugins":
-        raise ValueError("неверный iss PLUGIN_CLAIMS")
-    if claims["aud"] != "capability-gateway" or claims["typ"] != "plugin_capability":
-        raise ValueError("неверный aud/typ PLUGIN_CLAIMS")
-    if claims["plugin_id"] != PLUGIN_ID:
-        raise ValueError("plugin_id в PLUGIN_CLAIMS не совпадает с PLUGIN_ID")
-    if not claims["sub"].startswith(f"plugin:{PLUGIN_ID}:"):
-        raise ValueError("sub PLUGIN_CLAIMS не привязан к этому плагину")
-    if not isinstance(claims["scopes"], list):
-        raise ValueError("scopes PLUGIN_CLAIMS должен быть списком")
-    exp = claims["exp"]
-    if not isinstance(exp, (int, float)) or datetime.fromtimestamp(exp, tz=UTC) <= datetime.now(tz=UTC):
-        raise ValueError("PLUGIN_CLAIMS просрочен")
-    return claims
+def _forbidden(detail: str = "capability scope does not match request") -> HTTPException:
+    return HTTPException(status_code=403, detail=detail)
 
 
-def _authorized_gateway_call() -> None:
-    """Любой выход в инфраструктуру начинается с проверки claims.
+def _introspection_unavailable() -> HTTPException:
+    # Не включаем URL, response body или текст исключения: там могут быть token/secret.
+    return HTTPException(status_code=503, detail="capability introspection unavailable")
 
-    Реальный HTTP-вызов к ``GATEWAY_URL``/``/capabilities/v1/*`` делает задача 11;
-    здесь фиксируется, что плагин НЕ ходит в агентский pod-gateway и не доверяет
-    Gateway «просто»: сначала проверка claims.
-    """
+
+def _nonempty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value) and value.strip() == value
+
+
+def _optional_nonempty_string(value: Any) -> bool:
+    return value is None or _nonempty_string(value)
+
+
+def _parse_introspection(payload: Any) -> CapabilityScope:
+    """Строгий allowlist ответа health: никаких extra/неизвестных полей."""
+    if not isinstance(payload, dict) or set(payload) != INTROSPECTION_FIELDS:
+        raise _introspection_unavailable()
+
+    if not all(
+        _nonempty_string(payload[field])
+        for field in ("plugin_id", "company_id", "grant_id", "artifact_digest")
+    ):
+        raise _introspection_unavailable()
+    if not _optional_nonempty_string(payload["cabinet_id"]):
+        raise _introspection_unavailable()
+    if not _optional_nonempty_string(payload["project_id"]):
+        raise _introspection_unavailable()
+
+    digest = payload["artifact_digest"]
+    if (
+        not digest.startswith("sha256:")
+        or len(digest) != len("sha256:") + 64
+        or any(char not in "0123456789abcdef" for char in digest[len("sha256:") :])
+    ):
+        raise _introspection_unavailable()
+
+    raw_scopes = payload["scopes"]
+    if (
+        not isinstance(raw_scopes, list)
+        or any(not _nonempty_string(scope) for scope in raw_scopes)
+        or len(set(raw_scopes)) != len(raw_scopes)
+    ):
+        raise _introspection_unavailable()
+
+    exp = payload["exp"]
+    if isinstance(exp, bool) or not isinstance(exp, (int, float)) or not math.isfinite(exp):
+        raise _introspection_unavailable()
+
+    if payload["plugin_id"] != PLUGIN_ID:
+        raise _forbidden("capability token belongs to another plugin")
+    if float(exp) <= _current_timestamp():
+        raise _unauthorized("capability token expired")
+
+    return CapabilityScope(
+        plugin_id=payload["plugin_id"],
+        company_id=payload["company_id"],
+        cabinet_id=payload["cabinet_id"],
+        project_id=payload["project_id"],
+        grant_id=payload["grant_id"],
+        artifact_digest=digest,
+        scopes=tuple(raw_scopes),
+        exp=float(exp),
+    )
+
+
+async def _introspect_capability(token: str) -> CapabilityScope:
+    """Проверить token через protected health на каждом запросе, без кэша."""
     if not GATEWAY_URL:
-        raise RuntimeError("GATEWAY_URL не задан в Secret")
-    verify_plugin_claims()
+        raise _introspection_unavailable()
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(2.0, connect=1.0),
+            trust_env=False,
+            follow_redirects=False,
+        ) as client:
+            response = await client.get(
+                f"{GATEWAY_URL.rstrip('/')}{INTROSPECTION_PATH}",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/json",
+                },
+            )
+    except Exception:
+        # Redirect не следуется; timeout/DNS/TLS/HTTP ошибки одинаково fail-closed.
+        raise _introspection_unavailable() from None
+
+    if response.status_code == 401:
+        raise _unauthorized("capability token was rejected")
+    if response.status_code == 403:
+        raise _forbidden("capability token was rejected")
+    if response.status_code != 200:
+        raise _introspection_unavailable()
+
+    try:
+        payload = response.json()
+    except Exception:
+        raise _introspection_unavailable() from None
+    return _parse_introspection(payload)
+
+
+def _request_token(request: Request) -> str:
+    """Единственный входной контракт Gateway: X-Plugin-Capability-Token."""
+    token = request.headers.get(CAPABILITY_TOKEN_HEADER)
+    if (
+        token is None
+        or not token
+        or token.strip() != token
+        or len(token) > 16_384
+    ):
+        raise _unauthorized("X-Plugin-Capability-Token required")
+    return token
+
+
+async def _request_scope(
+    request: Request,
+    *,
+    company_id: Any,
+    cabinet_id: Any = None,
+    project_id: Any = None,
+) -> CapabilityScope:
+    """Introspect + сравнить client assertions с claims.
+
+    company_id обязателен в существующем API как assertion маршрута, но не
+    является SQL selector. Это сохраняет независимую проверку company-bound DSN
+    после того, как Gateway срезал /pluginpage/{plugin}/{company}.
+    """
+    scope = await _introspect_capability(_request_token(request))
+
+    if not _nonempty_string(company_id):
+        raise HTTPException(status_code=422, detail="company_id обязателен")
+    if company_id != scope.company_id:
+        raise _forbidden()
+
+    for requested, actual in (
+        (cabinet_id, scope.cabinet_id),
+        (project_id, scope.project_id),
+    ):
+        if requested is not None and (
+            not _nonempty_string(requested) or requested != actual
+        ):
+            raise _forbidden()
+    return scope
+
+
+def _greetings_where(scope: CapabilityScope) -> tuple[str, list[Any]]:
+    """WHERE только из introspection; значения всегда параметризованы."""
+    clauses = ["company_id = $1"]
+    params: list[Any] = [scope.company_id]
+    for column, value in (
+        ("cabinet_id", scope.cabinet_id),
+        ("project_id", scope.project_id),
+    ):
+        if value is not None:
+            params.append(value)
+            clauses.append(f"{column} = $" + str(len(params)))
+    return " AND ".join(clauses), params
+
+
+def _stats_id(scope: CapabilityScope) -> uuid.UUID:
+    """Ключ агрегата привязан к полному tenant-scope, а не к client input."""
+    scope_key = json.dumps(
+        [scope.company_id, scope.cabinet_id, scope.project_id],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return uuid.uuid5(uuid.NAMESPACE_OID, f"hello_plugin:stats:{scope_key}")
 
 
 async def _get_pool() -> asyncpg.Pool:
-    """Пул к СВОЕЙ БД компании по прямому DSN (§2, вариант B, ADR-007).
-
-    Никакого ``prodavan`` и никаких чужих DSN: граница обеспечивается ролью
-    PostgreSQL + CONNECT + search_path + NetworkPolicy, а не этим кодом.
-    """
+    """Пул к СВОЕЙ БД компании по прямому DSN, без платформенной БД."""
     global _pool
     if _pool is None:
         if not TENANT_DB_DSN:
@@ -149,11 +293,8 @@ async def _get_pool() -> asyncpg.Pool:
 
 @app.on_event("startup")
 async def _startup() -> None:
-    # Fail-closed: без Secret и валидного claims приложение не считается рабочим.
     _require_secret_env()
-    verify_plugin_claims()
-    # Пул создаём лениво: старт не должен падать, если tenant-PG ещё не готов,
-    # но /health всё равно остаётся 503 до LIQUIBASE_UPDATE_OK.
+    # Пул создаём лениво; никакой introspection/token не кэшируется при старте.
 
 
 @app.on_event("shutdown")
@@ -164,19 +305,22 @@ async def _shutdown() -> None:
         _pool = None
 
 
-@app.get("/health")
-async def health() -> Response:
-    """Ready ТОЛЬКО после успешного Liquibase ``update`` (§3.1, §11 кр. 4).
+@app.get("/health/live")
+async def health_live() -> Response:
+    """Bounded liveness процесса: без DB, tenant, capability и Secret access.
 
-    Проверка ``LIQUIBASE_UPDATE_OK`` выставляется entrypoint'ом после ``update``;
-    при ошибке миграции/checksum mismatch процесс приложения не запускается,
-    readinessProbe получает 503 или connection-refused — но не Ready.
+    Uvicorn запускается только после успешного entrypoint Liquibase update, но
+    этот ответ намеренно НЕ утверждает readiness и не выполняет миграции.
     """
+    return JSONResponse(status_code=200, content={"status": "alive"})
+
+
+async def _readiness_response() -> Response:
+    """Единая fail-closed readiness проверка для нового пути и legacy alias."""
     if not _MIGRATIONS_OK:
         return JSONResponse(status_code=503, content={"status": "migrations_pending"})
     try:
         pool = await _get_pool()
-        # Проверяем, что схема реально применена, а не только флаг env.
         async with pool.acquire() as conn:
             exists = await conn.fetchval(
                 "SELECT to_regclass('greetings') IS NOT NULL "
@@ -184,17 +328,36 @@ async def health() -> Response:
             )
         if not exists:
             return JSONResponse(status_code=503, content={"status": "schema_missing"})
-    except Exception:  # noqa: BLE001 — fail-closed: любая ошибка БД = не Ready
+    except Exception:  # noqa: BLE001 — любая ошибка БД = не Ready
         return JSONResponse(status_code=503, content={"status": "db_unavailable"})
     return JSONResponse(status_code=200, content={"status": "ready", "plugin_id": PLUGIN_ID})
 
 
+@app.get("/health/ready")
+async def health_ready() -> Response:
+    """Ready только после marker успешного Liquibase update и проверки схемы."""
+    return await _readiness_response()
+
+
+@app.get("/health")
+async def health() -> Response:
+    """Backward-compatible alias с ровно той же readiness семантикой."""
+    return await _readiness_response()
+
+
 def _signature_ok(raw_body: bytes, signature: str) -> bool:
-    """``X-Prodavan-Signature: sha256=<hmac>``, ``HMAC(secret, raw_body)`` (§7.5)."""
+    """Текущий совместимый контракт: HMAC-SHA256 ТОЛЬКО по raw body.
+
+    Timestamp/delivery/event/method/path нельзя добавить односторонне: текущий
+    Gateway вычисляет HMAC именно по raw_body. См. backend/CONTRACT.md.
+    """
     if not WEBHOOK_SECRET or not signature.startswith("sha256="):
         return False
+    supplied = signature[len("sha256=") :]
+    if len(supplied) != 64 or any(char not in "0123456789abcdef" for char in supplied):
+        return False
     expected = hmac.new(WEBHOOK_SECRET.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature[len("sha256=") :])
+    return hmac.compare_digest(expected, supplied)
 
 
 @app.post("/webhook/ping")
@@ -204,11 +367,7 @@ async def webhook_ping(
     x_prodavan_delivery: str | None = Header(default=None, alias="X-Prodavan-Delivery"),
     x_prodavan_event: str | None = Header(default=None, alias="X-Prodavan-Event"),
 ) -> Response:
-    """Входящий webhook: подпись + идемпотентность по ``X-Prodavan-Delivery``.
-
-    Без подписи / с неверной подписью -> 401 (§11 кр. 7). Повтор delivery ->
-    200 без повторной обработки (защита от ретраев outbox).
-    """
+    """Raw-body HMAC + demo idempotency; расширенная подпись не выдумывается."""
     raw_body = await request.body()
     if not x_prodavan_delivery:
         raise HTTPException(status_code=401, detail="missing X-Prodavan-Delivery")
@@ -216,11 +375,8 @@ async def webhook_ping(
         raise HTTPException(status_code=401, detail="invalid signature")
 
     if x_prodavan_delivery in _seen_deliveries:
-        # Повтор: возвращаем сохранённый результат, обработку НЕ дублируем.
         return JSONResponse(status_code=200, content=_seen_deliveries[x_prodavan_delivery])
 
-    # Полезная работа пилота: фиксируем факт доставки. Выходов в агентский
-    # pod-gateway здесь нет — плагин работает только со своей БД и Gateway.
     result = {
         "ok": True,
         "plugin_id": PLUGIN_ID,
@@ -231,50 +387,53 @@ async def webhook_ping(
     return JSONResponse(status_code=200, content=result)
 
 
-@app.get("/api/greetings")
+@app.get("/api/greetings/list")
 async def list_greetings(
-    company_id: str,
+    request: Request,
+    company_id: str | None = None,
+    cabinet_id: str | None = None,
     project_id: str | None = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    """Список приветствий своей компании (полный SQL, typed-колонки, §2)."""
-    _authorized_gateway_call()
+    """Список строго в introspected company/cabinet/project scope."""
+    scope = await _request_scope(
+        request,
+        company_id=company_id,
+        cabinet_id=cabinet_id,
+        project_id=project_id,
+    )
     pool = await _get_pool()
     safe_limit = max(1, min(limit, 200))
-    # Разделение по company_id/project_id — бизнес-логика плагина, не RLS (§2.4).
+    where, params = _greetings_where(scope)
+    limit_placeholder = "$" + str(len(params) + 1)
     async with pool.acquire() as conn:
-        if project_id is None:
-            rows = await conn.fetch(
-                "SELECT id, company_id, cabinet_id, project_id, message, created_at "
-                "FROM greetings WHERE company_id = $1 ORDER BY created_at DESC LIMIT $2",
-                company_id,
-                safe_limit,
-            )
-        else:
-            rows = await conn.fetch(
-                "SELECT id, company_id, cabinet_id, project_id, message, created_at "
-                "FROM greetings WHERE company_id = $1 AND project_id = $2 "
-                "ORDER BY created_at DESC LIMIT $3",
-                company_id,
-                project_id,
-                safe_limit,
-            )
+        rows = await conn.fetch(
+            "SELECT id, company_id, cabinet_id, project_id, message, created_at "
+            f"FROM greetings WHERE {where} "
+            f"ORDER BY created_at DESC LIMIT {limit_placeholder}",
+            *params,
+            safe_limit,
+        )
     return [dict(row) for row in rows]
 
 
 @app.post("/api/greetings")
-async def create_greeting(payload: dict[str, Any]) -> Response:
-    """Записать приветствие в СВОЮ БД и обновить счётчик в той же транзакции."""
-    _authorized_gateway_call()
-    company_id = payload.get("company_id")
+async def create_greeting(request: Request, payload: dict[str, Any]) -> Response:
+    """Запись и агрегат в одной транзакции и одном introspected tenant-scope."""
+    scope = await _request_scope(
+        request,
+        company_id=payload.get("company_id"),
+        cabinet_id=payload.get("cabinet_id"),
+        project_id=payload.get("project_id"),
+    )
+    unknown = set(payload) - {"company_id", "cabinet_id", "project_id", "message"}
+    if unknown:
+        raise HTTPException(status_code=422, detail="неизвестные поля запроса")
+
     message = payload.get("message")
-    if not isinstance(company_id, str) or not company_id:
-        raise HTTPException(status_code=422, detail="company_id обязателен")
     if not isinstance(message, str) or not message.strip():
         raise HTTPException(status_code=422, detail="message обязателен")
 
-    cabinet_id = payload.get("cabinet_id")
-    project_id = payload.get("project_id")
     greeting_id = uuid.uuid4()
     pool = await _get_pool()
     async with pool.acquire() as conn, conn.transaction():
@@ -282,33 +441,117 @@ async def create_greeting(payload: dict[str, Any]) -> Response:
             "INSERT INTO greetings (id, company_id, cabinet_id, project_id, message) "
             "VALUES ($1, $2, $3, $4, $5)",
             greeting_id,
-            company_id,
-            cabinet_id,
-            project_id,
+            scope.company_id,
+            scope.cabinet_id,
+            scope.project_id,
             message,
         )
-        # Одна строка статистики на компанию; UPSERT идемпотентен к повторам.
         await conn.execute(
             "INSERT INTO greeting_stats (id, greetings_count) "
             "VALUES ($1, 1) "
             "ON CONFLICT (id) DO UPDATE "
             "SET greetings_count = greeting_stats.greetings_count + 1",
-            uuid.uuid5(uuid.NAMESPACE_OID, f"hello_plugin:stats:{company_id}"),
+            _stats_id(scope),
         )
     return JSONResponse(
         status_code=201,
-        content={"id": str(greeting_id), "company_id": company_id, "message": message},
+        content={"id": str(greeting_id), "company_id": scope.company_id, "message": message},
     )
 
 
 @app.get("/api/stats")
-async def stats(company_id: str) -> dict[str, Any]:
-    """Агрегат из typed-таблицы ``greeting_stats`` (не jsonb)."""
-    _authorized_gateway_call()
+async def stats(
+    request: Request,
+    company_id: str | None = None,
+    cabinet_id: str | None = None,
+    project_id: str | None = None,
+) -> dict[str, Any]:
+    """Агрегат по ключу полного introspected tenant-scope."""
+    scope = await _request_scope(
+        request,
+        company_id=company_id,
+        cabinet_id=cabinet_id,
+        project_id=project_id,
+    )
     pool = await _get_pool()
-    stat_id = uuid.uuid5(uuid.NAMESPACE_OID, f"hello_plugin:stats:{company_id}")
     async with pool.acquire() as conn:
         count = await conn.fetchval(
-            "SELECT greetings_count FROM greeting_stats WHERE id = $1", stat_id
+            "SELECT greetings_count FROM greeting_stats WHERE id = $1",
+            _stats_id(scope),
         )
-    return {"company_id": company_id, "greetings_count": int(count or 0)}
+    return {"company_id": scope.company_id, "greetings_count": int(count or 0)}
+
+
+# Production providers use only the protected Gateway transport.  Module-local
+# in-process declarations, metadata, actions or SecretStore doubles are not trust.
+RUNTIME_DEPLOYMENT_IDENTITY_ROOT = Path("/etc/agentscale/plugin-runtime")
+_RUNTIME_REQUEST_TOKEN: ContextVar[str | None] = ContextVar(
+    "hello_runtime_request_token", default=None
+)
+
+
+def _read_runtime_deployment_identity() -> Mapping[str, str] | None:
+    """Read non-secret actual identity from a platform-managed read-only volume."""
+    values: dict[str, str] = {}
+    try:
+        for name in ("plugin_instance_id", "backend_digest"):
+            with (RUNTIME_DEPLOYMENT_IDENTITY_ROOT / name).open(
+                "r", encoding="ascii"
+            ) as stream:
+                raw = stream.read(258)
+            if len(raw) > 257:
+                return None
+            values[name] = raw.strip()
+    except (OSError, UnicodeError):
+        return None
+    return values
+
+
+def _runtime_deployment_identity() -> Mapping[str, str] | None:
+    return _read_runtime_deployment_identity()
+
+
+async def _runtime_scope(request: Request) -> CapabilityScope:
+    token = _request_token(request)
+    scope = await _introspect_capability(token)
+    # ContextVar is request-task local, not a cross-request token/claims cache.
+    _RUNTIME_REQUEST_TOKEN.set(token)
+    return scope
+
+
+def _current_runtime_token() -> str:
+    token = _RUNTIME_REQUEST_TOKEN.get()
+    if token is None:
+        raise RuntimeError("current runtime capability token unavailable")
+    return token
+
+
+_runtime_remote_providers = RemoteRuntimeProviderClient(
+    gateway_url=GATEWAY_URL,
+    token_provider=_current_runtime_token,
+)
+
+
+async def _runtime_egress_declaration(identity: Mapping[str, Any]) -> Any:
+    return await _runtime_remote_providers.declaration(identity=identity)
+
+
+async def _runtime_artifact_byte_count(identity: Mapping[str, Any]) -> int | None:
+    return await _runtime_remote_providers.byte_count(identity=identity)
+
+
+def _runtime_secret_store() -> Any:
+    # Plaintext is never a provider response.  Only the control-plane may resolve
+    # SecretStore values for its protected flow; hello has no local secret port.
+    return None
+
+
+install_runtime_api(
+    app,
+    scope_provider=_runtime_scope,
+    egress_declaration_provider=_runtime_egress_declaration,
+    artifact_metadata_provider=_runtime_artifact_byte_count,
+    secret_store_provider=_runtime_secret_store,
+    deployment_identity_provider=_runtime_deployment_identity,
+    pod_action_provider=_runtime_remote_providers,
+)

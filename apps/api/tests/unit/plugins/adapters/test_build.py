@@ -1,7 +1,7 @@
-"""Тесты ``build_plugin_admin_ports``: ровно 10 портов, fail-closed.
+"""Тесты ``build_plugin_admin_ports``: ровно 12 портов, fail-closed.
 
 Главный тест по заданию: отсутствие ЛЮБОЙ обязательной реализации = явная
-ошибка, а не заглушка «успех». Проверяем по одному для КАЖДОЙ из 10
+ошибка, а не заглушка «успех». Проверяем по одному для КАЖДОЙ из 11
 зависимостей (параметрайз), плюс успешную сборку и «нет stub-успеха».
 
 ВАЖНО: тесты НЕ запускались (verification freeze).
@@ -67,6 +67,13 @@ from .fakes import (
     make_artifact_record,
 )
 from .test_activation_adapter import _activator
+from ..admin.fakes import (
+    FakeInstallationScopeStore,
+    FakeInstanceStore,
+    FakePublicationApprovalStore,
+    FakeUpdateLock,
+    FakeWebhookSecretStore,
+)
 
 
 class _FakeCosign:
@@ -118,7 +125,18 @@ def _deps() -> dict[str, Any]:
         "mint_secret": SECRET,
         "activator": _activator(),
         "instance_resolver": resolver,
+        "instance_store": FakeInstanceStore(),
+        "webhook_secrets": FakeWebhookSecretStore(),
         "deployment_admin": FakeDeploymentAdmin(),
+        "publication_approvals": FakePublicationApprovalStore(),
+        "installation_scopes": FakeInstallationScopeStore(),
+        "update_lock": FakeUpdateLock(),
+        # Legacy in-memory route state is legal only as an explicit test port.
+        "routes": InMemoryRouteRegistry(),
+        # InMemory grant/audit — тоже ТОЛЬКО явные test/dev constructor overrides:
+        # production defaults из build_plugin_admin_ports удалены.
+        "grant_store": InMemoryGrantStore(),
+        "audit": InMemoryAdminAudit(),
         "resolver_registrar": resolver,
     }
 
@@ -126,28 +144,58 @@ def _deps() -> dict[str, Any]:
 # --------------------------------------------------------------------------- успех
 
 
-def test_build_plugin_admin_ports_wires_all_10_ports() -> None:
-    ports = build_plugin_admin_ports(**_deps())
+def test_build_plugin_admin_ports_wires_all_12_ports() -> None:
+    deps = _deps()
+    ports = build_plugin_admin_ports(**deps)
+    assert ports.webhook_secrets is deps["webhook_secrets"]
+    assert ports.publication_approvals is deps["publication_approvals"]
+    assert ports.update_lock is deps["update_lock"]
+    assert ports.installation_scopes is deps["installation_scopes"]
 
     assert isinstance(ports, PluginAdminPorts)
     assert isinstance(ports.tenant_db, TenantDbAdapter)
     assert isinstance(ports.object_store, ObjectStoreAdapter)
     assert isinstance(ports.artifact_registry, ArtifactRegistryAdapter)
     assert isinstance(ports.grant_store, InMemoryGrantStore)
+    assert ports.grant_store is deps["grant_store"]
     assert isinstance(ports.revocation, IdentityRevocationAdapter)
     assert isinstance(ports.mint, IdentityMintAdapter)
     assert isinstance(ports.audit, InMemoryAdminAudit)
+    assert ports.audit is deps["audit"]
     assert isinstance(ports.routes, InMemoryRouteRegistry)
     assert isinstance(ports.platform_admin, StaticPlatformAdmin)
-    # Ровно 10 полей, ни одно не None.
-    assert len(PluginAdminPorts.__dataclass_fields__) == 10  # type: ignore[attr-defined]
-    for name in PluginAdminPorts.__dataclass_fields__:  # type: ignore[attr-defined]
+    assert len(PluginAdminPorts.__dataclass_fields__) == 16  # type: ignore[attr-defined]
+    for name in (
+        "tenant_db", "object_store", "artifact_registry", "instance_store",
+        "grant_store", "revocation", "mint", "activation", "routes", "audit",
+        "platform_admin", "publication_approvals", "update_lock",
+    ):
         assert getattr(ports, name) is not None
 
 
 def test_build_plugin_admin_service_returns_wired_service() -> None:
     service = build_plugin_admin_service(**_deps())
     assert isinstance(service, PluginAdminService)
+
+
+def test_direct_builders_require_explicit_routes_without_memory_fallback() -> None:
+    deps = _deps()
+    deps.pop("routes")
+    with pytest.raises(ValueError, match="'routes'"):
+        build_plugin_admin_ports(**deps)
+    with pytest.raises(ValueError, match="'routes'"):
+        build_plugin_admin_service(**deps)
+
+
+@pytest.mark.parametrize("missing", ["grant_store", "audit"])
+def test_direct_builders_require_explicit_grant_store_and_audit(missing: str) -> None:
+    """Отсутствие grant_store/audit = typed config failure, не InMemory default."""
+    deps = _deps()
+    deps.pop(missing)
+    with pytest.raises(ValueError, match=f"'{missing}'"):
+        build_plugin_admin_ports(**deps)
+    with pytest.raises(ValueError, match=f"'{missing}'"):
+        build_plugin_admin_service(**deps)
 
 
 def test_no_success_stub_is_used_for_pure_contracts() -> None:
@@ -194,7 +242,15 @@ def test_no_success_stub_is_used_for_pure_contracts() -> None:
         "mint_secret",
         "activator",
         "instance_resolver",
+        "instance_store",
+        "webhook_secrets",
         "deployment_admin",
+        "publication_approvals",
+        "installation_scopes",
+        "update_lock",
+        "grant_store",
+        "audit",
+        "routes",
     ],
 )
 def test_build_raises_when_any_required_port_is_missing(missing: str) -> None:
@@ -248,9 +304,10 @@ def test_build_allows_real_db_implementations_for_pure_contracts() -> None:
     grant_store = InMemoryGrantStore()
     audit = InMemoryAdminAudit()
     routes = InMemoryRouteRegistry()
-    ports = build_plugin_admin_ports(
-        **deps, grant_store=grant_store, audit=audit, routes=routes
-    )
+    deps["grant_store"] = grant_store
+    deps["audit"] = audit
+    deps["routes"] = routes
+    ports = build_plugin_admin_ports(**deps)
     assert ports.grant_store is grant_store
     assert ports.audit is audit
     assert ports.routes is routes

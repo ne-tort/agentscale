@@ -57,6 +57,7 @@ class AuditDecision(StrEnum):
     DENY = "deny"
     ERROR = "error"
     SUCCESS = "success"
+    UNKNOWN = "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +308,7 @@ class PluginAuditEvent:
 class AuditPort(Protocol):
     """Append-only sink. Исключение = отказ мутации, а не «просто не записали»."""
 
-    def append(self, event: PluginAuditEvent) -> None: ...
+    async def append(self, event: PluginAuditEvent) -> None: ...
 
 
 class InMemoryAudit:
@@ -323,7 +324,7 @@ class InMemoryAudit:
         self.events: list[PluginAuditEvent] = []
         self.rows: list[dict[str, Any]] = []
 
-    def append(self, event: PluginAuditEvent) -> None:
+    async def append(self, event: PluginAuditEvent) -> None:
         row = event.redacted()
         self.events.append(event)
         self.rows.append(row)
@@ -335,7 +336,7 @@ class InMemoryAudit:
 class FailingAudit:
     """Для проверки fail-closed: append всегда бросает (audit failure = deny)."""
 
-    def append(self, event: PluginAuditEvent) -> None:
+    async def append(self, event: PluginAuditEvent) -> None:
         raise RuntimeError("audit append failed")
 
 

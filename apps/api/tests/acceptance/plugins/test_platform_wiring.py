@@ -74,13 +74,20 @@ PORTS_WITH_INMEMORY_IMPL: dict[tuple[str, str], str] = {
     ("objects", "PresignPort"): "scoped presigned (§5.4 fallback)",
     ("objects", "AuditPort"): "append-only sink (F11)",
     ("artifacts", "CosignPort"): "cosign CLI/HTTP adapter (CI, задача 16)",
-    ("artifacts", "RegistryStorePort"): "InMemoryRegistryStore",
+    ("artifacts", "RegistryStorePort"): (
+        "SqlArtifactRegistryStore (durable production) / "
+        "InMemoryRegistryStore (tests only)"
+    ),
     ("egress", "GrantStorePort"): "БД-адаптер (F11) / GrantLookup в тестах",
     ("egress", "AuditSinkPort"): "общий append-only sink (§6.3)",
     ("events", "TopicAdminPort"): "rpk/Redpanda Admin adapter (F11)",
     ("events", "ProducerPort"): "aiokafka ProducerPort adapter (F11)",
     ("events", "ConsumerPort"): "aiokafka dispatch, ручной commit (F11)",
     ("events", "DlqPort"): "DLQ-продюсер (F11)",
+    ("events", "RawDlqPort"): (
+        "KafkaRawDlqAdapter (infrastructure/plugins/capabilities/kafka.py: "
+        "bool ack + natural-key dedup) / FakeRawDlq в acceptance"
+    ),
     ("events", "SubscriptionStorePort"): "БД подписок (F11)",
     ("events", "IdempotencyStorePort"): "БД/Redis (F11)",
     ("events", "PublishedEventStorePort"): "БД/Redis (F11)",
@@ -105,7 +112,14 @@ PORTS_WITH_INMEMORY_IMPL: dict[tuple[str, str], str] = {
     ("gateway", "AuditPort"): "общий append-only sink (F11)",
     ("admin", "TenantDbPort"): "TenantDatabaseService (задача 05)",
     ("admin", "ObjectStorePort"): "PluginObjectStore (задача 06)",
-    ("admin", "ArtifactRegistryPort"): "PluginArtifactRegistry (задача 07)",
+    ("admin", "ArtifactRegistryPort"): (
+        "ArtifactRegistryAdapter(PluginArtifactRegistry + SqlArtifactRegistryStore)"
+    ),
+    ("admin", "InstanceStorePort"): (
+        "SqlPluginInstanceRepository (infrastructure/persistence/repositories/"
+        "plugins/instances.py: durable saga + InstanceIdResolver) / "
+        "FakeInstanceStore в acceptance"
+    ),
     ("admin", "GrantStorePort"): "БД-модель CapabilityGrant + Alembic (F11)",
     ("admin", "RevocationPort"): "identity.revocation (задача 02)",
     ("admin", "MintPort"): "identity.mint (задача 02)",
@@ -113,6 +127,28 @@ PORTS_WITH_INMEMORY_IMPL: dict[tuple[str, str], str] = {
     ("admin", "RouteRegistryPort"): "Ingress/NP-генератор (задачи 14/15)",
     ("admin", "AuditPort"): "общий append-only sink (F11)",
     ("admin", "PlatformAdminPort"): "PlatformAdmin auth (F11)",
+    ("admin", "WebhookSecretStorePort"): (
+        "trusted SecretStore по canonical webhook_secret_key "
+        "(wiring/install.py; K8sSecretProjection webhook resolver) / "
+        "FakeWebhookSecretStore в acceptance"
+    ),
+    ("admin", "PublicationApprovalReaderPort"): (
+        "SqlPluginPublicationApprovalRepository (exact company/plugin/SemVer/"
+        "digest binding read; CI approval_reader) / FakePublicationApprovalStore"
+    ),
+    ("admin", "PublicationApprovalStorePort"): (
+        "SqlPluginPublicationApprovalRepository (INSERT-if-absent + atomic CAS "
+        "NULL→consumed_at) / FakePublicationApprovalStore в acceptance"
+    ),
+    ("admin", "SecretDeliveryControlPort"): (
+        "ControlPlaneSecretDelivery + K8sSecretProjection (approved install/"
+        "artifact phase, без plugin token) / scoped FakeSecretDeliveryControl"
+    ),
+    ("admin", "PluginUpdateLockPort"): "SqlPluginUpdateLock (PostgreSQL advisory xact lock)",
+    ("admin", "InstallationScopeStorePort"): "SqlInstallationScopeRepository / scoped acceptance fixture",
+    ("events", "ConsumerOwnershipPort"): "AiokafkaConsumerAdapter.delivery_ownership",
+    ("events", "DeliveryClaimPort"): "RedisDeliveryClaimStore",
+    ("events", "RawDlqPort"): "KafkaRawDlqAdapter (production) / durable RawDlq double (acceptance)",
 }
 
 
@@ -244,6 +280,7 @@ def test_plugin_platform_is_off_by_default() -> None:
     assert settings.plugin_platform_enabled is False
     assert settings.plugin_claims_secret == ""
     assert settings.plugin_static_origin == ""
+    assert settings.plugin_shell_origin == ""
     assert settings.plugin_egress_mode == "none"
 
 

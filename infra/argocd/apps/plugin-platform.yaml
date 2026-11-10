@@ -1,98 +1,34 @@
-# Плагиновая платформа (F8/GitOps, дизайн v4 §7.4, §14 п.9, acceptance №13).
-#
-# Этот файл — участник app-of-apps: он лежит в `infra/argocd/apps/` и синкается
-# корневым приложением `agentscale-root` (infra/argocd/root-app.yaml, dev-хост).
-# Проект тот же, что у всех приложений контура — `agentscale` (НЕ `default`),
-# чтобы сохранить ограничение по repo/namespace/kinds из 00-project.yaml.
-#
-# ВАЖНО (политика сред): root-app.yaml исключает только `agentscale-prod.yaml`
-# и `agentscale-e2e.yaml`, поэтому этот файл ПОПАДЁТ в dev-контур автоматически.
-# root-app-prod.yaml, наоборот, имеет явный include
-# {00-*.yaml,agent-sandbox.yaml,agentscale-prod.yaml} — `plugin-*.yaml` туда НЕ
-# входит, значит на выделенном prod-хосте плагины случайно не появятся. Prod
-# включается отдельной задачей и только по явному требованию.
+# Плагиновая платформа: только Git-owned always-on ресурсы и minimal runtime contracts.
+# Runtime-created Deployment/Service плагинов НЕ принадлежат этому Application.
+# Шаблон с placeholders не входит в kustomize render.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: plugin-platform
   namespace: argocd
   annotations:
-    # Порядок ВНУТРИ app-of-apps (этот уровень НЕ путать с `sync-wave: "25"`
-    # на самом Ingress `plugins-gateway` — та аннотация управляет порядком
-    # ресурсов уже внутри этого Application).
-    #   -10 : AppProject `agentscale` / `agent-sandbox` (00-project.yaml)
-    #    -5 : приложение `agent-sandbox` — регистрирует CRD
-    #         extensions.agents.x-k8s.io / agents.x-k8s.io
-    #     0 : `agentscale-dev` — создаёт namespace `agentscale-dev`,
-    #         `agentscale-dev-sandboxes`, базовые сервисы и dev Ingress
-    #  >  0 : плагины. Ставим "1": СТРОГО ПОСЛЕ CRD и после того, как
-    #         namespace'ы и Plugin Gateway уже существуют. Плагиновый слой
-    #         не вводит своих CRD, но зависит от зарегистрированного API и от
-    #         готовности инфраструктуры dev-контура.
     argocd.argoproj.io/sync-wave: "1"
   finalizers:
-    - resources-finalizer.argocd.argoproj.io
+    - resources-finalizer.argoproj.io
 spec:
   project: agentscale
   source:
     repoURL: https://github.com/ne-tort/agentscale.git
     targetRevision: main
-    # ВЫБОР РОДИТЕЛЯ (два допустимых варианта source.path):
-    #   1) infra/k3s/overlays/dev/plugins  — выбран здесь: dev-специфичный
-    #      слой (Ingress `plugins-gateway` с router.priority 120, NP, RBAC,
-    #      egress-правила). Соответствует политике «работаем только с dev».
-    #   2) infra/k3s/base/plugins         — если родитель решит держать
-    #      нейтральные манифесты плагинов в base, а dev-оверлей подключать
-    #      отдельно. Тогда замените path на этот и проследите, чтобы
-    #      `overlays/dev/plugins/` не дублировал те же ресурсы (иначе Argo
-    #      увидит два Application на один и тот же объект).
-    # Каталог `.../plugins/` ведёт задача №14, `kustomization.yaml` внутри
-    # оверлеев ведёт родитель. Здесь мы только указываем на готовый путь.
     path: infra/k3s/overlays/dev/plugins
   destination:
     server: https://kubernetes.default.svc
-    # Используем УЖЕ разрешённые в 00-project.yaml destinations, ничего нового
-    # в AppProject не добавляем. Основной namespace — `agentscale-dev`: там
-    # живёт Plugin Gateway, tenant-postgres, MinIO и Ingress `plugins-gateway`
-    # (backend Ingress'а `plugin-gateway:8080` должен быть в том же namespace).
-    #
-    # ВЫБОР РОДИТЕЛЯ: если поды плагинов (`app: plugin`, Deployment
-    # `replicas: 0`) и NP `plugin-egress` будут вынесены в
-    # `agentscale-dev-sandboxes` (как в дизайне v4 §6.2), замените значение на
-    # `agentscale-dev-sandboxes` — он тоже есть в destinations проекта.
-    # Допустим и смешанный вариант: ресурсы с ЯВНЫМ `metadata.namespace`
-    # применяются в свой namespace, а Argo проверяет КАЖДЫЙ из них по
-    # `spec.destinations` AppProject. Оба namespace уже разрешены, поэтому
-    # правка 00-project.yaml сейчас НЕ требуется. Если появится третий
-    # namespace — см. plugin-apps-project-notes.md, раздел 3.
     namespace: agentscale-dev
   syncPolicy:
     automated:
-      # selfHeal ОБЯЗАТЕЛЕН по задаче, но именно он и есть источник риска:
-      # activator будит backend патчем `deployments/scale` 0 -> 1, а Argo без
-      # `ignoreDifferences` увидит дрейф и немедленно вернёт `replicas: 0`,
-      # положив плагин посреди запроса. Защита — блок ignoreDifferences ниже
-      # плюс RespectIgnoreDifferences=true.
       selfHeal: true
-      # FAIL-CLOSED: prune намеренно ВЫКЛЮЧЕН. По дизайну v4 §5.1 Deployment
-      # backend'а плагина создаётся платформой при install (admin API / grant),
-      # а не обязательно лежит в Git. `prune: true` удалил бы такой «лишний»
-      # Deployment при первом же синке — живой backend плагина исчез бы.
-      # Лучше оставить неубранный ресурс, чем удалить работающий.
-      # Если родитель подтвердит, что ВСЕ плагиновые Deployment'ы декларативно
-      # коммитятся в Git, prune можно включить; до подтверждения — false.
+      # Dynamic plugin resources создаются вне Argo; prune не должен их удалять.
       prune: false
     syncOptions:
-      # Namespace уже создаёт `agentscale-dev` (wave 0), но оставляем true:
-      # операция идемпотентна и страхует холодный старт/ручной sync приложения.
       - CreateNamespace=true
-      # КЛЮЧЕВОЕ для replicas: без этого флага игнорируемые различия
-      # учитываются только при расчёте diff, но всё равно могут быть
-      # перезаписаны при apply. С ним Argo не трогает /spec/replicas и при
-      # обычном синке, а не только при selfHeal. См. agentscale-dev.yaml.
+      # Нужен ТОЛЬКО для runtime-owned activation state, не для replicas или
+      # Git-owned tenant/PgBouncer/Envoy config.
       - RespectIgnoreDifferences=true
-      # Не блокировать волну на health-гейтинге: холодный старт плагина
-      # (pull образа + Liquibase update, §7.4) длится десятки секунд.
       - Wait=false
     retry:
       limit: 5
@@ -100,83 +36,17 @@ spec:
         duration: 5s
         factor: 2
         maxDuration: 3m
-  # ---------------------------------------------------------------------------
-  # ГЛАВНОЕ: разрешить activator'у усыплять/будить backend плагина.
-  # ---------------------------------------------------------------------------
-  # Deployment плагина декларируется с `replicas: 0` (§7.4). Plugin Gateway
-  # будит его через `deployments/scale` и удерживает запрос до Ready, затем по
-  # idle-TTL снова ставит 0. Без ignoreDifferences automated.selfHeal каждые
-  # несколько секунд «чинил» бы live-состояние обратно к `replicas: 0` из Git,
-  # и 0 -> 1 никогда не успевал бы отработать (acceptance №13, риск в §10).
+  # Намеренно НЕТ ignore Deployment /spec/replicas: Gateway, tenant Postgres,
+  # PgBouncer и Envoy масштабируются Git config и не должны оставаться выключенными.
+  # Runtime-created Deployment не отслеживаются Application, поэтому широкий ignore
+  # для их scale-to-zero не требуется.
   #
-  # ВЫБРАННЫЙ РАБОЧИЙ ВАРИАНТ — `jsonPointers: [/spec/replicas]`.
-  # Это буквально пример из документации Argo CD 2.13 (установлена в кластере,
-  # см. infra/argocd/install): "configured to ignore differences in
-  # spec.replicas for all deployments" — group `apps`, kind `Deployment`,
-  # jsonPointers `/spec/replicas`. Путь точечный, затрагивает ТОЛЬКО replicas,
-  # не зависит от версии Argo, от имени менеджера в managedFields и от того,
-  # кто именно патчит scale-подресурс. Проверяется тестом
-  # infra/ops/tests/test_plugin_ingress_priority.py.
-  #
-  # `jqPathExpressions: ['.spec.replicas']` добавлен как эквивалентная запись
-  # того же пути (jq `path(.spec.replicas)` даёт ["spec","replicas"]). Это не
-  # альтернатива «или», а дубль на случай, если запись позже сузят по
-  # name/namespace: jsonPointers остаётся основным, jq не даёт забыть путь.
-  # Оба механизма поддерживаются Argo CD 2.13 (Diff Customization).
-  #
-  # ПОЧЕМУ НЕ `managedFieldsManagers`: этот вариант игнорирует ВСЕ поля,
-  # которыми владеет указанный менеджер, а не только replicas. Мало того,
-  # имя manager у activator'а (`deployments/scale` через k8s API) заранее не
-  # фиксировано и может смениться при смене клиента/библиотеки — защита тихо
-  # перестала бы действовать. Fail-closed требует точечного jsonPointers.
-  #
-  # НИКАКИХ НОВЫХ CRD: в этот Application не добавляем объекты KEDA
-  # (scale-to-zero по HTTP), Knative Serving, ACME-издателя сертификатов
-  # или встроенный pod-автоскейлер — равно как и в 00-project.yaml.
-  # Обоснование запрета и план будущего перехода — в
-  # plugin-apps-project-notes.md.
-  #
-  # Запись НЕ сужена по `name`: имя Deployment зависит от установленного
-  # плагина/инстанса и создаётся динамически, поэтому перечислить его нельзя.
-  # Побочный эффект — /spec/replicas игнорируется и у always-running Deployment
-  # самого Plugin Gateway; это безопасно (его replicas меняет только Git),
-  # а вот сужение по имени сломало бы wake-up у новых плагинов.
+  # Намеренно НЕТ ignore /data для tenant-postgres-config, pgbouncer-credentials
+  # или egress-proxy-config: отсутствующий контроллер не должен блокировать Git.
+  # Единственный узкий ignore защищает CAS state, который пишет работающий Gateway.
   ignoreDifferences:
-    - group: apps
-      kind: Deployment
-      jsonPointers:
-        - /spec/replicas
-      jqPathExpressions:
-        - .spec.replicas
-    # Статус в live-объекте шлют контроллеры; под selfHeal он создаёт
-    # вечный OutOfSync. Повторяем поведение agentscale-dev.yaml.
-    - group: apps
-      kind: Deployment
-      jsonPointers:
-        - /status
-    # -------------------------------------------------------------------------
-    # Контроллер-правимые данные (замечание задачи 14). selfHeal иначе сотрёт
-    # то, что admin API пишет ВНЕ Git при grant/revoke:
-    #   * tenant_hba.conf — пары (role, tenant_<company>) + pg_reload_conf();
-    #   * pgbouncer userlist.txt — SCRAM-секреты ролей + RELOAD.
-    #
-    # ВАЖНО: `egress-proxy-config` ЗДЕСЬ НЕ ИГНОРИРУЕМ. Контроллер синхронизации
-    # (infrastructure/plugins/controllers/**) пока НЕ задеплоен как Pod — в
-    # kustomize-рендере оверлея нет ни одного controller-ресурса. ignoreDifferences
-    # на /data поэтому не защищал «данные контроллера», а НАОБОРОТ запрещал Argo
-    # применить эталонный конфиг из Git: live ConfigMap оставался с admin
-    # 127.0.0.1:9901, и readiness-проба падала даже после правки манифеста.
-    # Когда контроллер будет реально задеплоен, добавить его ConfigMap сюда
-    # ОТДЕЛЬНОЙ записью и сразу подключить EnvoyReloadPort (иначе patch /data
-    # не вступит в силу).
-    # -------------------------------------------------------------------------
     - group: ""
       kind: ConfigMap
-      name: tenant-postgres-config
-      jsonPointers:
-        - /data
-    - group: ""
-      kind: Secret
-      name: pgbouncer-credentials
+      name: plugin-activation-state
       jsonPointers:
         - /data

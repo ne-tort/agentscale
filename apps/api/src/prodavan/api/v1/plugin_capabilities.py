@@ -53,6 +53,7 @@ from prodavan.application.plugins.transport.bodies import (
     JobsCancelBody,
     JobsGetBody,
     JobsSubmitBody,
+    McpInvokeBody,
     McpRegisterBody,
     NetworkRequestBody,
     ObjectsCredentialsBody,
@@ -170,7 +171,7 @@ async def _typed_payload(request: Request, model: type[BaseModel]) -> BaseModel:
         ) from exc
 
 
-def _run(
+async def _run(
     *,
     request: Request,
     claims: Any,
@@ -179,8 +180,8 @@ def _run(
     domain_request: Any,
 ) -> dict[str, Any]:
     """Единая точка вызова сервиса (без generic dispatch)."""
-    service = get_capability_service(request)
-    return invoke_capability(
+    service = await get_capability_service(request)
+    return await invoke_capability(
         request=request,
         claims=claims,
         service=service,
@@ -237,7 +238,7 @@ async def cache_operation(
         ) from exc
 
     domain_request = bridge_mod.build_cache_request(op, typed, claims)
-    return _run(
+    return await _run(
         request=request,
         claims=claims,
         capability="cache",
@@ -260,7 +261,7 @@ async def objects_credentials(
     """Short-lived scoped credentials / presigned (§4.3, §5.4)."""
     from prodavan.application.plugins.transport import bridge as bridge_mod
 
-    return _run(
+    return await _run(
         request=request,
         claims=claims,
         capability="objects",
@@ -278,7 +279,7 @@ async def objects_get(
     from prodavan.application.plugins.transport import bridge as bridge_mod
 
     typed = await _typed_payload(request, ObjectsListBody)
-    return _run(
+    return await _run(
         request=request,
         claims=claims,
         capability="objects",
@@ -296,7 +297,7 @@ async def objects_list(
     """Тот же typed контракт, что и ``GET /objects`` (для POST-клиентов)."""
     from prodavan.application.plugins.transport import bridge as bridge_mod
 
-    return _run(
+    return await _run(
         request=request,
         claims=claims,
         capability="objects",
@@ -320,7 +321,7 @@ async def objects_delete(
         raise PluginTransportError(
             PluginProblem(422, "VALIDATION_ERROR", "Validation Error", str(exc))
         ) from exc
-    return _run(
+    return await _run(
         request=request,
         claims=claims,
         capability="objects",
@@ -349,7 +350,7 @@ async def docs_query(
         raise PluginTransportError(
             PluginProblem(422, "VALIDATION_ERROR", "Validation Error", "invalid typed docs query")
         ) from exc
-    return _run(
+    return await _run(
         request=request,
         claims=claims,
         capability="docs",
@@ -366,7 +367,7 @@ async def events_publish(
 ) -> dict[str, Any]:
     from prodavan.application.plugins.transport import bridge as bridge_mod
 
-    return _run(
+    return await _run(
         request=request,
         claims=claims,
         capability="events",
@@ -383,7 +384,7 @@ async def jobs_submit(
 ) -> dict[str, Any]:
     from prodavan.application.plugins.transport import bridge as bridge_mod
 
-    return _run(
+    return await _run(
         request=request,
         claims=claims,
         capability="jobs",
@@ -402,7 +403,7 @@ async def jobs_get(
     from prodavan.application.plugins.transport import bridge as bridge_mod
 
     typed = await _typed_payload(request, JobsGetBody)
-    return _run(
+    return await _run(
         request=request,
         claims=claims,
         capability="jobs",
@@ -420,7 +421,7 @@ async def jobs_cancel(
 ) -> dict[str, Any]:
     from prodavan.application.plugins.transport import bridge as bridge_mod
 
-    return _run(
+    return await _run(
         request=request,
         claims=claims,
         capability="jobs",
@@ -449,11 +450,35 @@ async def pods_invoke(
         raise PluginTransportError(
             PluginProblem(422, "VALIDATION_ERROR", "Validation Error", "invalid pods.invoke contract")
         ) from exc
-    return _run(
+    return await _run(
         request=request,
         claims=claims,
         capability="pods",
         operation="pods.invoke",
+        domain_request=domain_request,
+    )
+
+
+@router.post("/mcp/invoke", response_model=DecisionResponse)
+async def mcp_invoke(
+    body: McpInvokeBody,
+    request: Request,
+    claims: PluginClaimsDep,
+) -> dict[str, Any]:
+    """Typed MCP broker call; manifest binding and tenant assertions stay server-side."""
+    from prodavan.application.plugins.transport import bridge as bridge_mod
+
+    try:
+        domain_request = bridge_mod._mcp_invoke(body, claims)
+    except (ValueError, KeyError) as exc:
+        raise PluginTransportError(
+            PluginProblem(422, "VALIDATION_ERROR", "Validation Error", "invalid mcp.invoke contract")
+        ) from exc
+    return await _run(
+        request=request,
+        claims=claims,
+        capability="mcp",
+        operation="mcp.invoke",
         domain_request=domain_request,
     )
 
@@ -472,7 +497,7 @@ async def mcp_register(
         raise PluginTransportError(
             PluginProblem(422, "VALIDATION_ERROR", "Validation Error", "invalid mcp.register contract")
         ) from exc
-    return _run(
+    return await _run(
         request=request,
         claims=claims,
         capability="mcp",
@@ -490,7 +515,7 @@ async def secrets_read(
     """Возвращает ссылку/версию; plaintext через HTTP-контракт не уходит."""
     from prodavan.application.plugins.transport import bridge as bridge_mod
 
-    return _run(
+    return await _run(
         request=request,
         claims=claims,
         capability="secrets",
@@ -514,7 +539,7 @@ async def network_request(
         raise PluginTransportError(
             PluginProblem(422, "VALIDATION_ERROR", "Validation Error", "invalid network.request contract")
         ) from exc
-    return _run(
+    return await _run(
         request=request,
         claims=claims,
         capability="network",
@@ -536,7 +561,16 @@ async def plugin_health(claims: PluginClaimsDep) -> dict[str, Any]:
     этот эндпоинт проверяет именно plugin trust-контур (кр. 17) и является
     удобной проверкой, что ``company_id`` взят из claims, а не из заголовка.
     """
-    return {"status": "ok", "surface": "plugin-capabilities", "company_id": claims.company_id}
+    return {
+        "plugin_id": claims.plugin_id,
+        "company_id": claims.company_id,
+        "cabinet_id": claims.cabinet_id,
+        "project_id": claims.project_id,
+        "grant_id": claims.grant_id,
+        "artifact_digest": claims.artifact_digest,
+        "scopes": sorted(claims.scopes),
+        "exp": claims.exp,
+    }
 
 
 # ---------------------------------------------------------------------------

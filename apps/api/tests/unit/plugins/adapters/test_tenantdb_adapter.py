@@ -143,15 +143,15 @@ async def test_ensure_plugin_schema_accepts_own_company_dsn_ref() -> None:
     assert schema.dsn_ref != database.dsn_ref  # это ДВЕ разные ссылки
 
 
-async def test_ensure_plugin_schema_calls_grant_plugin_positionally() -> None:
+async def test_ensure_plugin_schema_calls_ensure_plugin_positionally() -> None:
     """Сверяем, что в реальный сервис ушли ровно два позиционных аргумента."""
 
     recorded: list[tuple[str, tuple[object, ...]]] = []
 
     class RecordingService(TenantDatabaseService):
-        async def grant_plugin(self, company_id: str, plugin_id: str) -> TenantDsn:
-            recorded.append(("grant_plugin", (company_id, plugin_id)))
-            return await super().grant_plugin(company_id, plugin_id)
+        async def ensure_plugin(self, company_id: str, plugin_id: str) -> TenantDsn:
+            recorded.append(("ensure_plugin", (company_id, plugin_id)))
+            return await super().ensure_plugin(company_id, plugin_id)
 
     service = RecordingService(
         admin=FakeAdminConnection(),
@@ -163,7 +163,7 @@ async def test_ensure_plugin_schema_calls_grant_plugin_positionally() -> None:
     await adapter.ensure_plugin_schema(
         company_id=COMPANY, plugin_id=PLUGIN, dsn_ref=""
     )
-    assert recorded == [("grant_plugin", (COMPANY, PLUGIN))]
+    assert recorded == [("ensure_plugin", (COMPANY, PLUGIN))]
 
 
 # --------------------------------------------------------------------------- drop
@@ -177,7 +177,7 @@ async def test_drop_plugin_schema_returns_pair_and_is_idempotent() -> None:
         True,
         True,
     )
-    # Повтор: роль уже удалена → реальный сервис бросает NOT_FOUND → (True, True).
+    # Повтор: роль уже удалена → сервис идемпотентно подтверждает отсутствие.
     assert await adapter.drop_plugin_schema(company_id=COMPANY, plugin_id=PLUGIN) == (
         True,
         True,

@@ -18,23 +18,58 @@ import { SettingsProvider } from "../../preferences/SettingsProvider";
 import pluginStrings from "../../i18n/units/plugins";
 import { buildCatalogue } from "../../i18n/catalogue";
 import { PLUGIN_SANDBOX } from "./PluginFrame";
-import { OPAQUE_ORIGIN, PLUGIN_RPC_PROTOCOL, type PluginChannel } from "./rpc";
+import {
+  OPAQUE_ORIGIN,
+  PLUGIN_RPC_PROTOCOL,
+  type PluginChannel,
+  type PluginChannelOptions,
+  type PluginRequestHandler,
+} from "./rpc";
 import {
   PluginPage,
   pluginSrcFailure,
   resolvePluginPagePhase,
   DEFAULT_PLUGIN_BACK_PATH,
-  DEFAULT_PLUGIN_VERSION,
   type PluginPageProps,
 } from "./PluginPage";
-import type { PluginInfo, PluginInfoPort } from "./usePluginFrame";
-import { PLUGIN_ROUTE_PATHS, PLUGIN_ROUTE_ELEMENTS, PluginRoutes } from "../../app/plugin-routes";
+import type { ConnectedPluginInfo, PluginInfo, PluginInfoPort } from "./usePluginFrame";
+import {
+  PLUGIN_ROUTE_PATHS,
+  PUBLIC_PLUGIN_ROUTE_PATHS,
+  PLUGIN_ROUTE_ELEMENTS,
+  PluginRoutes,
+} from "../../app/plugin-routes";
 
 const STATIC_ORIGIN = "https://plugin-origin.agentscale.dev";
 const SHELL_ORIGIN = "https://agentscale.dev";
-const SAFE_SRC = `${STATIC_ORIGIN}/tenant-co_123/mod_equipment/${DEFAULT_PLUGIN_VERSION}/index.html`;
+const VERSION = "1.2.0";
+const DIGEST = `sha256:${"a".repeat(64)}`;
+const OTHER_DIGEST = `sha256:${"b".repeat(64)}`;
+const INSTANCE_ID = "instance-1234567890";
+const NONCE = "nonce-1234567890";
+const CAPABILITIES = ["hello.greetings@1"] as const;
+const SAFE_SRC = `${STATIC_ORIGIN}/tenant-co_123/mod_equipment/${VERSION}/index.html`;
 
-/** Порт возвращает только connected/granted/digest — capability-токена в нем нет. */
+function connectedInfo(overrides: Partial<ConnectedPluginInfo> = {}): ConnectedPluginInfo {
+  return {
+    connected: true,
+    granted: true,
+    manifest_version: VERSION,
+    artifact_digest: DIGEST,
+    capabilities: CAPABILITIES,
+    scope: { company_id: "co_123" },
+    static_origin: STATIC_ORIGIN,
+    plugin_shell_origin: SHELL_ORIGIN,
+    frontend_entry: "index.html",
+    frontend_base_path: `/tenant-co_123/mod_equipment/${VERSION}`,
+    route_path: "/",
+    rpc_operations: [],
+    public_pages: ["/"],
+    ...overrides,
+  };
+}
+
+/** Порт возвращает registry identity/grant, но никогда capability token. */
 function infoPort(info: PluginInfo | Error): PluginInfoPort {
   return {
     getPluginInfo: vi.fn(async () => {
@@ -44,7 +79,7 @@ function infoPort(info: PluginInfo | Error): PluginInfoPort {
   };
 }
 
-const grantedPort = () => infoPort({ connected: true, granted: true });
+const grantedPort = () => infoPort(connectedInfo());
 const config = { staticOrigin: STATIC_ORIGIN, shellOrigin: SHELL_ORIGIN };
 
 /**
@@ -59,7 +94,13 @@ function inertChannel(expectedOrigin: string): PluginChannel {
     ready: true,
     get disposed() { return disposed; },
     handshake: () => Promise.resolve({
-      protocol: PLUGIN_RPC_PROTOCOL, type: "plugin.ready", plugin_id: "mod_equipment", version: DEFAULT_PLUGIN_VERSION,
+      protocol: PLUGIN_RPC_PROTOCOL,
+      type: "plugin.ready",
+      plugin_id: "mod_equipment",
+      version: VERSION,
+      artifact_digest: DIGEST,
+      instance_id: INSTANCE_ID,
+      nonce: NONCE,
     }),
     request: <T,>() => Promise.resolve(undefined as T),
     dispose: () => { disposed = true; },
@@ -94,6 +135,8 @@ async function mountPage(
       <Routes>
         <Route path={PLUGIN_ROUTE_PATHS[0]} element={<PluginPage {...pageProps} />} />
         <Route path={PLUGIN_ROUTE_PATHS[1]} element={<PluginPage {...pageProps} />} />
+        <Route path={PUBLIC_PLUGIN_ROUTE_PATHS[0]} element={<PluginPage {...pageProps} publicPage />} />
+        <Route path={PUBLIC_PLUGIN_ROUTE_PATHS[1]} element={<PluginPage {...pageProps} publicPage />} />
         <Route path="*" element={<div data-testid="not-found">404</div>} />
       </Routes>
       <LocationProbe />
@@ -157,11 +200,14 @@ describe("plugin-routes.tsx: маршруты для родителя", () => {
     expect(host?.querySelector(".plugin-page")).not.toBeNull();
   });
 
-  it("вложенный deep-link /plugins/.../* тоже не уезжает в SPA-fallback", async () => {
-    await mountPage("/plugins/mod_equipment/co_123/section/42");
+  it("вложенный deep-link передаёт nested routePath в bootstrap", async () => {
+    const port = infoPort(connectedInfo({ route_path: "/section/42" }));
+    await mountPage("/plugins/mod_equipment/co_123/section/42", { infoPort: port });
     expect(host?.querySelector("[data-testid='not-found']")).toBeNull();
     expect(host?.querySelector(".plugin-page")).not.toBeNull();
     expect(host?.querySelector(".plugin-page")?.getAttribute("data-plugin-id")).toBe("mod_equipment");
+    expect(port.getPluginInfo).toHaveBeenCalledWith(expect.objectContaining({ routePath: "/section/42" }));
+    expect(frame()?.getAttribute("src")).toBe(SAFE_SRC);
   });
 });
 
@@ -203,23 +249,81 @@ describe("PluginPage: изоляция iframe", () => {
     expect(markup()).not.toContain("authorization");
   });
 
-  it("версия из пропа попадает в версионированный путь static-origin", async () => {
-    await mountPage("/plugins/mod_equipment/co_123", { version: "2.3.4" });
-    expect(frame()?.getAttribute("src"))
-      .toBe(`${STATIC_ORIGIN}/tenant-co_123/mod_equipment/2.3.4/index.html`);
+  it("custom frontend_entry/base_path берутся из bootstrap, не из tenant template", async () => {
+    await mountPage("/plugins/mod_equipment/co_123", {
+      infoPort: infoPort(connectedInfo({
+        manifest_version: "2.3.4",
+        frontend_entry: "shell.html",
+        frontend_base_path: "/signed/release",
+      })),
+    });
+    expect(frame()?.getAttribute("src")).toBe(`${STATIC_ORIGIN}/signed/release/shell.html`);
+    expect(frame()?.getAttribute("data-plugin-version")).toBe("2.3.4");
   });
 
-  it("capability-токен НЕ попадает во frontend: порт отдаёт только флаги, в DOM нет секретов", async () => {
-    const info = { connected: true, granted: true, digest: "sha256:deadbeef" };
+  it("PluginFrame получает manifest-scoped onRequest, а не generic capability.call", async () => {
+    const operation = {
+      capability_id: "hello.greetings",
+      capability_version: "1.0",
+      operation: "list",
+      http_method: "GET",
+      backend_path: "/api/greetings/list",
+      public: false,
+    } as const;
+    const operationTransport = vi.fn(async () => ({ items: [] }));
+    let channelOptions: PluginChannelOptions | undefined;
+    const channelFactory = (_frame: HTMLIFrameElement, origin: string, options: PluginChannelOptions) => {
+      channelOptions = options;
+      return inertChannel(origin);
+    };
+    await mountPage("/plugins/mod_equipment/co_123", {
+      infoPort: infoPort(connectedInfo({
+        capabilities: ["hello.greetings@1.0"],
+        rpc_operations: [operation],
+      })),
+      operationTransport,
+      channelFactory,
+    });
+    expect(channelOptions?.onRequest).toEqual(expect.any(Function));
+    const request: Parameters<PluginRequestHandler>[0] = {
+      protocol: PLUGIN_RPC_PROTOCOL,
+      type: "plugin.rpc.request",
+      plugin_id: "mod_equipment",
+      version: VERSION,
+      artifact_digest: DIGEST,
+      instance_id: INSTANCE_ID,
+      nonce: NONCE,
+      request_id: "request-1",
+      method: "capability.call",
+      capability: { id: "hello.greetings", version: "1.0" },
+      context: { company_id: "co_123" },
+      idempotency_key: "request-1",
+      input: { method: "list", params: {} },
+    };
+    await expect(channelOptions!.onRequest!(request)).resolves.toEqual({ items: [] });
+    expect(operationTransport).toHaveBeenCalledWith(expect.objectContaining({ declaration: operation }));
+    await expect(channelOptions!.onRequest!({
+      ...request,
+      input: { method: "not_signed", params: {} },
+    })).rejects.toMatchObject({ reason: "OPERATION_NOT_DECLARED", rpcCode: "CAPABILITY_DENIED" });
+    expect(operationTransport).toHaveBeenCalledTimes(1);
+  });
+
+  it("capability-токен НЕ попадает во frontend: registry identity есть, секретов в DOM нет", async () => {
+    const info = connectedInfo({ artifact_digest: OTHER_DIGEST });
     await mountPage("/plugins/mod_equipment/co_123", { infoPort: infoPort(info) });
-    // Контракт порта не содержит capability-токена: только connected/granted/digest.
-    expect(Object.keys(info).sort()).toEqual(["connected", "digest", "granted"]);
+    // Контракт порта содержит identity/capabilities, но не capability-токен.
+    expect(Object.keys(info).sort()).toEqual([
+      "artifact_digest", "capabilities", "connected", "granted", "manifest_version", "scope",
+      "static_origin", "plugin_shell_origin", "frontend_entry", "frontend_base_path", "route_path", "rpc_operations", "public_pages",
+    ].sort());
     expect(JSON.stringify(info)).not.toMatch(/token|secret|claims|authorization/i);
-    // Ни digest артефакта, ни тем более токен не оказываются в URL/разметке.
-    for (const marker of ["deadbeef", "capability_token", "plugin_claims", "access_token", "?token="]) {
+    // Доверенный digest передаётся ТОЛЬКО в handoff name; URL и токены запрещены.
+    expect(frame()?.getAttribute("name")).toContain(OTHER_DIGEST);
+    expect(frame()?.getAttribute("src")).not.toContain(OTHER_DIGEST);
+    for (const marker of ["capability_token", "plugin_claims", "access_token", "?token="]) {
       expect(markup()).not.toContain(marker);
     }
-    expect(frame()?.getAttribute("src")).not.toContain("deadbeef");
   });
 
   it("sandbox='allow-scripts allow-forms', allow-same-origin ОТСУТСТВУЕТ", async () => {
@@ -279,12 +383,12 @@ describe("PluginPage: состояния и retry", () => {
     expect(text()).toContain(pluginStrings.ru.loading);
     expect(host?.querySelector("[role='status']")?.getAttribute("aria-live")).toBe("polite");
     expect(frame()).toBeNull();
-    await act(async () => { resolveInfo({ connected: true, granted: true }); await Promise.resolve(); });
+    await act(async () => { resolveInfo(connectedInfo()); await Promise.resolve(); });
   });
 
   it("notGranted: «Доступ к плагину не выдан», iframe нет", async () => {
     await mountPage("/plugins/mod_equipment/co_123", {
-      infoPort: infoPort({ connected: true, granted: false }),
+      infoPort: infoPort(connectedInfo({ granted: false })),
     });
     expect(text()).toContain(pluginStrings.ru.notGranted);
     expect(host?.querySelector(".plugin-page")?.getAttribute("data-plugin-status")).toBe("notGranted");
@@ -310,7 +414,7 @@ describe("PluginPage: состояния и retry", () => {
   });
 
   it("retry: кнопка «Повторить» перезапускает загрузку через порт", async () => {
-    const port = infoPort({ connected: true, granted: false });
+    const port = infoPort(connectedInfo({ granted: false }));
     await mountPage("/plugins/mod_equipment/co_123", { infoPort: port });
     const retry = host?.querySelector<HTMLButtonElement>(".plugin-page__error button");
     expect(retry?.textContent).toBe(pluginStrings.ru.retry);
@@ -322,7 +426,10 @@ describe("PluginPage: состояния и retry", () => {
   it("originMismatch: отсутствие конфигурации static-origin → отказ без iframe", async () => {
     // Явно пустой env, чтобы тест не зависел от VITE_PLUGIN_STATIC_ORIGIN,
     // который vite.config.ts подставляет через define.
-    await mountPage("/plugins/mod_equipment/co_123", { config: { env: {} } });
+    await mountPage("/plugins/mod_equipment/co_123", {
+      config: { env: {} },
+      infoPort: infoPort(connectedInfo({ static_origin: "" })),
+    });
     expect(host?.querySelector(".plugin-page")?.getAttribute("data-plugin-blocked")).toBe("true");
     expect(text()).toContain(pluginStrings.ru.loadError);
     expect(frame()).toBeNull();
@@ -390,7 +497,7 @@ describe("PluginPage: локализация en (ключи согласован
     window.localStorage.setItem("agentscale.locale", "en");
     try {
       await mountPage("/plugins/mod_equipment/co_123", {
-        infoPort: infoPort({ connected: true, granted: false }),
+        infoPort: infoPort(connectedInfo({ granted: false })),
       });
       expect(text()).toContain(pluginStrings.en.notGranted);
       expect(text()).not.toContain(pluginStrings.ru.notGranted);

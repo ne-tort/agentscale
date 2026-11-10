@@ -1,5 +1,11 @@
 # Сверка сетевой политики плагинов с as-built (network alignment)
 
+> **HISTORICAL REPORT / NOT CURRENT ACCEPTANCE.** Содержимое относится к ранней
+> волне и не переподтверждено на audited HEAD `6ee720dd`. Любые «реализовано»,
+> `[x]`, `acceptance ✓`, «эталон» и прошлые test counts — только historical
+> claims. Актуальный статус: [STOP-SHIP](plugin-migration-status.md) и
+> [live-only acceptance map](plugin-acceptance-map.md). Написанный код ≠ live.
+
 **Статус:** реализовано, тесты написаны но НЕ запускались (verification freeze,
 `docs/migration/plugin-migration-plan.md` §0.2, §9 дизайна v4).
 **Источник архитектуры:** [`docs/ARCHITECTURE/plugin-architecture-complete.md`](../ARCHITECTURE/plugin-architecture-complete.md)

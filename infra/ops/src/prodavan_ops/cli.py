@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import typer
 
 from prodavan_ops import __version__
@@ -11,6 +14,17 @@ from prodavan_ops.k8s import (
     assert_kubeconfig_docker_ready,
     rollout_restart,
     wait_argo_app,
+)
+from prodavan_ops.plugin import (
+    DEFAULT_MAX_PAYLOAD_BYTES,
+    DEFAULT_TIMEOUT_SECONDS,
+    MAX_PAYLOAD_BYTES,
+    MAX_TIMEOUT_SECONDS,
+    CommandResult,
+    PluginAcceptanceError,
+    execute_action,
+    redact_data,
+    write_evidence,
 )
 from prodavan_ops.smoke import smoke, smoke_public_https
 from prodavan_ops.validate import validate_all
@@ -163,6 +177,211 @@ def e2e_cleanup_cmd(
     """Remove e2e Job (and optionally the Argo app)."""
     assert_kubeconfig_docker_ready()
     cleanup_e2e(unsync=unsync)
+
+
+plugin_app = typer.Typer(
+    help=(
+        "Plugin v4 live acceptance over HTTP. Credentials: "
+        "PRODAVAN_PLUGIN_API_BASE_URL and exactly one of "
+        "PRODAVAN_PLUGIN_BEARER_TOKEN / PRODAVAN_PLUGIN_SERVICE_TOKEN."
+    ),
+    no_args_is_help=True,
+)
+app.add_typer(plugin_app, name="plugin")
+
+
+def _emit_plugin_result(result: CommandResult, *, evidence_path: Path | None = None) -> None:
+    destination: Path | None = None
+    if evidence_path is not None:
+        try:
+            destination = write_evidence(result, evidence_path)
+        except PluginAcceptanceError as exc:
+            document = {
+                "status": "error",
+                "operation": result.action,
+                "request_id": result.request_id,
+                "evidence_status": "failed",
+                "error": exc.as_dict(),
+            }
+            typer.echo(
+                json.dumps(
+                    redact_data(document, sensitive_values=result.sensitive_values),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    allow_nan=False,
+                ),
+                err=True,
+            )
+            raise typer.Exit(code=exc.exit_code) from exc
+    document = result.console_document()
+    if destination is not None:
+        document["evidence_file"] = str(destination)
+    typer.echo(
+        json.dumps(
+            redact_data(document, sensitive_values=result.sensitive_values),
+            ensure_ascii=False,
+            sort_keys=True,
+            allow_nan=False,
+        ),
+        err=not result.ok,
+    )
+    if not result.ok:
+        raise typer.Exit(code=result.exit_code)
+
+
+def _run_plugin_action(
+    action: str,
+    *,
+    company_id: str | None = None,
+    operation: str | None = None,
+    payload: Path | None = None,
+    job_id: str | None = None,
+    max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    insecure: bool = False,
+    retry: bool = False,
+    evidence_path: Path | None = None,
+) -> None:
+    result = execute_action(
+        action,
+        company_id=company_id,
+        operation=operation,
+        payload_file=payload,
+        job_id=job_id,
+        max_payload_bytes=max_payload_bytes,
+        timeout_seconds=timeout,
+        insecure=insecure,
+        retry=retry,
+    )
+    _emit_plugin_result(result, evidence_path=evidence_path)
+
+
+def _plugin_timeout_option() -> float:
+    return typer.Option(
+        DEFAULT_TIMEOUT_SECONDS,
+        "--timeout",
+        min=0.1,
+        max=MAX_TIMEOUT_SECONDS,
+        help="Total per-attempt HTTP timeout in seconds (bounded).",
+    )
+
+
+def _plugin_insecure_option() -> bool:
+    return typer.Option(
+        False,
+        "--insecure",
+        help="Disable TLS verification only for an explicit self-signed dev endpoint; warns on stderr.",
+    )
+
+
+def _plugin_retry_option() -> bool:
+    return typer.Option(
+        False,
+        "--retry",
+        help=(
+            "Retry once only after timeout/network failure or HTTP 502/503/504; "
+            "invoke may repeat side effects (no retry storm)."
+        ),
+    )
+
+
+def _plugin_payload_limit_option() -> int:
+    return typer.Option(
+        DEFAULT_MAX_PAYLOAD_BYTES,
+        "--max-payload-bytes",
+        min=1,
+        max=MAX_PAYLOAD_BYTES,
+        help=f"Maximum invoke JSON size in bytes (hard cap {MAX_PAYLOAD_BYTES}).",
+    )
+
+
+@plugin_app.command("status")
+def plugin_status_cmd(
+    company_id: str = typer.Option(..., "--company-id", help="Company whose installed modules are listed."),
+    timeout: float = _plugin_timeout_option(),
+    insecure: bool = _plugin_insecure_option(),
+    retry: bool = _plugin_retry_option(),
+) -> None:
+    """Read installed modules and runtime/grant status for one company."""
+    _run_plugin_action(
+        "status", company_id=company_id, timeout=timeout, insecure=insecure, retry=retry
+    )
+
+
+@plugin_app.command("capabilities")
+def plugin_capabilities_cmd(
+    company_id: str = typer.Option(..., "--company-id", help="Company whose effective grants/quotas are read."),
+    timeout: float = _plugin_timeout_option(),
+    insecure: bool = _plugin_insecure_option(),
+    retry: bool = _plugin_retry_option(),
+) -> None:
+    """Read effective grants/quotas; missing quotas produce incomplete evidence and non-zero exit."""
+    _run_plugin_action(
+        "capabilities", company_id=company_id, timeout=timeout, insecure=insecure, retry=retry
+    )
+
+
+@plugin_app.command("invoke")
+def plugin_invoke_cmd(
+    operation: str = typer.Option(
+        ...,
+        "--operation",
+        "--capability",
+        help="Closed typed operation, for example cache.get, docs.query, jobs.get or health.",
+    ),
+    payload: Path = typer.Option(..., "--payload", help="UTF-8 JSON object file; never a raw argv payload."),
+    job_id: str | None = typer.Option(None, "--job-id", help="Typed path id for jobs.get/jobs.cancel."),
+    max_payload_bytes: int = _plugin_payload_limit_option(),
+    timeout: float = _plugin_timeout_option(),
+    insecure: bool = _plugin_insecure_option(),
+    retry: bool = _plugin_retry_option(),
+) -> None:
+    """Invoke a closed typed capability with a bounded JSON payload from a file."""
+    _run_plugin_action(
+        "invoke",
+        operation=operation,
+        payload=payload,
+        job_id=job_id,
+        max_payload_bytes=max_payload_bytes,
+        timeout=timeout,
+        insecure=insecure,
+        retry=retry,
+    )
+
+
+@plugin_app.command("evidence")
+def plugin_evidence_cmd(
+    action: str = typer.Argument(..., help="Acceptance action: status, capabilities or invoke."),
+    output: Path = typer.Option(
+        ...,
+        "--output",
+        "-o",
+        help="Exact external JSON evidence file; repository docs and missing parent dirs are rejected.",
+    ),
+    company_id: str | None = typer.Option(None, "--company-id", help="Required for status/capabilities."),
+    operation: str | None = typer.Option(
+        None, "--operation", "--capability", help="Required for invoke; closed typed operation."
+    ),
+    payload: Path | None = typer.Option(None, "--payload", help="Required for invoke: bounded JSON object file."),
+    job_id: str | None = typer.Option(None, "--job-id", help="Typed path id for jobs.get/jobs.cancel."),
+    max_payload_bytes: int = _plugin_payload_limit_option(),
+    timeout: float = _plugin_timeout_option(),
+    insecure: bool = _plugin_insecure_option(),
+    retry: bool = _plugin_retry_option(),
+) -> None:
+    """Write sanitised request/response evidence even for failed or incomplete acceptance."""
+    _run_plugin_action(
+        action,
+        company_id=company_id,
+        operation=operation,
+        payload=payload,
+        job_id=job_id,
+        max_payload_bytes=max_payload_bytes,
+        timeout=timeout,
+        insecure=insecure,
+        retry=retry,
+        evidence_path=output,
+    )
 
 
 if __name__ == "__main__":

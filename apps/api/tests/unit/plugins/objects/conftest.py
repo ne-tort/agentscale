@@ -127,6 +127,9 @@ class FakePresigner:
     async def presign_put(self, *, bucket: str, key: str, ttl_seconds: int) -> str:
         return self._sign("put", bucket, key, ttl_seconds)
 
+    async def presign_head(self, *, bucket: str, key: str, ttl_seconds: int) -> str:
+        return self._sign("head", bucket, key, ttl_seconds)
+
     def _sign(self, method: str, bucket: str, key: str, ttl_seconds: int) -> str:
         self.calls.append(
             {"method": method, "bucket": bucket, "key": key, "ttl_seconds": ttl_seconds}
@@ -135,7 +138,15 @@ class FakePresigner:
             raise self.error
         if self.empty_url:
             return ""
-        return f"https://minio:9000/{bucket}/{key}?X-Amz-Expires={ttl_seconds}"
+        return (
+            f"https://minio:9000/{bucket}/{key}"
+            "?X-Amz-Algorithm=AWS4-HMAC-SHA256"
+            "&X-Amz-Credential=fake-presigner%2F20260101%2Fus-east-1%2Fs3%2Faws4_request"
+            "&X-Amz-Date=20260101T000000Z"
+            f"&X-Amz-Expires={ttl_seconds}"
+            "&X-Amz-SignedHeaders=host"
+            f"&X-Amz-Signature={'ab' * 32}"
+        )
 
 
 def build_store(

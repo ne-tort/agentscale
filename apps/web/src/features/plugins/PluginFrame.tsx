@@ -7,7 +7,15 @@ import {
   toPluginFrameError,
   type PluginErrorCode,
 } from "./errors";
-import { createPluginChannel, OPAQUE_ORIGIN, type PluginChannel, type PluginChannelFactory } from "./rpc";
+import { buildPluginShellHandoff, resolvePluginShellOrigin } from "./shellHandoff";
+import {
+  createPluginChannel,
+  OPAQUE_ORIGIN,
+  type PluginChannel,
+  type PluginChannelFactory,
+  type PluginRequestContext,
+  type PluginRequestHandler,
+} from "./rpc";
 export type { PluginChannelFactory } from "./rpc";
 
 /**
@@ -90,7 +98,16 @@ export interface PluginFrameProps extends Pick<IframeHTMLAttributes<HTMLIFrameEl
   readonly pluginId: string;
   readonly companyId: string;
   readonly version: string;
+  /** Registry identity обязательна: без digest канал не создаётся. */
+  readonly artifactDigest: string;
+  readonly capabilities?: readonly string[];
+  readonly scope?: PluginRequestContext;
+  readonly grantExpiresAt?: string;
+  readonly grantTtlMs?: number;
+  readonly onRequest?: PluginRequestHandler;
   readonly src: string;
+  /** Exact origin from the server bootstrap DTO; never Host/window.location/query. */
+  readonly shellOrigin?: string;
   /** Явное исключение v4: публичная страница не требует сессии в UI-логике. */
   readonly publicPage?: boolean;
   readonly expectedOrigin?: string;
@@ -129,8 +146,17 @@ export function PluginFrame(props: PluginFrameProps) {
 
   const channelFactoryRef = useRef(props.channelFactory);
   channelFactoryRef.current = props.channelFactory;
+  const onRequestRef = useRef(props.onRequest);
+  onRequestRef.current = props.onRequest;
 
-  const { pluginId, version, src, publicPage = false, timeoutMs, expectedOrigin } = props;
+  const {
+    pluginId, companyId, version, artifactDigest, src, shellOrigin, publicPage = false,
+    timeoutMs, grantTtlMs, grantExpiresAt, expectedOrigin,
+  } = props;
+  const capabilities = props.capabilities ?? [];
+  const scope = props.scope ?? { company_id: companyId };
+  const capabilitiesKey = capabilities.join("|");
+  const scopeKey = JSON.stringify(scope);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,33 +170,64 @@ export function PluginFrame(props: PluginFrameProps) {
 
     // Пока интеграция не подтвердила grant, канал не создаётся: пустой `src`
     // означает «данных нет» (fail-closed), а не «грузим что попало».
-    if (!src) return undefined;
+    if (!src) {
+      frame.removeAttribute("name");
+      return undefined;
+    }
 
+    let handoffName: string | undefined;
     let srcError: PluginFrameError | undefined;
-    try { assertSafeSrc(src); }
-    catch (error) { srcError = toPluginFrameError(error, "unsafeSrc"); }
+    try {
+      assertSafeSrc(src);
+      if (shellOrigin !== undefined) {
+        const canonicalShell = resolvePluginShellOrigin(shellOrigin);
+        if (new URL(src).origin === canonicalShell) {
+          throw new PluginFrameError("originMismatch", "plugin_static_origin_is_shell");
+        }
+        handoffName = buildPluginShellHandoff({
+          shellOrigin: canonicalShell,
+          pluginId,
+          manifestVersion: version,
+          artifactDigest,
+        });
+      }
+    } catch (error) { srcError = toPluginFrameError(error, "unsafeSrc"); }
     if (srcError) {
       frame.removeAttribute("src");
+      frame.removeAttribute("name");
       setErrorCode(srcError.code);
       setPhase(srcError.code === "notConnected" ? "notConnected" : "error");
       try { onErrorRef.current?.(srcError); } catch { /* Внешний обработчик не влияет на отказ. */ }
       return undefined;
     }
 
-    frame.setAttribute("src", src);
+    // A previous dispose/fatal error blocks via srcdoc. Explicit retry is the
+    // only path that clears it and creates a fresh nonce/instance channel.
+    frame.removeAttribute("srcdoc");
+    delete frame.dataset.pluginBlocked;
     const targetOrigin = expectedOrigin ?? expectedPluginOrigin(src);
     let channel: PluginChannel;
+    let failureReported = false;
     try {
       const channelOptions = {
         pluginId,
         version,
+        artifactDigest,
+        capabilities,
+        scope,
+        ...(grantExpiresAt ? { grantExpiresAt } : {}),
+        ...(grantTtlMs !== undefined ? { grantTtlMs } : {}),
         timeoutMs,
+        ...(onRequestRef.current ? {
+          onRequest: (request: Parameters<PluginRequestHandler>[0]) => onRequestRef.current!(request),
+        } : {}),
         onReady: () => {
           if (cancelled) return;
           setPhase("ready");
           try { onReadyRef.current?.(); } catch { /* ignore */ }
         },
         onError: (cause: PluginFrameError) => {
+          failureReported = true;
           if (cancelled) return;
           setErrorCode(cause.code);
           setPhase("error");
@@ -190,10 +247,17 @@ export function PluginFrame(props: PluginFrameProps) {
       try { onErrorRef.current?.(frameError); } catch { /* ignore */ }
       return undefined;
     }
+    // Channel/load listener exists BEFORE navigation starts. The first real
+    // plugin load is therefore the only event that can trigger host.ready.
+    // The bounded server-derived DTO is installed before src; it is not a token,
+    // a client header, signed-HTML mutation, or a replacement for RPC validation.
+    if (handoffName) frame.name = handoffName;
+    else frame.removeAttribute("name");
+    frame.setAttribute("src", src);
     channelRef.current = channel;
     void channel.handshake().catch((error: unknown) => {
       // `dispose()` при cleanup тоже реджектит handshake — это не ошибка UI.
-      if (cancelled) return;
+      if (cancelled || failureReported) return;
       const frameError = toPluginFrameError(error);
       setErrorCode(frameError.code);
       setPhase("error");
@@ -205,7 +269,10 @@ export function PluginFrame(props: PluginFrameProps) {
       channel.dispose();
       if (channelRef.current === channel) channelRef.current = null;
     };
-  }, [pluginId, version, src, timeoutMs, expectedOrigin, attempt]);
+  }, [
+    pluginId, companyId, version, artifactDigest, src, shellOrigin, timeoutMs, grantTtlMs,
+    grantExpiresAt, expectedOrigin, capabilitiesKey, scopeKey, attempt,
+  ]);
 
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
 
@@ -221,8 +288,8 @@ export function PluginFrame(props: PluginFrameProps) {
   return <section
     className={props.className ?? "plugin-frame"}
     data-plugin-phase={phase}
-    data-plugin-company={props.companyId}
     data-plugin-public={publicPage ? "true" : "false"}
+    data-plugin-company={props.companyId}
     aria-busy={phase === "loading"}
   >
     {publicPage && <p className="plugin-frame__notice" role="status">{t("plugins.publicPage")}</p>}
@@ -236,6 +303,7 @@ export function PluginFrame(props: PluginFrameProps) {
 
     <iframe
       ref={frameRef}
+      data-plugin-public={publicPage ? "true" : "false"}
       sandbox={PLUGIN_SANDBOX}
       referrerPolicy="no-referrer"
       {...credentialless}

@@ -1,0 +1,4 @@
+........................................................................ [ 71%]
+.............................                                            [100%]
+- generated xml file: C:\Temp\plugin-k8s-fix-artifacts-bd5b14e08a76\unit-targeted-junit.xml -
+101 passed in 0.50s

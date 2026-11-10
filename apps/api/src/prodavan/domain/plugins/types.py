@@ -17,6 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+import json
+import math
 import re
 from typing import Mapping
 
@@ -112,8 +114,134 @@ SEMVER_PATTERN: re.Pattern[str] = re.compile(
 ARTIFACT_DIGEST_PATTERN: re.Pattern[str] = re.compile(r"^sha256:[0-9a-f]{64}$")
 EGRESS_REF_PATTERN: re.Pattern[str] = re.compile(r"^grant:[A-Za-z0-9_.:/-]+$")
 PATH_PATTERN: re.Pattern[str] = re.compile(r"^/[A-Za-z0-9._/-]*$")
+# Public pages allow exactly '/', but reject empty path segments and keep the
+# same traversal/URI restrictions as other absolute plugin paths.
+PUBLIC_PAGE_PATTERN: re.Pattern[str] = re.compile(r"^(?!.*//)/[A-Za-z0-9._/-]*$")
 RELATIVE_PATH_PATTERN: re.Pattern[str] = re.compile(r"^[A-Za-z0-9._/-]+$")
 PROTOCOL_VERSION: str = "plugin-rpc/1"
+PLUGIN_CAPABILITY_ID_PATTERN: re.Pattern[str] = re.compile(r"^[a-z][a-z0-9_-]{1,63}(\.[a-z][a-z0-9_-]{1,63})?$")
+PLUGIN_CAPABILITY_VERSION_PATTERN: re.Pattern[str] = re.compile(r"^[0-9]+\.[0-9]+$")
+PLUGIN_OPERATION_PATTERN: re.Pattern[str] = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+PLUGIN_RPC_METHODS: frozenset[str] = frozenset({"GET", "POST"})
+MCP_SERVER_ID_PATTERN: re.Pattern[str] = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+MCP_TOOL_NAME_PATTERN: re.Pattern[str] = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+POD_SCOPE_PATTERN: re.Pattern[str] = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
+POD_MAX_ALLOWLIST = 256
+POD_SCOPE_MAX_LENGTH = 256
+SECRET_DELIVERY_MODE = "k8s_secret"
+SECRET_DELIVERY_MAX_ALLOWLIST = 256
+SECRET_REF_MAX_LENGTH = 512
+SECRET_REF_PATTERN: re.Pattern[str] = re.compile(
+    r"^(?:vault|file)://[A-Za-z0-9][A-Za-z0-9._-]*"
+    r"(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"
+)
+MCP_PROPERTY_NAME_PATTERN: re.Pattern[str] = MCP_TOOL_NAME_PATTERN
+MCP_SCHEMA_TYPES: frozenset[str] = frozenset(
+    {"object", "array", "string", "number", "integer", "boolean", "null"}
+)
+MCP_SCHEMA_FIELDS: frozenset[str] = frozenset({
+    "type", "title", "description", "properties", "required", "additionalProperties",
+    "items", "minProperties", "maxProperties", "minItems", "maxItems", "uniqueItems",
+    "minLength", "maxLength", "pattern", "minimum", "maximum", "exclusiveMinimum",
+    "exclusiveMaximum", "enum", "const",
+})
+MCP_FORBIDDEN_DECLARATION_FIELDS: frozenset[str] = frozenset({
+    "command", "script", "handler", "executable", "entrypoint", "endpoint", "url", "uri",
+    "env", "secret", "secrets", "token", "access_token", "session_token", "webhook_secret",
+    "password", "api_key", "private_key", "credentials", "authorization", "dsn",
+})
+MCP_UNSAFE_TEXT_PATTERN: re.Pattern[str] = re.compile(
+    r"(?:[a-z][a-z0-9+.-]*://|\bwww\.|-----BEGIN [A-Z ]*PRIVATE KEY-----|"
+    r"\b(?:password|secret|token|api_key|private_key|dsn)\s*[:=])",
+    re.IGNORECASE,
+)
+MCP_MAX_SERVERS = 256
+MCP_MAX_TOOLS_PER_SERVER = 64
+MCP_MAX_DESCRIPTION_LENGTH = 1024
+MCP_MAX_SCHEMA_PROPERTIES = 64
+MCP_MAX_SCHEMA_DEPTH = 8
+MCP_MAX_JSON_DEPTH = 16
+MCP_MAX_SCHEMA_NODES = 1024
+MCP_MAX_SCHEMA_BYTES = 16 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class RpcOperationDeclaration:
+    """Одна объявленная plugin RPC-операция (маршрут broker → plugin backend).
+
+    ``capability`` — типизированный id/version, а НЕ свободная строка: broker и
+    bootstrap доверяют только операциям из подписанного manifest. ``public``
+    разрешает вызов только для route_path из ``public_pages``; приватный UI видит
+    все операции.
+    """
+
+    capability_id: str
+    capability_version: str
+    operation: str
+    http_method: str
+    backend_path: str
+    public: bool = False
+
+    @property
+    def capability(self) -> str:
+        return f"{self.capability_id}@{self.capability_version}"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.capability_id, str) or not PLUGIN_CAPABILITY_ID_PATTERN.fullmatch(self.capability_id):
+            raise ValueError("rpc operation capability id is invalid")
+        if not isinstance(self.capability_version, str) or not PLUGIN_CAPABILITY_VERSION_PATTERN.fullmatch(self.capability_version):
+            raise ValueError("rpc operation capability version must be '<major>.<minor>'")
+        if not isinstance(self.operation, str) or not PLUGIN_OPERATION_PATTERN.fullmatch(self.operation):
+            raise ValueError("rpc operation name is invalid")
+        if not isinstance(self.http_method, str) or self.http_method not in PLUGIN_RPC_METHODS:
+            raise ValueError("rpc operation http method must be GET or POST")
+        _validate_absolute_path(self.backend_path, field_name="rpc_operations.backend_path")
+        if not self.backend_path.startswith("/api/"):
+            raise ValueError("rpc operation backend_path must stay under /api/")
+        if not isinstance(self.public, bool):
+            raise ValueError("rpc operation public must be a boolean")
+
+
+@dataclass(frozen=True, slots=True)
+class PluginRpcOperations:
+    """Неизменяемый реестр операций; дубликаты запрещены fail-closed."""
+
+    operations: tuple[RpcOperationDeclaration, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.operations, tuple):
+            raise ValueError("rpc operations must be a tuple")
+        keys = [
+            (item.capability_id, item.capability_version, item.operation)
+            for item in self.operations
+        ]
+        if len(set(keys)) != len(keys):
+            raise ValueError("rpc operations must not contain duplicate capability/operation")
+        paths = [item.backend_path for item in self.operations]
+        if len(set(paths)) != len(paths):
+            raise ValueError("rpc operations must not reuse the same backend_path")
+
+    def resolve(
+        self,
+        *,
+        capability_id: str,
+        capability_version: str,
+        operation: str,
+        public: bool,
+    ) -> RpcOperationDeclaration | None:
+        for item in self.operations:
+            if (
+                item.capability_id == capability_id
+                and item.capability_version == capability_version
+                and item.operation == operation
+            ):
+                if public and not item.public:
+                    return None
+                return item
+        return None
+
+    def public_operations(self) -> tuple[RpcOperationDeclaration, ...]:
+        return tuple(item for item in self.operations if item.public)
 
 SELF_REFERENCE_FIELDS: frozenset[str] = frozenset({"artifact_digest", "signature"})
 """Поля, запрещённые в манифесте: подписываемый документ не может нести свой digest/подпись."""
@@ -140,6 +268,143 @@ def _validate_absolute_path(value: str, *, field_name: str) -> None:
     """Абсолютный URL-путь без выхода наверх."""
     if not isinstance(value, str) or not PATH_PATTERN.fullmatch(value) or ".." in value:
         raise ValueError(f"{field_name} must be an absolute path without '..'")
+
+
+def _validate_mcp_text(value: object, *, field_name: str, max_length: int) -> None:
+    if (
+        not isinstance(value, str)
+        or len(value) > max_length
+        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+        or MCP_UNSAFE_TEXT_PATTERN.search(value)
+    ):
+        raise ValueError(f"{field_name} contains unsafe or oversized text")
+
+
+def _validate_mcp_scalar(value: object, *, field_name: str) -> None:
+    if value is None or isinstance(value, (bool, int)):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{field_name} must contain finite JSON numbers")
+        return
+    if isinstance(value, str):
+        _validate_mcp_text(value, field_name=field_name, max_length=1024)
+        return
+    raise ValueError(f"{field_name} must contain only scalar JSON values")
+
+
+def _strict_mcp_json(value: object) -> object:
+    """Скопировать JSON-only schema с теми же resource bounds, что discovery."""
+    nodes = 0
+
+    def walk(item: object, depth: int) -> object:
+        nonlocal nodes
+        nodes += 1
+        if nodes > MCP_MAX_SCHEMA_NODES or depth > MCP_MAX_JSON_DEPTH:
+            raise ValueError("mcp input_schema exceeds JSON depth/node limits")
+        if item is None or isinstance(item, (str, bool, int)):
+            return item
+        if isinstance(item, float):
+            if not math.isfinite(item):
+                raise ValueError("mcp input_schema numbers must be finite")
+            return item
+        if isinstance(item, Mapping):
+            result: dict[str, object] = {}
+            for key, child in item.items():
+                if not isinstance(key, str):
+                    raise ValueError("mcp input_schema keys must be strings")
+                result[key] = walk(child, depth + 1)
+            return result
+        if isinstance(item, (list, tuple)):
+            return [walk(child, depth + 1) for child in item]
+        raise ValueError("mcp input_schema must contain JSON values only")
+
+    return walk(value, 0)
+
+
+def _validate_mcp_schema_node(value: object, *, depth: int, field_name: str) -> None:
+    if depth >= MCP_MAX_SCHEMA_DEPTH or not isinstance(value, Mapping):
+        raise ValueError(f"{field_name} exceeds schema depth limits")
+    unknown = set(value) - MCP_SCHEMA_FIELDS
+    if unknown:
+        raise ValueError(f"{field_name} contains unsupported or executable schema fields")
+    schema_type = value.get("type")
+    if not isinstance(schema_type, str) or schema_type not in MCP_SCHEMA_TYPES:
+        raise ValueError(f"{field_name}.type is invalid")
+
+    for key, maximum in (
+        ("minLength", 4096), ("maxLength", 4096),
+        ("minItems", 1024), ("maxItems", 1024),
+        ("minProperties", 64), ("maxProperties", 64),
+    ):
+        if key in value and (
+            not isinstance(value[key], int) or isinstance(value[key], bool)
+            or not 0 <= value[key] <= maximum
+        ):
+            raise ValueError(f"{field_name}.{key} is outside its bounds")
+    for key in ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"):
+        if key in value and (
+            not isinstance(value[key], (int, float)) or isinstance(value[key], bool)
+            or (isinstance(value[key], float) and not math.isfinite(value[key]))
+        ):
+            raise ValueError(f"{field_name}.{key} must be a finite number")
+    for key in ("additionalProperties", "uniqueItems"):
+        if key in value and not isinstance(value[key], bool):
+            raise ValueError(f"{field_name}.{key} must be boolean")
+    for key, maximum in (("title", 128), ("description", 512), ("pattern", 256)):
+        if key in value:
+            _validate_mcp_text(value[key], field_name=f"{field_name}.{key}", max_length=maximum)
+
+    required = value.get("required")
+    if required is not None:
+        if not isinstance(required, list) or len(required) > MCP_MAX_SCHEMA_PROPERTIES:
+            raise ValueError(f"{field_name}.required exceeds its bounds")
+        if any(
+            not isinstance(item, str) or not MCP_PROPERTY_NAME_PATTERN.fullmatch(item)
+            or item in MCP_FORBIDDEN_DECLARATION_FIELDS
+            for item in required
+        ) or len(set(required)) != len(required):
+            raise ValueError(f"{field_name}.required contains invalid or duplicate names")
+
+    properties = value.get("properties")
+    if properties is not None:
+        if not isinstance(properties, Mapping) or len(properties) > MCP_MAX_SCHEMA_PROPERTIES:
+            raise ValueError(f"{field_name}.properties exceeds its bounds")
+        for name, child in properties.items():
+            if (
+                not MCP_PROPERTY_NAME_PATTERN.fullmatch(name)
+                or name in MCP_FORBIDDEN_DECLARATION_FIELDS
+            ):
+                raise ValueError(f"{field_name}.properties contains a forbidden name")
+            _validate_mcp_schema_node(child, depth=depth + 1, field_name=f"{field_name}.properties")
+    if "items" in value:
+        _validate_mcp_schema_node(value["items"], depth=depth + 1, field_name=f"{field_name}.items")
+
+    enum = value.get("enum")
+    if enum is not None:
+        if not isinstance(enum, list) or not 1 <= len(enum) <= 64:
+            raise ValueError(f"{field_name}.enum exceeds its bounds")
+        for item in enum:
+            _validate_mcp_scalar(item, field_name=f"{field_name}.enum")
+        if len({json.dumps(item, sort_keys=True) for item in enum}) != len(enum):
+            raise ValueError(f"{field_name}.enum must not contain duplicates")
+    if "const" in value:
+        _validate_mcp_scalar(value["const"], field_name=f"{field_name}.const")
+
+
+def _validate_mcp_input_schema(value: object) -> None:
+    if not isinstance(value, Mapping) or value.get("type") != "object":
+        raise ValueError("mcp input_schema must be an object schema")
+    normalized = _strict_mcp_json(value)
+    try:
+        encoded = json.dumps(
+            normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError):
+        raise ValueError("mcp input_schema is not canonicalizable JSON") from None
+    if len(encoded) > MCP_MAX_SCHEMA_BYTES:
+        raise ValueError("mcp input_schema exceeds its byte limit")
+    _validate_mcp_schema_node(normalized, depth=0, field_name="mcp input_schema")
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +446,117 @@ class MigrationsDeclaration:
 
 
 @dataclass(frozen=True, slots=True)
+class McpToolDeclaration:
+    """Data-only MCP tool из подписанного manifest, без handler/endpoint/secrets."""
+
+    name: str
+    description: str
+    version: str
+    input_schema: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not MCP_TOOL_NAME_PATTERN.fullmatch(self.name):
+            raise ValueError("mcp tool name is invalid")
+        if (
+            not isinstance(self.description, str) or not self.description
+            or self.description != self.description.strip()
+        ):
+            raise ValueError("mcp tool description must be non-empty and trimmed")
+        _validate_mcp_text(
+            self.description, field_name="mcp tool description", max_length=MCP_MAX_DESCRIPTION_LENGTH,
+        )
+        _validate_semver(self.version, field_name="mcp tool version")
+        _validate_mcp_input_schema(self.input_schema)
+
+
+@dataclass(frozen=True, slots=True)
+class McpServerDeclaration:
+    """Логический server_id и уникальные tool declarations, не runtime transport."""
+
+    server_id: str
+    tools: tuple[McpToolDeclaration, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.server_id, str) or not MCP_SERVER_ID_PATTERN.fullmatch(self.server_id):
+            raise ValueError("mcp server_id is invalid")
+        if (
+            not isinstance(self.tools, tuple)
+            or not 1 <= len(self.tools) <= MCP_MAX_TOOLS_PER_SERVER
+            or any(not isinstance(item, McpToolDeclaration) for item in self.tools)
+        ):
+            raise ValueError("mcp server tools must be a bounded non-empty tuple")
+        names = [item.name for item in self.tools]
+        if len(set(names)) != len(names):
+            raise ValueError("mcp tool names must be unique per server")
+
+
+@dataclass(frozen=True, slots=True)
+class PodAllowlistEntry:
+    """Exact instance/project/job scope без pod id, wildcard, command или args."""
+
+    plugin_instance_id: str
+    project_id: str
+    job_id: str
+
+    def __post_init__(self) -> None:
+        for field_name in ("plugin_instance_id", "project_id", "job_id"):
+            value = getattr(self, field_name)
+            if (
+                not isinstance(value, str)
+                or len(value) > POD_SCOPE_MAX_LENGTH
+                or not POD_SCOPE_PATTERN.fullmatch(value)
+            ):
+                raise ValueError(f"pods.allowlist.{field_name} must be an exact bounded identifier")
+
+
+@dataclass(frozen=True, slots=True)
+class PodsDeclaration:
+    """Signed non-empty exact allowlist; omitted declaration grants no pod access."""
+
+    allowlist: tuple[PodAllowlistEntry, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.allowlist, tuple)
+            or not 1 <= len(self.allowlist) <= POD_MAX_ALLOWLIST
+            or any(not isinstance(item, PodAllowlistEntry) for item in self.allowlist)
+        ):
+            raise ValueError("pods.allowlist must contain 1..256 typed entries")
+        keys = [
+            (item.plugin_instance_id, item.project_id, item.job_id)
+            for item in self.allowlist
+        ]
+        if len(set(keys)) != len(keys):
+            raise ValueError("pods.allowlist must not contain duplicate entries")
+
+
+@dataclass(frozen=True, slots=True)
+class SecretDeliveryDeclaration:
+    """References only: no delivery Secret names/data и no plaintext values."""
+
+    mode: str
+    allowlist: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.mode, str) or self.mode != SECRET_DELIVERY_MODE:
+            raise ValueError("secret_delivery.mode must be k8s_secret")
+        if (
+            not isinstance(self.allowlist, tuple)
+            or not 1 <= len(self.allowlist) <= SECRET_DELIVERY_MAX_ALLOWLIST
+        ):
+            raise ValueError("secret_delivery.allowlist must contain 1..256 secret refs")
+        for ref in self.allowlist:
+            if (
+                not isinstance(ref, str)
+                or len(ref) > SECRET_REF_MAX_LENGTH
+                or not SECRET_REF_PATTERN.fullmatch(ref)
+            ):
+                raise ValueError("secret_delivery.allowlist must contain canonical vault:// or file:// refs")
+        if len(set(self.allowlist)) != len(self.allowlist):
+            raise ValueError("secret_delivery.allowlist must not contain duplicate refs")
+
+
+@dataclass(frozen=True, slots=True)
 class PluginManifest:
     """Манифест плагина v1 (подписан как OCI annotation).
 
@@ -199,6 +575,10 @@ class PluginManifest:
     public_pages: tuple[str, ...]
     webhooks: tuple[str, ...]
     min_platform_version: str
+    rpc_operations: PluginRpcOperations = PluginRpcOperations()
+    mcp_servers: tuple[McpServerDeclaration, ...] = ()
+    pods: PodsDeclaration | None = None
+    secret_delivery: SecretDeliveryDeclaration | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.plugin_id, str) or not PLUGIN_ID_PATTERN.fullmatch(self.plugin_id):
@@ -229,11 +609,36 @@ class PluginManifest:
             for value in values:
                 _validate_absolute_path(value, field_name=field_name)
         _validate_semver(self.min_platform_version, field_name="min_platform_version")
+        if not isinstance(self.rpc_operations, PluginRpcOperations):
+            raise ValueError("rpc_operations must be PluginRpcOperations")
+        if (
+            not isinstance(self.mcp_servers, tuple) or len(self.mcp_servers) > MCP_MAX_SERVERS
+            or any(not isinstance(item, McpServerDeclaration) for item in self.mcp_servers)
+        ):
+            raise ValueError("mcp_servers must be a bounded tuple of declarations")
+        server_ids = [item.server_id for item in self.mcp_servers]
+        if len(set(server_ids)) != len(server_ids):
+            raise ValueError("mcp server_id values must be unique")
+        if self.pods is not None and not isinstance(self.pods, PodsDeclaration):
+            raise ValueError("pods must be a PodsDeclaration or None")
+        if self.secret_delivery is not None and not isinstance(
+            self.secret_delivery, SecretDeliveryDeclaration
+        ):
+            raise ValueError("secret_delivery must be a SecretDeliveryDeclaration or None")
 
     @property
     def requested_capabilities(self) -> frozenset[str]:
-        """Запрошенные capability (для compatibility gate до PUBLISHED)."""
+        """Запрошенные capability (для compatibility gate до PUBLISHED).
+
+        RPC-операции здесь НЕ подмешиваются: их id/version не входят в infra
+        allowlist grant'а. Наличие действующего grant'а проверяется по нему,
+        иначе существующий grant стал бы «недостаточным» от одного объявления.
+        """
         return frozenset(item.value for item in self.capabilities)
+
+    @property
+    def rpc_capability_ids(self) -> frozenset[str]:
+        return frozenset(item.capability_id for item in self.rpc_operations.operations)
 
 
 @dataclass(frozen=True, slots=True)
@@ -526,7 +931,9 @@ __all__ = [
     "PluginInstance",
     "PluginInstanceStatus",
     "PluginManifest",
+    "PluginRpcOperations",
     "QuotaRef",
+    "RpcOperationDeclaration",
     "RegistryOutcome",
     "RegistryResult",
 ]

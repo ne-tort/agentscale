@@ -114,12 +114,8 @@ def _statements(company_id: str, plugin_id: str) -> list[dict[str, Any]]:
             "Effect": "Allow",
             "Action": [a for a in OBJECT_ACTIONS if a not in _BUCKET_ACTIONS],
             "Resource": [_object_arn(company_id, plugin_id)],
-            # Дополнительная страховка на случай, если реализация хранилища
-            # трактует ARN-object шире, чем префикс: ключ всё равно обязан
-            # начинаться с module-<plugin>/.
-            "Condition": {
-                "StringLike": {_PREFIX_CONDITION_KEY: [f"{prefix}*"]}
-            },
+            # s3:prefix допустим только для ListBucket выше. Object-level
+            # действия ограничены самим exact tenant/module prefix ARN.
         },
     ]
 
@@ -136,8 +132,7 @@ def bucket_policy(company_id: str, plugin_id: str) -> dict[str, Any]:
              "Resource": ["arn:aws:s3:::tenant-<co>"],
              "Condition": {"StringLike": {"s3:prefix": ["module-<p>/*"]}}},
             {"Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
-             "Resource": ["arn:aws:s3:::tenant-<co>/module-<p>/*"],
-             "Condition": {...}}
+             "Resource": ["arn:aws:s3:::tenant-<co>/module-<p>/*"]}
           ]
         }
 

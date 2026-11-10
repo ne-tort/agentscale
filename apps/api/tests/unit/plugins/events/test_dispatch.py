@@ -279,6 +279,9 @@ async def test_same_source_event_id_in_another_subscription_is_not_a_duplicate()
     h = build_harness(records=[record_of(event, offset=1), record_of(event, offset=2)],
                       subscription=sub_a)
     await h.dispatcher.consume(sub_a)
+    # FakeSubscriptions хранит одну active запись; sub_b тоже должен быть
+    # зарегистрирован до consume, иначе strict identity guard корректно откажет.
+    h.subscriptions.subscription = sub_b
     await h.dispatcher.consume(sub_b)
     assert len(h.handler.calls) == 2
     assert h.idempotency.seen_keys == {
@@ -460,17 +463,33 @@ async def test_unknown_subscription_fails_closed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_malformed_record_seeks_back_and_raises() -> None:
-    """Битая запись -> seek(offset), commit нет (не теряем позицию)."""
+async def test_malformed_record_without_raw_dlq_fails_closed() -> None:
+    """Нет durable RawDlqPort -> seek + MISSING_DEPENDENCY, не in-memory fallback."""
+
+    from prodavan.application.plugins.events.dispatch import PluginEventDispatcher
 
     from .conftest import FakeRecord
 
     h = build_harness(records=[FakeRecord(value={"event_id": "only"}, offset=12)])
+    dispatcher = PluginEventDispatcher(
+        producer=h.producer,
+        consumer=h.consumer,
+        topic_admin=h.admin,
+        dlq=h.dlq,
+        subscriptions=h.subscriptions,
+        published_events=h.published,
+        idempotency=h.idempotency,
+        delivery_claims=h.claims,
+        audit=h.audit,
+        handler=h.handler,
+        wake_hook=h.wake,
+    )
     with pytest.raises(PluginEventError) as exc:
-        await h.dispatcher.consume(make_subscription())
-    assert exc.value.code is PluginEventErrorCode.INVALID_EVENT
+        await dispatcher.consume(make_subscription())
+    assert exc.value.code is PluginEventErrorCode.MISSING_DEPENDENCY
     assert h.consumer.seeks == [12]
     assert h.consumer.commits == []
+    assert h.handler.calls == []
 
 
 # ---------------------------------------------------------------------------

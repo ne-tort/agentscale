@@ -1,37 +1,24 @@
-"""Карта переноса ``mod_equipment`` по bounded context'ам (F10, §8 этап 4).
+"""Historical data-only bounded-context inventory с текущими safety boundaries.
 
-**Это ТОЛЬКО данные.** Модуль ничего не импортирует из legacy-кода, ничего не
-вызывает и не меняет существующие сервисы/страницы. Имена в ``legacy_entrypoints``
-получены чтением (glob/grep) реальных файлов:
+Имена полей, values и порядок records сохранены для поведенческой совместимости.
+Модуль ничего не импортирует из legacy services, не вызывает Alembic, не меняет
+флаги, таблицы, routes или call flow. ``RemovalStep`` и его ``dropped_*`` поля —
+inert historical metadata, а не план destructive migration.
 
-* ``apps/api/src/prodavan/application/modules/equipment_*.py`` и
-  ``application/modules/module_*.py``;
-* ``apps/api/src/prodavan/api/v1/b2b.py``, ``application/b2b/importer.py``,
-  ``application/tenders/workflow.py``, ``application/mcp/prodavan_equipment_mcp/server.py``;
-* ``apps/web/src/features/equipment/**`` и ``apps/web/src/routes/pages.tsx``.
+``legacy_entrypoints`` — compatibility source references, а не deletion list.
+В частности, product upsert/seeds, ``mod_management_meta``, ``seed_rows``,
+``management_module_merge`` и bootstrap constants сохраняются для fresh/historical
+upgrades. Их присутствие в historical tuple не делает их cutover entrypoints.
 
-Порядок переноса — ровно по §8 этап 4: **offers → prices → budget → documents →
-tenders**, затем (§8 этап 6) ``mod_management`` последним. Каждый контекст
-переводится за фича-флагом ``plugin_enabled_modules[]``; старый путь просто
-выключается, **сравнивать нечего** (данные dev эфемерны, §8 / §13.1).
+``2026110802`` — dormant/not active и не активируется. Никакого runtime cutover
+или startup/deploy schema removal эти records не выполняют. Любая будущая
+destructive revision требует завершённого code-first S4, отдельного S5
+ADR/review/acceptance и создаётся заново от тогдашней current head со
+schema-only downgrade и без env guard.
 
-ЯВНАЯ ПОМЕТКА О ДАННЫХ
-======================
-Все таблицы ``module_*`` платформенной БД (``modules``,
-``module_meta_documents``, ``module_instances``,
-``module_instance_meta_documents``, ``module_instance_data_rows``,
-``module_company_grants``, ``module_cabinet_bindings``,
-``module_project_bindings``) дропаются ревизией Alembic **БЕЗ ПЕРЕНОСА
-СОДЕРЖИМОГО**. Строки ``module_instance_data_rows`` (JSONB-строки declarative-app)
-не читаются, не выгружаются, не бэкапируются, не перекладываются в таблицы плагина.
-Тестовые данные создаются заново сидом плагина (§8). Никаких dual-read/dual-write,
-snapshot, метрик парности или «недель наблюдения» — см. §13.1.
-
-Плагин владеет своей схемой ``module_<plugin_id>`` в tenant-БД компании и
-мигрирует её сам (§2, §3); это **другие** таблицы, не одноимённые legacy-таблицы
-платформенной БД. Имена совпадают только префиксом, что отражено в
-``RemovalStep.dropped_tables`` (платформенные) и ``plugin_capability`` (схема
-плагина).
+Исторические имена ``MODULE_TABLES_DROPPED_WITHOUT_DATA_TRANSFER`` и
+``DATA_TRANSFER_POLICY`` сохранены как compatibility contracts. Актуальный канон —
+code-first expand/contract A→B и отдельные S4/S5 decisions, а не старый §8 drop plan.
 """
 
 from __future__ import annotations
@@ -41,36 +28,37 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class RemovalStep:
-    """Что удаляется ревизией Alembic после переноса контекста.
+    """Inert historical removal metadata, сохранённое для compatibility.
 
-    ``alembic_revision`` — метка/слаг ревизии (конкретный id назначает родитель
-    при F11; здесь намеренно не выдумывается числовой id, чтобы не конфликтовать
-    с чужой работой). ``dropped_table_slugs`` — ``table_slug`` значения внутри
-    ``module_instance_data_rows`` для ``mod_equipment`` (реальные константы из
-    ``equipment_offers_service.py``).
+    ``alembic_revision`` — opaque legacy slug, а не active или approved revision id.
+    ``dropped_tables`` и ``dropped_table_slugs`` — historical names, а не DDL
+    instructions. Значения не вызывают Alembic и не разрешают destructive cutover.
+    Новая revision возможна только после code-first S4 и отдельного S5 review от
+    тогдашней current head; ``2026110802`` остаётся dormant/not active.
     """
 
     alembic_revision: str
     dropped_module: str
     dropped_tables: tuple[str, ...]
     dropped_table_slugs: tuple[str, ...]
-    #: Явная фиксация: содержимое НЕ переносится (§8 этап 6, §13.1).
+    #: Compatibility boolean, а не текущая data-transfer или cutover policy.
     content_transferred: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class ContextMigration:
-    """Один bounded context переноса ``mod_equipment``."""
+    """Data-only bounded-context record; не исполняемый runtime cutover."""
 
     context_id: str
-    #: Реально существующие сервисы/страницы (имена из прочитанных файлов).
+    #: Compatibility source references, не deletion list; helpers сохраняются.
     legacy_entrypoints: tuple[str, ...]
     #: Capability плагина, закрывающая контекст в его собственной tenant-схеме.
     plugin_capability: str
+    #: Inert historical metadata; не вызывает Alembic и не активирует 0802.
     removal_step: RemovalStep
 
 
-#: Все платформенные ``module_*`` таблицы declarative-app. Дропаются БЕЗ переноса.
+#: Historical compatibility name/tuple; не разрешение на DROP или runtime cutover.
 MODULE_TABLES_DROPPED_WITHOUT_DATA_TRANSFER: tuple[str, ...] = (
     "modules",
     "module_meta_documents",
@@ -82,13 +70,15 @@ MODULE_TABLES_DROPPED_WITHOUT_DATA_TRANSFER: tuple[str, ...] = (
     "module_instance_data_rows",
 )
 
-#: Текстовая фиксация политики (дублирует docstring для проверок/отчётов).
+#: Narrative-only compatibility text; operational tables/flags/call flow не меняются.
 DATA_TRANSFER_POLICY: str = (
-    "module_* таблицы дропаются ревизией Alembic без переноса содержимого; "
-    "данные dev эфемерны, создаются заново сидом плагина"
+    "0802 dormant/not active; runtime cutover и destructive revisions запрещены. "
+    "Migration-only helpers preserved for fresh/historical upgrades. Будущая "
+    "schema revision — только после code-first S4 и отдельного S5 review от "
+    "тогдашней current head, со schema-only downgrade и без env guard"
 )
 
-#: Общая страница/рантайм, общие для всех контекстов (§8 «в finale»).
+#: Compatibility source references, а не deletion/cutover entrypoints.
 SHARED_LEGACY_ENTRYPOINTS: tuple[str, ...] = (
     "apps/web/src/features/equipment/EquipmentProcurementPage.tsx::EquipmentProcurementPage",
     "apps/web/src/routes/pages.tsx::EquipmentPage",
@@ -96,7 +86,7 @@ SHARED_LEGACY_ENTRYPOINTS: tuple[str, ...] = (
 )
 
 
-# Порядок ЗАФИКСИРОВАН §8 этап 4; не переставлять.
+# Historical order сохранён для behavior compatibility, не как execution plan.
 MIGRATION_CONTEXTS: tuple[ContextMigration, ...] = (
     # ---------------------------------------------------------------- 1. offers
     ContextMigration(
@@ -212,9 +202,10 @@ MIGRATION_CONTEXTS: tuple[ContextMigration, ...] = (
             dropped_table_slugs=("tenders",),
         ),
     ),
-    # ------------------------------------------- 6. mod_management (§8 этап 6)
+    # -------------------------------------- 6. mod_management historical record
     ContextMigration(
         context_id="mod_management",
+        # Helpers ниже preserved for fresh/historical upgrades, НЕ deletion targets.
         legacy_entrypoints=(
             "application/platform/product_module_seeds.py::mod_management_meta",
             "application/platform/management_module_merge.py",
@@ -234,7 +225,7 @@ MIGRATION_CONTEXTS: tuple[ContextMigration, ...] = (
 )
 
 
-#: Порядок context_id для проверок/отчётов (§8 этап 4 → этап 6).
+#: Historical context order для behavior compatibility, не для runtime cutover.
 CONTEXT_ORDER: tuple[str, ...] = tuple(item.context_id for item in MIGRATION_CONTEXTS)
 
 

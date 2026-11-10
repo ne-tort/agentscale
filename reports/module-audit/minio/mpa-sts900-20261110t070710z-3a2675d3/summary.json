@@ -1,0 +1,48 @@
+{
+  "run_id": "mpa-sts900-20261110t070710z-3a2675d3",
+  "acceptance": true,
+  "collected": 29,
+  "passed": 29,
+  "failed": 0,
+  "errors": 0,
+  "skipped": 0,
+  "pytest_exit_code": 0,
+  "setup_error": null,
+  "targeted_units": {
+    "objects": {
+      "passed": 121,
+      "failed": 0,
+      "skipped": 0
+    },
+    "minio": {
+      "passed": 230,
+      "failed": 0,
+      "skipped": 0
+    },
+    "capabilities": {
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "junit": "C:\\Users\\qwerty\\git\\agentscale\\wt-migration\\.agents\\worktrees\\audit-plugin-modules\\reports\\module-audit\\minio\\mpa-sts900-20261110t070710z-3a2675d3\\minio-plugin-acceptance-junit.xml",
+  "console": "C:\\Users\\qwerty\\git\\agentscale\\wt-migration\\.agents\\worktrees\\audit-plugin-modules\\reports\\module-audit\\minio\\mpa-sts900-20261110t070710z-3a2675d3\\pytest-output.txt",
+  "command": "python -m pytest --confcutdir=tests/integration/minio_plugin_acceptance tests/integration/minio_plugin_acceptance -q --junitxml=/artifacts/minio-plugin-acceptance-junit.xml",
+  "pythonpath": "src",
+  "pythonutf8": "1",
+  "ambient_proxy": "explicitly empty; harness sentinel isolation retained",
+  "minio_image": "ghcr.io/ne-tort/minio:RELEASE.2024-10-02T17-50-41Z",
+  "mc_image": "ghcr.io/ne-tort/mc:RELEASE.2024-10-08T09-37-26Z",
+  "network_mode": "unique internal Docker network; no published ports; no volume",
+  "contract_migration": "STS TTL 900..3600; presign 60..3600; standard botocore validation restored; canary-only ListBucket on dedicated probe bucket and GetObject only fixed canary key; exact HTTP 403 AccessDenied/numeric accepted; missing 403/404 stays unwired; tenant unscoped List and canary access denied",
+  "removed": [
+    "minio-container",
+    "runner-container",
+    "docker-network",
+    "runner-image"
+  ],
+  "cleanup_failures": [],
+  "artifact_secret_scan_passed": true,
+  "live_production_verified": false,
+  "stop_ship": true
+}

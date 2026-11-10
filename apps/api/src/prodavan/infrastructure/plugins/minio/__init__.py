@@ -51,8 +51,8 @@
 Родитель (F11) уже добавил ``plugin-buckets-init.yaml`` +
 ``agentscale-minio-plugin-policy`` в ``base/platform/kustomization.yaml`` и
 env ``agentscale-minio-plugin-admin`` в API Deployment — имена сверены. Осталось:
-  * привязать из Secret ``agentscale-minio-plugin-presigner`` env
-    ``PLUGIN_MINIO_PRESIGN_ACCESS_KEY`` / ``PLUGIN_MINIO_PRESIGN_SECRET_KEY``;
+  * привязать admin/presigner credentials только через PLUGIN_MINIO_*_REF;
+    plaintext env переменные отклоняются конфигурацией;
   * предоставить append-only ``AuditSinkPort`` и ``QuotaAdminPort``.
     Без sink аудит отказывает (``strict=True`` в сервисе → deny) — корректное
     fail-closed поведение, а не «залогируем потом».
@@ -97,7 +97,7 @@ def build_plugin_object_store(
     Parameters
     ----------
     config:
-        Обязательная fail-closed конфигурация (``MinioPluginConfig.from_env()``).
+        Обязательная fail-closed конфигурация через SecretStore refs.
         Без admin-кредов построение невозможно — фолбэка на root нет.
     audit_sink:
         Append-only приёмник с ``append(event)`` (синхронным или async).
@@ -138,7 +138,7 @@ def build_plugin_object_store(
     if not isinstance(config, MinioPluginConfig):
         raise TypeError(
             "build_plugin_object_store требует MinioPluginConfig, "
-            "получите его через MinioPluginConfig.from_env()"
+            "получите его через MinioPluginConfig.from_secret_refs()"
         )
 
     sink = audit_sink
@@ -164,7 +164,6 @@ def build_plugin_object_store(
     sts = MinioSts(
         config=config,
         sts_client=sts_client,
-        sts_available=bool(config.sts_enabled),
         clock=clock,
     )
     audit = MinioAuditAdapter(sink=sink, clock=clock)

@@ -28,6 +28,8 @@ from prodavan.application.plugins.capabilities.contracts import (
     NetworkEgressRequest,
     NetworkHttpMethod,
     ObjectPermission,
+    ObjectPresignMethod,
+    ObjectsPresignRequest,
     ObjectsScopedCredentialsRequest,
     PodActionName,
     PodsInvokeRequest,
@@ -175,7 +177,10 @@ def test_objects_contract_never_carries_base64_bytes() -> None:
     """Объекты: только scoped credentials / ключи / digest'ы, не base64-байты (§4.3)."""
     import prodavan.application.plugins.capabilities.contracts as contracts
 
-    for name in ("ObjectsScopedCredentialsRequest", "ObjectsListRequest", "ObjectsDeleteRequest"):
+    for name in (
+        "ObjectsScopedCredentialsRequest", "ObjectsPresignRequest",
+        "ObjectsListRequest", "ObjectsDeleteRequest",
+    ):
         cls = getattr(contracts, name)
         field_names = {item.name for item in dataclasses.fields(cls)}
         assert not ({"data", "content", "bytes", "base64", "blob", "file"} & field_names), name
@@ -184,6 +189,29 @@ def test_objects_contract_never_carries_base64_bytes() -> None:
         permissions=frozenset({ObjectPermission.READ}), ttl_seconds=900, envelope=envelope(),
     )
     assert credentials.ttl_seconds == 900
+
+
+def test_objects_presign_is_exact_key_typed_operation() -> None:
+    from prodavan.application.plugins.capabilities.contracts import OPERATION_TO_CAPABILITY
+
+    request = ObjectsPresignRequest(
+        bucket="tenant-co_123", object_key="module-mod_equipment/report.bin",
+        method=ObjectPresignMethod.HEAD, ttl_seconds=60, envelope=envelope(),
+    )
+    assert request.method is ObjectPresignMethod.HEAD
+    assert OPERATION_TO_CAPABILITY["objects.presign"] == "objects"
+    assert "presign" in CAPABILITY_OPERATIONS["objects"]
+    for method in ("LIST", "DELETE", "GET"):
+        with pytest.raises(TypedContractError, match="method"):
+            ObjectsPresignRequest(
+                bucket="tenant-co_123", object_key="module-mod_equipment/report.bin",
+                method=method, ttl_seconds=60, envelope=envelope(),  # type: ignore[arg-type]
+            )
+    with pytest.raises(TypedContractError, match="ttl_seconds"):
+        ObjectsPresignRequest(
+            bucket="tenant-co_123", object_key="module-mod_equipment/report.bin",
+            method=ObjectPresignMethod.GET, ttl_seconds=3601, envelope=envelope(),
+        )
 
 
 def test_db_direct_is_not_a_gateway_capability() -> None:
@@ -275,26 +303,28 @@ def test_register_is_idempotency_guarded() -> None:
         registry.register("cache", _DummyCache())
 
 
-def test_dispatch_rejects_arbitrary_operation_string() -> None:
+@pytest.mark.asyncio
+async def test_dispatch_rejects_arbitrary_operation_string() -> None:
     """Typed dispatch не является generic: произвольная операция отклоняется."""
     from prodavan.application.plugins.capabilities.ports import dispatch
 
     with pytest.raises(UnknownCapabilityError):
-        dispatch(_DummyCache(), "cache", "execute_sql", CacheGetRequest(key="k", envelope=envelope()))
+        await dispatch(_DummyCache(), "cache", "execute_sql", CacheGetRequest(key="k", envelope=envelope()))
 
 
-def test_dispatch_accepts_dotted_and_bare_operation_forms() -> None:
+@pytest.mark.asyncio
+async def test_dispatch_accepts_dotted_and_bare_operation_forms() -> None:
     """Точечная форма (задача 04) и голая форма ведут к одному методу адаптера."""
     from prodavan.application.plugins.capabilities.contracts import CacheGetResponse
     from prodavan.application.plugins.capabilities.ports import dispatch
 
     class TypedCache(_DummyCache):
-        def get(self, request: CacheGetRequest) -> CacheGetResponse:
+        async def get(self, request: CacheGetRequest) -> CacheGetResponse:
             return CacheGetResponse(request_id=request.envelope.request_id, ok=True, digest=DIGEST)
 
     request = CacheGetRequest(key="k", envelope=envelope())
     for operation in ("cache.get", "get"):
-        response = dispatch(TypedCache(), "cache", operation, request)
+        response = await dispatch(TypedCache(), "cache", operation, request)
         assert isinstance(response, CacheGetResponse)
 
 

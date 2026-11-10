@@ -103,7 +103,9 @@ def test_plugin_platform_is_off_by_default() -> None:
     s = Settings()
     assert s.plugin_platform_enabled is False
     assert s.plugin_claims_secret == ""
+    assert s.plugin_event_signing_secret_ref == ""
     assert s.plugin_static_origin == ""
+    assert s.plugin_shell_origin == ""
     assert s.plugin_egress_mode == "none"
 
 
@@ -121,17 +123,76 @@ def test_plugin_platform_enabled_without_static_origin_fails() -> None:
         Settings(plugin_platform_enabled=True, plugin_claims_secret="s3cret")
 
 
+def test_plugin_platform_enabled_without_shell_origin_fails() -> None:
+    from prodavan.config.settings import Settings
+
+    with pytest.raises(RuntimeError, match="PLUGIN_SHELL_ORIGIN"):
+        Settings(
+            plugin_platform_enabled=True,
+            plugin_claims_secret="s3cret",
+            plugin_static_origin="https://plugins.example.dev",
+        )
+
+
+@pytest.mark.parametrize(
+    "shell_origin",
+    [
+        "http://agentscale.dev",
+        "https://*.agentscale.dev",
+        "https://agentscale.dev/path",
+        "https://agentscale.dev/?token=x",
+        "https://plugins.example.dev",
+    ],
+)
+def test_plugin_platform_shell_origin_is_exact_https_and_distinct(
+    shell_origin: str,
+) -> None:
+    from prodavan.config.settings import Settings
+
+    with pytest.raises(RuntimeError, match="PLUGIN_SHELL_ORIGIN|distinct"):
+        Settings(
+            plugin_platform_enabled=True,
+            plugin_claims_secret="s3cret",
+            plugin_static_origin="https://plugins.example.dev",
+            plugin_shell_origin=shell_origin,
+        )
+
+
 def test_plugin_platform_valid_configuration_is_accepted() -> None:
     from prodavan.config.settings import Settings
 
     s = Settings(
         plugin_platform_enabled=True,
         plugin_claims_secret="s3cret",
+        plugin_event_signing_secret_ref=(
+            "k8s-secret://agentscale-plugin-events/signing-key"
+        ),
         plugin_static_origin="https://plugin-origin.agentscale.dev",
+        plugin_shell_origin="https://agentscale.dev",
     )
     assert s.plugin_claims_ttl_seconds == 300
     assert s.plugin_claims_issuer == "agentscale-plugins"
     assert s.plugin_claims_audience == "capability-gateway"
+
+
+def test_plugin_enabled_requires_separate_event_signing_ref() -> None:
+    from prodavan.config.settings import Settings
+
+    with pytest.raises(RuntimeError, match="PLUGIN_EVENT_SIGNING_SECRET_REF"):
+        Settings(
+            plugin_platform_enabled=True,
+            plugin_claims_secret="s3cret",
+            plugin_static_origin="https://plugin-origin.agentscale.dev",
+            plugin_shell_origin="https://agentscale.dev",
+        )
+
+
+@pytest.mark.parametrize("ref", ["plaintext", "k8s-secret://missing-key"])
+def test_plugin_event_signing_ref_shape_is_validated(ref: str) -> None:
+    from prodavan.config.settings import Settings
+
+    with pytest.raises(RuntimeError, match="PLUGIN_EVENT_SIGNING_SECRET_REF"):
+        Settings(plugin_event_signing_secret_ref=ref)
 
 
 def test_plugin_full_egress_requires_explicit_approval() -> None:

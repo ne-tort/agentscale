@@ -4,6 +4,7 @@ import type {
   ApiError,
   AdminModule,
   AdminPluginsResponse,
+  PluginBootstrapResponse,
   AdminProfile,
   AttachmentUpload,
   CabinetBoundModule,
@@ -627,6 +628,12 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     // Токен идёт в заголовке (request добавляет Authorization), в query — только
     // company_id; capability-токен плагина в URL не попадает никогда (§5.2).
     listAdminPlugins: (companyId) => request<AdminPluginsResponse>(`/admin/plugins/?company_id=${encodeURIComponent(companyId)}`),
+    getPluginBootstrap: (companyId, pluginId, routePath) => request<PluginBootstrapResponse>(
+      `/companies/${encodePath(companyId)}/plugins/${encodePath(pluginId)}/bootstrap${routePath ? `?route_path=${encodeURIComponent(routePath)}` : ""}`,
+    ),
+    getPublicPluginBootstrap: (companyId, pluginId, routePath) => request<PluginBootstrapResponse>(
+      `/public/plugins/${encodePath(companyId)}/${encodePath(pluginId)}/bootstrap${routePath ? `?route_path=${encodeURIComponent(routePath)}` : ""}`,
+    ),
     createAdminModule: (name) => request<AdminModule>("/admin/modules", { method: "POST", body: JSON.stringify({ name }) }),
     getAdminModule: (moduleId) => request<AdminModule>(`/admin/modules/${encodePath(moduleId)}`),
     patchAdminModule: (moduleId, patch) => request<AdminModule>(`/admin/modules/${encodePath(moduleId)}`, { method: "PATCH", body: JSON.stringify(patch) }),

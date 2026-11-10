@@ -1,0 +1,91 @@
+{
+  "runId": "kpa-mwa8vha6-ae192c8ebb57",
+  "status": "PASSED",
+  "acceptanceContract": "collected>0, skipped=0, KAFKA_PLUGIN_ACCEPTANCE_REQUIRE_COMPLETE=1",
+  "collected": 16,
+  "passed": 16,
+  "failed": 0,
+  "skipped": 0,
+  "errors": 0,
+  "xfail": 0,
+  "junit": "junit-final.xml",
+  "console": "console-final.log",
+  "durationSeconds": 33.85,
+  "invocation": "python -m pytest -p tests.integration.kafka_plugin_acceptance.acceptance_plugin --confcutdir=tests/integration/kafka_plugin_acceptance tests/integration/kafka_plugin_acceptance -q --junitxml=junit-final.xml (from apps/api)",
+  "environment": {
+    "kafka": "disposable Redpanda v24.2.4 PLAINTEXT, isolated Docker network",
+    "postgres": "disposable postgres:16.15-alpine, random schema per test",
+    "redis": "disposable redis:7.4.11-alpine, exact owned keys only",
+    "backend": "localhost real HTTP backend via production HttpProxyPort",
+    "securityProtocol": "PLAINTEXT with LOCAL_TEST_ONLY_NO_SHARED_ENVIRONMENT confirmation",
+    "signingKeys": "two independent random test file:// refs, minimum 32 bytes, external read-only root",
+    "ambientEnvironment": "scrubbed; only required acceptance values injected"
+  },
+  "rebalance": {
+    "scenario": "test_rebalance_after_wake_before_handler_blocks_stale_delivery_then_recovers",
+    "junit": "rebalance-evidence.xml",
+    "log": "rebalance-evidence.log",
+    "outcome": "PASSED in 8.39s",
+    "evidence": [
+      "real generation 1 assignment",
+      "real generation 2 with both members",
+      "partition assignment moved to successor",
+      "LeaveGroup request succeeded",
+      "real generation 3 successor-only assignment",
+      "typed stale denial assertions passed",
+      "exactly one backend delivery and owner-only recovery assertions passed"
+    ],
+    "lineEvidence": {
+      "generation1": 9,
+      "generation2": 21,
+      "successorAssignment": 35,
+      "leaveGroup": 28,
+      "passedResult": 42
+    }
+  },
+  "intermediateRuns": {
+    "firstBlockedRunId": "kpa-mwa7urfu-b0cbbd243e26",
+    "firstAttemptResult": "13 errors, 0 tests reached services due conftest await",
+    "firstRealAttemptResult": "7 passed, 9 failed, 13 teardown errors; after-wake not reached",
+    "rerunAttempt2": "15 passed, after-wake TimeoutError",
+    "rerunAttempt3": "15 passed, delivery-before-commit TimeoutError",
+    "targetedRebalanceAfterFix": "4 passed in 17.33s"
+  },
+  "unitRegressions": {
+    "file": "unit-kafka-adapters.xml",
+    "result": "23 passed",
+    "covers": [
+      "supported getone signature",
+      "bounded timeout preserves pending fetch",
+      "late record not lost",
+      "external cancellation propagates without record loss",
+      "close cancels pending fetch",
+      "no unsupported timeout_ms keyword"
+    ]
+  },
+  "cleanup": "cleanup.json",
+  "finalSecretScan": "secret-scan.json",
+  "productionChanges": [
+    "apps/api/src/prodavan/infrastructure/plugins/adapters/kafka_adapters.py"
+  ],
+  "productionTestChanges": [
+    "apps/api/tests/unit/plugins/infra_adapters/conftest.py",
+    "apps/api/tests/unit/plugins/infra_adapters/test_kafka_adapters.py"
+  ],
+  "harnessOnlyChanges": [
+    "apps/api/tests/integration/kafka_plugin_acceptance/acceptance_plugin.py",
+    "apps/api/tests/integration/kafka_plugin_acceptance/conftest.py",
+    "apps/api/tests/integration/kafka_plugin_acceptance/database.py",
+    "apps/api/tests/integration/kafka_plugin_acceptance/resources.py",
+    "apps/api/tests/integration/kafka_plugin_acceptance/harness.py",
+    "apps/api/tests/integration/kafka_plugin_acceptance/test_retry_and_rebalance.py"
+  ],
+  "outOfScopeNotTouched": [
+    "PostgreSQL/Redis standalone",
+    "MinIO",
+    "frontend",
+    "kubectl",
+    "shared/dev/prod resources"
+  ],
+  "remainingBlockers": "No remaining Kafka acceptance blocker. K8s wake, production SealedSecret, job declarations and other STOP-SHIP gates remain intentionally out of scope."
+}

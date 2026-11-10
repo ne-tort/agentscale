@@ -24,6 +24,7 @@
         tenant_db=...,            # адаптер к tenantdb.TenantDatabaseService
         object_store=...,         # адаптер к objects.*
         artifact_registry=...,    # адаптер к artifacts.PluginArtifactRegistry
+        instance_store=...,       # SQL PluginInstanceRow (durable saga)
         grant_store=...,          # БД-репозиторий CapabilityGrant + фича-флага
         revocation=...,           # адаптер к identity.InMemoryRevocation / БД
         mint=...,                 # адаптер к identity.mint_plugin_claims
@@ -67,6 +68,8 @@ from .contracts import (
     IssuedPluginClaims,
     MintRequest,
     ObjectStoreBinding,
+    PluginInstanceRecord,
+    PluginInstanceStatus,
     PluginListSnapshot,
     PluginRuntimeStatus,
     PluginSchema,
@@ -92,6 +95,7 @@ from .ports import (
     ArtifactRegistryPort,
     AuditPort,
     GrantStorePort,
+    InstanceStorePort,
     MintPort,
     ObjectStorePort,
     PlatformAdminPort,
@@ -129,6 +133,8 @@ __all__ = [
     "IssuedPluginClaims",
     "MintRequest",
     "ObjectStoreBinding",
+    "PluginInstanceRecord",
+    "PluginInstanceStatus",
     "PluginListSnapshot",
     "PluginRuntimeStatus",
     "PluginSchema",
@@ -152,6 +158,7 @@ __all__ = [
     "ArtifactRegistryPort",
     "AuditPort",
     "GrantStorePort",
+    "InstanceStorePort",
     "MintPort",
     "ObjectStorePort",
     "PlatformAdminPort",

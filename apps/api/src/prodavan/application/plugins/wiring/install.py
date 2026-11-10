@@ -18,7 +18,7 @@
 -----------------------------
     a) build_plugin_repositories(session, redis)   -> SQL/Redis-репозитории A10
     b) build_runtime_ports(settings, ...)          -> cosign/k8s/state/proxy
-    c) build_plugin_admin_ports(...)               -> PluginAdminPorts (все 10 полей)
+    c) build_plugin_admin_ports(...)               -> PluginAdminPorts (все 12 полей)
     d) build_gateway_runtime(...)                 -> PluginGatewayRuntime
     e) build_plugin_platform(settings, grant_store=..., cosign=...,
                              admin_ports=..., <порты зон>)
@@ -73,8 +73,12 @@ Fail-closed
 
 from __future__ import annotations
 
+import asyncio
 import importlib
+import inspect
 import logging
+import os
+from dataclasses import replace
 from typing import Any, Final, Mapping
 
 logger = logging.getLogger(__name__)
@@ -91,6 +95,28 @@ UNWIRED_PORTS_STATE_KEY: Final[str] = "plugin_unwired_ports"
 #: они НЕ должны попадать в ``plugin_unwired_ports`` — иначе Verify Dev видит
 #: ложный долг. Отдельный ключ для честной диагностики.
 IN_MEMORY_PORTS_STATE_KEY: Final[str] = "plugin_in_memory_ports"
+RUNTIME_PORTS_STATE_KEY: Final[str] = "plugin_runtime_ports"
+RUNTIME_SHUTDOWN_STATE_KEY: Final[str] = "plugin_runtime_shutdown_registered"
+TENANT_DB_ADMIN_STATE_KEY: Final[str] = "plugin_tenant_db_admin_connection"
+TENANT_DB_ADMIN_LIFECYCLE_STATE_KEY: Final[str] = "plugin_tenant_db_admin_lifecycle"
+DIGEST_PAYLOAD_STORE_STATE_KEY: Final[str] = "plugin_digest_payload_store"
+BODY_DIGEST_RESOLVER_FACTORY_STATE_KEY: Final[str] = "plugin_body_digest_resolver_factory"
+DIGEST_PAYLOAD_SHUTDOWN_STATE_KEY: Final[str] = "plugin_digest_payload_shutdown_registered"
+MCP_DISCOVERY_STATE_KEY: Final[str] = "plugin_mcp_discovery"
+CAPABILITY_LIFECYCLE_STATE_KEY: Final[str] = "plugin_capability_lifecycle"
+_TENANT_DB_ADMIN_LIFESPAN_NAME: Final[str] = "plugin-tenant-db-admin"
+_MINIO_STS_LIFESPAN_NAME: Final[str] = "plugin-minio-sts-probe"
+_RUNTIME_LIFESPAN_NAME: Final[str] = "plugin-runtime"
+_PAYLOAD_LIFESPAN_NAME: Final[str] = "plugin-digest-payload-store"
+_CAPABILITY_LIFESPAN_NAME: Final[str] = "plugin-capability-platform"
+MINIO_STS_LIFECYCLE_STATE_KEY: Final[str] = "plugin_minio_sts_lifecycle"
+
+# CI publication is an emergency-disabled trust contour of its own.  These
+# variables intentionally do not fall back to Keycloak, employee auth, the
+# plugin platform flag, or any agent/pod credential.
+PLUGIN_CI_PUBLICATION_ENABLED_ENV: Final[str] = "PLUGIN_CI_PUBLICATION_ENABLED"
+PLUGIN_CI_OIDC_AUDIENCE_ENV: Final[str] = "PLUGIN_CI_OIDC_AUDIENCE"
+_PLUGIN_CI_LIFESPAN_NAME: Final[str] = "plugin-ci-publication-artifacts"
 
 
 class LazyRedisManager:
@@ -147,6 +173,8 @@ _OWN_STATE_KEYS: Final[tuple[str, ...]] = (
     "plugin_artifact_registry",
     "plugin_adapter_registry",
     "plugin_tenant_db",
+    TENANT_DB_ADMIN_STATE_KEY,
+    TENANT_DB_ADMIN_LIFECYCLE_STATE_KEY,
     "plugin_object_store",
     "plugin_egress",
     "plugin_activator",
@@ -160,16 +188,36 @@ _OWN_STATE_KEYS: Final[tuple[str, ...]] = (
     PLUGIN_SURFACE_GUARD_STATE_KEY,
     UNWIRED_PORTS_STATE_KEY,
     IN_MEMORY_PORTS_STATE_KEY,
+    RUNTIME_PORTS_STATE_KEY,
+    RUNTIME_SHUTDOWN_STATE_KEY,
+    DIGEST_PAYLOAD_STORE_STATE_KEY,
+    BODY_DIGEST_RESOLVER_FACTORY_STATE_KEY,
+    DIGEST_PAYLOAD_SHUTDOWN_STATE_KEY,
+    MCP_DISCOVERY_STATE_KEY,
+    CAPABILITY_LIFECYCLE_STATE_KEY,
 )
 
 __all__ = [
     "PLUGIN_SURFACE_GUARD_STATE_KEY",
     "UNWIRED_PORTS_STATE_KEY",
     "IN_MEMORY_PORTS_STATE_KEY",
+    "RUNTIME_PORTS_STATE_KEY",
+    "RUNTIME_SHUTDOWN_STATE_KEY",
+    "TENANT_DB_ADMIN_STATE_KEY",
+    "TENANT_DB_ADMIN_LIFECYCLE_STATE_KEY",
+    "DIGEST_PAYLOAD_STORE_STATE_KEY",
+    "BODY_DIGEST_RESOLVER_FACTORY_STATE_KEY",
+    "DIGEST_PAYLOAD_SHUTDOWN_STATE_KEY",
+    "MCP_DISCOVERY_STATE_KEY",
+    "CAPABILITY_LIFECYCLE_STATE_KEY",
     "LazyRedisManager",
+    "PLUGIN_CI_OIDC_AUDIENCE_ENV",
+    "PLUGIN_CI_PUBLICATION_ENABLED_ENV",
     "PluginCompositionError",
+    "install_plugin_ci_publication",
     "install_plugin_platform",
     "install_plugin_platform_for_tests",
+    "plugin_ci_publication_enabled",
 ]
 
 
@@ -193,36 +241,6 @@ class PluginCompositionError(RuntimeError):
 # Fail-closed заглушка для портов БЕЗ прод-фабрики (НЕ «тихий успех»).
 # ---------------------------------------------------------------------------
 
-
-class _UnwiredDeploymentAdmin:
-    """Fail-closed ``DeploymentAdminPort`` до появления k8s lifecycle-адаптера.
-
-    ``build_plugin_admin_ports`` проверяет ``isinstance(deployment_admin,
-    DeploymentAdminPort)`` (``@runtime_checkable`` Protocol), поэтому одного
-    ``_UnwiredPort`` с ``__getattr__`` мало: Protocol ищет РЕАЛЬНЫЕ атрибуты
-    класса. Объявляем все три метода явно. Каждый честно отказывает — grant
-    БЕЗ созданного Deployment не должен выглядеть успешным, а uninstall БЕЗ
-    purge не должен «пройти». Имя попадает в ``plugin_unwired_ports``.
-    """
-
-    async def ensure_deployment(
-        self, *, company_id: str, plugin_id: str, plugin_instance_id: str,
-        artifact_digest: str, dsn_ref: str,
-    ) -> str:
-        raise RuntimeError(
-            "DeploymentAdminPort.ensure_deployment() is not wired (F11: k8s "
-            "create-deployment adapter required before granting a plugin)"
-        )
-
-    async def purge_infra(self, *, company_id: str, plugin_id: str) -> bool:
-        raise RuntimeError(
-            "DeploymentAdminPort.purge_infra() is not wired (F11: k8s purge adapter required)"
-        )
-
-    async def runtime_status(self, *, company_id: str, plugin_id: str) -> Any:
-        raise RuntimeError(
-            "DeploymentAdminPort.runtime_status() is not wired (F11: k8s status adapter required)"
-        )
 
 
 class _UnwiredPort:
@@ -250,6 +268,184 @@ class _UnwiredPort:
 
         refuse.__name__ = method
         return refuse
+
+
+class _TenantDbAdminLifecycle:
+    """Shared startup, shutdown and readiness for one tenant admin adapter."""
+
+    def __init__(self, admin: Any | None) -> None:
+        self.admin = admin
+
+    @property
+    def name(self) -> str:
+        return _TENANT_DB_ADMIN_LIFESPAN_NAME
+
+    async def startup(self) -> None:
+        open_pool = getattr(self.admin, "open", None)
+        if callable(open_pool):
+            await open_pool()
+
+    async def shutdown(self) -> None:
+        close_pool = getattr(self.admin, "close", None)
+        if callable(close_pool):
+            await close_pool()
+
+    async def health(self) -> bool:
+        if self.admin is None or isinstance(self.admin, _UnwiredPort):
+            return False
+        probe = getattr(self.admin, "health", None)
+        if callable(probe):
+            return bool(await probe())
+        return True
+
+
+class _MinioStsProbeLifecycle:
+    """Async startup/revalidation hook for the one shared MinioSts adapter."""
+
+    def __init__(self, sts: Any) -> None:
+        self.sts = sts
+        self._revalidate_task: asyncio.Task[Any] | None = None
+
+    @property
+    def name(self) -> str:
+        return _MINIO_STS_LIFESPAN_NAME
+
+    async def startup(self) -> None:
+        # Registration happens during create_app; only this async initialization
+        # hook may perform IO. Failure deliberately leaves the operation unwired.
+        await self.sts.probe(force=True)
+        config = getattr(self.sts, "config", None)
+        if (
+            self._revalidate_task is None
+            and bool(getattr(config, "sts_enabled", False))
+            and bool(getattr(config, "sts_probe_enabled", False))
+        ):
+            self._revalidate_task = asyncio.create_task(self._revalidate())
+
+    async def _revalidate(self) -> None:
+        # Refresh before expiry; failed probes use bounded retry backoff. This
+        # task is owned by lifespan/worker initialization, never by module import.
+        while True:
+            config = self.sts.config
+            if self.sts.scoped_credentials_wired:
+                delay = max(1, int(config.sts_probe_revalidate_seconds) - 1)
+            else:
+                delay = int(config.sts_probe_retry_seconds)
+            await asyncio.sleep(delay)
+            try:
+                await self.sts.probe(force=True)
+            except Exception:
+                # A driver failure must not leave permanent stale availability or
+                # terminate future revalidation. Probe itself never logs credentials.
+                self.sts.invalidate()
+
+    async def shutdown(self) -> None:
+        task = self._revalidate_task
+        self._revalidate_task = None
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        # The platform-owned adapter closes the client; this resource only drops
+        # availability so a stale success cannot survive shutdown/error.
+        self.sts.invalidate()
+
+    async def health(self) -> bool | None:
+        config = getattr(self.sts, "config", None)
+        if not bool(getattr(config, "sts_enabled", False)) or not bool(
+            getattr(config, "sts_probe_enabled", False)
+        ):
+            return None
+        return bool(self.sts.scoped_credentials_wired)
+
+
+class _AcloseLifecycle:
+    """Shutdown-only LifespanResource для владельца с идемпотентным aclose().
+
+    Startup намеренно пустой: композиция уже собрала владельца (без IO при
+    регистрации/старте). Закрытие идёт ТОЛЬКО через LifespanManager — в
+    обратном порядке регистрации (shutdown_all), как и остальные ресурсы.
+    Никаких Starlette on_startup/on_shutdown: на кастомном
+    FastAPI(lifespan=...) они не вызываются, а на pinned Starlette (>=1.6)
+    add_event_handler/lifespan_context удалены совсем.
+    """
+
+    __slots__ = ("_name", "owner")
+
+    def __init__(self, name: str, owner: Any) -> None:
+        self._name = name
+        self.owner = owner
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    async def startup(self) -> None:
+        return None
+
+    async def shutdown(self) -> None:
+        await self.owner.aclose()
+
+    async def health(self) -> bool | None:
+        # Shutdown-only ресурс: отдельной readiness-проверки нет.
+        return None
+
+
+def _lifespan_manager(
+    app: Any,
+    overrides: Mapping[str, Any] | None,
+    step: str,
+) -> Any:
+    """Единый shared LifespanManager — единственный lifecycle-шов (fail-closed).
+
+    Источник: app.state.lifespan_manager (main) либо явная передача
+    overrides['lifespan_manager'] (plugin gateway, который по контракту
+    не публикует менеджер в app.state). Старых fallback'ов на
+    app.add_event_handler/app.router.lifespan_context НЕТ: первый не
+    работает на кастомном lifespan и удалён в Starlette 1.6+, второй удалён
+    вместе с ним. Отсутствие менеджера = ошибка композиции, не тихий пропуск.
+    """
+
+    state = getattr(app, "state", None)
+    manager = getattr(state, "lifespan_manager", None)
+    if manager is None and overrides is not None:
+        manager = overrides.get("lifespan_manager")
+    if manager is None or not callable(getattr(manager, "register", None)):
+        raise PluginCompositionError(
+            step,
+            "shared application LifespanManager is unavailable; plugin lifecycle "
+            "must be registered through LifespanManager.register (Starlette "
+            "on_startup/on_shutdown is unsupported on the pinned framework)",
+        )
+    return manager
+
+
+def _register_shutdown_resource(
+    app: Any,
+    owner: Any,
+    composer: _Composer,
+    *,
+    step: str,
+    resource_name: str,
+    overrides: Mapping[str, Any] | None = None,
+) -> _AcloseLifecycle:
+    """Зарегистрировать aclose()-ресурс один раз; владелец остаётся singleton."""
+
+    manager = _lifespan_manager(app, overrides, step)
+    get_resource = getattr(manager, "get", None)
+    existing = get_resource(resource_name) if callable(get_resource) else None
+    if existing is not None:
+        if getattr(existing, "owner", None) is not owner:
+            raise PluginCompositionError(
+                step, f"a different {resource_name} lifecycle is already registered"
+            )
+        return existing
+    resource = _wrap(step, _AcloseLifecycle, resource_name, owner)
+    _wrap(step, manager.register, resource)
+    composer.mark_lifecycle(manager, resource_name)
+    return resource
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +504,11 @@ def _wrap(step: str, fn: Any, *args: Any, **kwargs: Any) -> Any:
     except PluginCompositionError:
         raise
     except Exception as exc:  # noqa: BLE001 — fail-closed: любая ошибка = отказ целиком
-        raise PluginCompositionError(step, f"{type(exc).__name__}: {exc}") from exc
+        # Driver/config exceptions may contain DSNs, secret refs, credentials or
+        # response payloads. Only the exception type crosses the composition log.
+        raise PluginCompositionError(
+            step, f"{type(exc).__name__}: operation failed"
+        ) from None
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +525,7 @@ class _Composer:
         if self._state is None:
             raise PluginCompositionError("app", "app has no .state to attach plugin platform to")
         self._before: dict[str, tuple[bool, Any]] = {}
+        self._lifecycle: list[tuple[Any, str]] = []
         for key in _OWN_STATE_KEYS:
             try:
                 self._before[key] = (True, getattr(self._state, key))
@@ -337,7 +538,22 @@ class _Composer:
             if key not in self._touched:
                 self._touched.append(key)
 
+    def mark_lifecycle(self, manager: Any, name: str) -> None:
+        """Запомнить одну регистрацию LifespanManager для отката."""
+
+        self._lifecycle.append((manager, name))
+
     def rollback(self) -> None:
+        for manager, name in reversed(self._lifecycle):
+            try:
+                unregister = getattr(manager, "unregister", None)
+                if callable(unregister):
+                    unregister(name)
+            except Exception:  # noqa: BLE001 — откат не маскирует исходную ошибку
+                logger.warning(
+                    "plugin composition rollback failed to unregister lifespan %s", name
+                )
+        self._lifecycle.clear()
         for key in reversed(self._touched):
             existed, old = self._before.get(key, (False, None))
             try:
@@ -373,12 +589,260 @@ def _register_guard_once(app: Any, composer: _Composer) -> None:
     composer.mark(PLUGIN_SURFACE_GUARD_STATE_KEY)
 
 
+def _register_runtime_shutdown(
+    app: Any,
+    runtime: Any,
+    composer: _Composer,
+    *,
+    overrides: Mapping[str, Any] | None = None,
+) -> None:
+    """Attach one idempotent runtime shutdown LifespanResource and rollback state."""
+    state = composer._state
+    if bool(getattr(state, RUNTIME_SHUTDOWN_STATE_KEY, False)):
+        if getattr(state, RUNTIME_PORTS_STATE_KEY, None) is not runtime:
+            raise PluginCompositionError(
+                "runtime_lifecycle", "a different plugin runtime is already registered"
+            )
+        return
+    if not callable(getattr(runtime, "aclose", None)):
+        raise PluginCompositionError(
+            "runtime_lifecycle",
+            "RuntimePorts must support idempotent async shutdown",
+        )
+    _register_shutdown_resource(
+        app,
+        runtime,
+        composer,
+        step="runtime_lifecycle",
+        resource_name=_RUNTIME_LIFESPAN_NAME,
+        overrides=overrides,
+    )
+    setattr(state, RUNTIME_PORTS_STATE_KEY, runtime)
+    composer.mark(RUNTIME_PORTS_STATE_KEY)
+    setattr(state, RUNTIME_SHUTDOWN_STATE_KEY, True)
+    composer.mark(RUNTIME_SHUTDOWN_STATE_KEY)
+
+
+def _publish_digest_payload_store(
+    redis: Any,
+    overrides: Mapping[str, Any],
+    composer: _Composer,
+) -> Any:
+    """Publish one content-addressed store and its network resolver factory."""
+    from prodavan.application.plugins.capabilities.payloads import (
+        DigestPayloadResolverFactory,
+        DigestPayloadStore,
+    )
+
+    state = composer._state
+    existing = getattr(state, DIGEST_PAYLOAD_STORE_STATE_KEY, None)
+    supplied = overrides.get("digest_payload_store")
+    if existing is not None and supplied is not None and existing is not supplied:
+        raise PluginCompositionError(
+            "payload_store", "a different digest payload store is already installed"
+        )
+    store = supplied or existing
+    if store is None:
+        client = overrides.get("redis_client")
+        if client is None:
+            from prodavan.infrastructure.plugins.capabilities.redis import ManagerRedisClient
+
+            client = ManagerRedisClient(redis)
+        store = DigestPayloadStore(
+            client=client,
+            config=overrides.get("digest_payload_config"),
+        )
+    if not isinstance(store, DigestPayloadStore):
+        raise PluginCompositionError(
+            "payload_store", "digest_payload_store must be a DigestPayloadStore"
+        )
+    if existing is not None and store is not existing:
+        raise PluginCompositionError(
+            "payload_store", "digest payload store singleton identity changed"
+        )
+
+    factory = getattr(state, BODY_DIGEST_RESOLVER_FACTORY_STATE_KEY, None)
+    if factory is None:
+        factory = DigestPayloadResolverFactory(store=store)
+    elif not callable(factory) or getattr(factory, "store", None) is not store:
+        raise PluginCompositionError(
+            "payload_store", "body digest resolver factory is bound to another store"
+        )
+    setattr(state, DIGEST_PAYLOAD_STORE_STATE_KEY, store)
+    setattr(state, BODY_DIGEST_RESOLVER_FACTORY_STATE_KEY, factory)
+    composer.mark(DIGEST_PAYLOAD_STORE_STATE_KEY, BODY_DIGEST_RESOLVER_FACTORY_STATE_KEY)
+    return store
+
+
+def _register_digest_payload_shutdown(
+    app: Any,
+    store: Any,
+    composer: _Composer,
+    *,
+    overrides: Mapping[str, Any] | None = None,
+) -> None:
+    """Register one idempotent close without closing the shared Redis manager."""
+    state = composer._state
+    if getattr(state, DIGEST_PAYLOAD_STORE_STATE_KEY, None) is not store:
+        raise PluginCompositionError(
+            "payload_lifecycle", "digest payload store is not published"
+        )
+    if bool(getattr(state, DIGEST_PAYLOAD_SHUTDOWN_STATE_KEY, False)):
+        return
+    if not callable(getattr(store, "aclose", None)):
+        raise PluginCompositionError(
+            "payload_lifecycle",
+            "DigestPayloadStore must support idempotent async shutdown",
+        )
+    _register_shutdown_resource(
+        app,
+        store,
+        composer,
+        step="payload_lifecycle",
+        resource_name=_PAYLOAD_LIFESPAN_NAME,
+        overrides=overrides,
+    )
+    setattr(state, DIGEST_PAYLOAD_SHUTDOWN_STATE_KEY, True)
+    composer.mark(DIGEST_PAYLOAD_SHUTDOWN_STATE_KEY)
+
+
+def _register_tenant_db_admin_lifecycle(
+    app: Any,
+    resource: _TenantDbAdminLifecycle,
+    composer: _Composer,
+    *,
+    overrides: Mapping[str, Any] | None = None,
+) -> None:
+    """Register the adapter once with shared lifespan and publish diagnostics.
+
+    Только LifespanManager.register: никаких Starlette startup/shutdown событий.
+    """
+    manager = _lifespan_manager(app, overrides, "tenant_db_admin_lifecycle")
+    get_resource = getattr(manager, "get", None)
+    existing = get_resource(resource.name) if callable(get_resource) else None
+    if existing is not None:
+        if existing is not resource:
+            raise PluginCompositionError(
+                "tenant_db_admin_lifecycle",
+                "a different tenant admin lifecycle is already registered",
+            )
+        return
+    _wrap("tenant_db_admin_lifecycle", manager.register, resource)
+    composer.mark_lifecycle(manager, resource.name)
+    setattr(composer._state, TENANT_DB_ADMIN_STATE_KEY, resource.admin)
+    setattr(composer._state, TENANT_DB_ADMIN_LIFECYCLE_STATE_KEY, resource)
+    composer.mark(TENANT_DB_ADMIN_STATE_KEY, TENANT_DB_ADMIN_LIFECYCLE_STATE_KEY)
+
+
+def _register_minio_sts_lifecycle(
+    app: Any,
+    sts: Any,
+    composer: _Composer,
+    *,
+    overrides: Mapping[str, Any] | None = None,
+) -> None:
+    """Register probe startup without constructor/import-time IO or a second STS.
+
+    Только LifespanManager.register: никаких Starlette startup/shutdown событий.
+    """
+    if sts is None:
+        return
+    resource = _MinioStsProbeLifecycle(sts)
+    manager = _lifespan_manager(app, overrides, "minio_sts_probe")
+    get_resource = getattr(manager, "get", None)
+    existing = get_resource(resource.name) if callable(get_resource) else None
+    if existing is not None:
+        if existing is not resource and getattr(existing, "sts", None) is not sts:
+            raise PluginCompositionError(
+                "minio_sts_probe", "a different MinioSts lifecycle is already registered",
+            )
+        return
+    _wrap("minio_sts_probe", manager.register, resource)
+    composer.mark_lifecycle(manager, resource.name)
+    setattr(composer._state, MINIO_STS_LIFECYCLE_STATE_KEY, resource)
+    composer.mark(MINIO_STS_LIFECYCLE_STATE_KEY)
+
+
+def _register_capability_shutdown(
+    app: Any,
+    platform: Any,
+    composer: _Composer,
+    *,
+    overrides: Mapping[str, Any] | None = None,
+) -> None:
+    """Register one idempotent capability platform close via the shared lifespan."""
+    if not callable(getattr(platform, "aclose", None)):
+        raise PluginCompositionError(
+            "capability_lifecycle",
+            "platform must support idempotent async capability shutdown",
+        )
+    _register_shutdown_resource(
+        app,
+        platform,
+        composer,
+        step="capability_lifecycle",
+        resource_name=_CAPABILITY_LIFESPAN_NAME,
+        overrides=overrides,
+    )
+    setattr(composer._state, CAPABILITY_LIFECYCLE_STATE_KEY, True)
+    composer.mark(CAPABILITY_LIFECYCLE_STATE_KEY)
+
+
+def _close_runtime_after_failed_build(runtime: Any) -> None:
+    """Best-effort async cleanup without masking the composition exception."""
+    if runtime is None:
+        return
+    close = getattr(runtime, "aclose", None)
+    if not callable(close):
+        return
+    try:
+        result = close()
+        if not inspect.isawaitable(result):
+            return
+
+        async def wait_for_close() -> None:
+            await result
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(wait_for_close())
+        else:
+            loop.create_task(wait_for_close())
+    except Exception:  # noqa: BLE001 — rollback preserves the startup failure
+        logger.warning("plugin runtime rollback close failed")
+
+
 # ---------------------------------------------------------------------------
 # Авто-композиция: реальные сервисы зон + честные заглушки без фабрики.
 # ---------------------------------------------------------------------------
 
 
-def _minio_bucket_admin() -> Any | None:
+def _shared_secret_store(overrides: Mapping[str, Any]) -> Any:
+    """Resolve one control-plane RoutingSecretStore, never a runtime-local backend."""
+    store = overrides.get("secret_store")
+    if store is None:
+        from prodavan.infrastructure.secrets.store import get_secret_store
+
+        store = get_secret_store()
+    if store is None:
+        from prodavan.application.plugins.capabilities.adapters._shared import (
+            CapabilityConfigurationError,
+        )
+
+        raise CapabilityConfigurationError("secret_store_unwired")
+    if not all(
+        callable(getattr(store, method, None)) for method in ("get", "put", "delete")
+    ):
+        from prodavan.application.plugins.capabilities.adapters._shared import (
+            CapabilityConfigurationError,
+        )
+
+        raise CapabilityConfigurationError("secret_store_contract_invalid")
+    return store
+
+
+def _minio_bucket_admin(secret_store: Any = None, settings: Any = None) -> Any | None:
     """Собрать реальный ``BucketAdminPort`` из env плагинового контура.
 
     ``MinioBucketAdmin`` уже реализует весь контракт (bucket-per-tenant,
@@ -395,16 +859,20 @@ def _minio_bucket_admin() -> Any | None:
         from prodavan.infrastructure.plugins.minio.adapters import MinioBucketAdmin
         from prodavan.infrastructure.plugins.minio.config import MinioPluginConfig
 
+        if secret_store is None:
+            raise RuntimeError("SecretStore is required for PLUGIN_MINIO_*_REF")
         return MinioBucketAdmin(
-            config=MinioPluginConfig.from_env(),
+            config=MinioPluginConfig.from_secret_refs(
+                secret_store=secret_store,
+                settings=settings,
+            ),
             owns_bucket=True,
         )
     except Exception as exc:  # noqa: BLE001 — конфигурация/импорт ≠ падение startup
         logger.warning(
-            "plugin MinIO bucket admin is not configured (%s: %s); "
+            "plugin MinIO bucket admin is not configured (%s); "
             "object capability stays fail-closed",
             type(exc).__name__,
-            str(exc)[:120],
         )
         return None
 
@@ -478,7 +946,25 @@ def _activation_mint(repos: Any, config: Any) -> Any | None:
         return None
 
 
-def _tenant_db_secrets() -> Any | None:
+def _tenant_db_admin(settings: Any) -> Any | None:
+    """Build asyncpg admin or leave a typed-unwired port without a fallback."""
+    from prodavan.infrastructure.plugins.tenantdb import (
+        AsyncpgAdminConnection,
+        TenantAdminConfigError,
+    )
+
+    try:
+        return AsyncpgAdminConnection.from_settings(settings)
+    except TenantAdminConfigError as exc:
+        # reason is a fixed safe code, never the URL or driver message.
+        logger.warning(
+            "plugin tenant-db admin port is not configured (%s); grant stays fail-closed",
+            exc.reason,
+        )
+        return None
+
+
+def _tenant_db_secrets(secret_store: Any = None) -> Any | None:
     """``tenantdb.SecretPort`` поверх существующего ``RoutingSecretStore``.
 
     Порт задачи 05 — ASYNC (``put``/``rotate``/``delete``), а
@@ -492,9 +978,28 @@ def _tenant_db_secrets() -> Any | None:
     try:
         from prodavan.infrastructure.secrets.store import get_secret_store
 
-        store = get_secret_store()
+        store = secret_store if secret_store is not None else get_secret_store()
+
+        def _ref_for_key(key: str) -> str:
+            from prodavan.config.settings import settings
+
+            if settings.vault_addr:
+                return f"vault://ai_keys/{key}"
+            return f"file://ai_keys/{key}.secret"
 
         class _AsyncSecretStore:
+            async def get(self, *, key: str) -> Any | None:
+                from prodavan.application.plugins.tenantdb.service import StoredSecret
+
+                secret_ref = _ref_for_key(key)
+                try:
+                    value = store.get(secret_ref)
+                except Exception as exc:
+                    if getattr(exc, "code", "") == "SECRET_NOT_FOUND":
+                        return None
+                    raise
+                return StoredSecret(secret_ref=secret_ref, value=value)
+
             async def put(self, *, key: str, value: str) -> str:
                 return store.put(key, value)
 
@@ -516,15 +1021,22 @@ def _tenant_db_secrets() -> Any | None:
         return _AsyncSecretStore()
     except Exception as exc:  # noqa: BLE001 — конфигурация/импорт ≠ падение startup
         logger.warning(
-            "plugin tenant-db secret port is not configured (%s: %s); "
+            "plugin tenant-db secret port is not configured (%s); "
             "DSN storage stays fail-closed",
             type(exc).__name__,
-            str(exc)[:120],
         )
         return None
 
 
-def _zone_services(runtime: Any, repos: Any, config: Any, ov: dict[str, Any], unwired: list[str]) -> dict[str, Any]:
+def _zone_services(
+    runtime: Any,
+    repos: Any,
+    config: Any,
+    ov: dict[str, Any],
+    unwired: list[str],
+    *,
+    settings: Any = None,
+) -> dict[str, Any]:
     """Собрать РЕАЛЬНЫЕ сервисы зон для тонких admin-адаптеров.
 
     Один ``runtime`` (k8s/proxy/cosign) и один набор ``repos`` (SQL/Redis) на
@@ -548,6 +1060,7 @@ def _zone_services(runtime: Any, repos: Any, config: Any, ov: dict[str, Any], un
     )
     from prodavan.application.plugins.objects.service import PluginObjectStore
     from prodavan.application.plugins.tenantdb.service import TenantDatabaseService
+    from prodavan.infrastructure.plugins.minio.adapters import MinioAuditAdapter
 
     verifier = ArtifactVerifier(
         runtime.cosign,
@@ -561,20 +1074,47 @@ def _zone_services(runtime: Any, repos: Any, config: Any, ov: dict[str, Any], un
     )
     object_buckets = ov.get("object_buckets")
     if object_buckets is None:
-        object_buckets = _minio_bucket_admin()
+        minio_kwargs = {"settings": settings} if settings is not None else {}
+        object_buckets = _minio_bucket_admin(ov.get("secret_store"), **minio_kwargs)
+    minio_config = ov.get("minio_config") or getattr(object_buckets, "config", None)
+    if minio_config is not None:
+        # Reuse the exact resolved config in the typed objects adapter: refs are
+        # resolved once and admin/STS cannot observe different credential versions.
+        ov["minio_config"] = minio_config
+    legacy = {"minio_sts_available", "io_test_sts_available"} & set(ov)
+    if legacy:
+        raise PluginCompositionError(
+            "minio_sts_probe",
+            f"legacy STS availability override is forbidden: {sorted(legacy)[0]}",
+        )
+    object_sts = ov.get("object_sts")
+    if object_sts is None and minio_config is not None:
+        from prodavan.infrastructure.plugins.minio.adapters import MinioSts
+
+        # No constructor boolean is target evidence. The shared adapter starts
+        # unwired and is probed only by the async lifespan resource below.
+        object_sts = MinioSts(
+            config=minio_config,
+            sts_client=ov.get("minio_sts_client"),
+        )
+        ov["object_sts"] = object_sts
     object_store = PluginObjectStore(
         buckets=object_buckets,
-        sts=ov.get("object_sts"),
+        sts=object_sts,
         presigner=ov.get("object_presigner"),
-        audit=repos.audit,
+        audit=MinioAuditAdapter(sink=repos.audit),
     )
     tenant_db_secrets = ov.get("tenant_db_secrets")
     if tenant_db_secrets is None:
-        tenant_db_secrets = _tenant_db_secrets()
+        tenant_db_secrets = _tenant_db_secrets(ov.get("secret_store"))
     if tenant_db_secrets is None:
         tenant_db_secrets = need("tenant_db_secrets")
+    tenant_db_admin = ov.get("tenant_db_admin")
+    if tenant_db_admin is None:
+        # The service converts None to typed ADMIN_UNAVAILABLE on every use.
+        unwired.append("tenant_db_admin")
     tenant_db = TenantDatabaseService(
-        admin=need("tenant_db_admin"),
+        admin=tenant_db_admin,
         secrets=tenant_db_secrets,
         audit=repos.audit,
         dsn_host=config.tenant_db_host,
@@ -596,21 +1136,311 @@ def _zone_services(runtime: Any, repos: Any, config: Any, ov: dict[str, Any], un
         proxy=runtime.proxy,
     )
     return {
+        "artifact_verifier": verifier,
         "artifact_registry": artifact_registry,
         "object_store": object_store,
         "object_buckets": object_buckets,
+        "object_sts": object_sts,
         "tenant_db": tenant_db,
+        "tenant_db_secrets": tenant_db_secrets,
         "activator": activator,
     }
 
 
+def _webhook_secret_resolver(repos: Any, secrets: Any) -> Any:
+    """Resolve ACTIVE grants, plus the strictly fenced first-grant projection."""
+    from datetime import UTC, datetime
+
+    from prodavan.application.plugins.admin.contracts import (
+        CapabilityGrantRecord,
+        PluginInstanceRecord,
+        PluginInstanceStatus,
+        PluginPublicationApproval,
+    )
+    from prodavan.application.plugins.admin.ports import webhook_secret_key
+    from prodavan.application.plugins.tenantdb.service import StoredSecret
+
+    grants = getattr(repos, "grant_store", None)
+    instances = getattr(repos, "instance_store", None)
+    approvals = getattr(repos, "publication_approvals", None)
+
+    class _Resolver:
+        async def _active_grant_allowed(
+            self,
+            record: CapabilityGrantRecord,
+            *,
+            company_id: str,
+            plugin_id: str,
+            plugin_instance_id: str,
+            secret_ref: str,
+        ) -> bool:
+            if (
+                not isinstance(record, CapabilityGrantRecord)
+                or not record.is_active
+                or record.revoked_at is not None
+                or record.company_id != company_id
+                or record.plugin_id != plugin_id
+                or record.plugin_instance_id != plugin_instance_id
+                or record.webhook_secret_ref != secret_ref
+            ):
+                return False
+            expires = getattr(record, "expires_at", None)
+            if expires is not None and (
+                not isinstance(expires, datetime)
+                or expires.tzinfo is None
+                or expires.utcoffset() is None
+                or expires <= datetime.now(UTC)
+            ):
+                return False
+            # SQL implementations additionally verify the physical expires_at row.
+            activity = getattr(grants, "is_active_async", None)
+            if callable(activity) and not await activity(grant_id=record.grant_id):
+                return False
+            return True
+
+        async def _first_grant_allowed(
+            self,
+            *,
+            company_id: str,
+            plugin_id: str,
+            plugin_instance_id: str,
+        ) -> bool:
+            instance_getter = getattr(instances, "get", None)
+            approval_getter = getattr(approvals, "get", None)
+            if not callable(instance_getter) or not callable(approval_getter):
+                return False
+            instance = await instance_getter(company_id=company_id, plugin_id=plugin_id)
+            if (
+                not isinstance(instance, PluginInstanceRecord)
+                or instance.status is not PluginInstanceStatus.INSTALLED
+                or instance.company_id != company_id
+                or instance.plugin_id != plugin_id
+                or instance.plugin_instance_id != plugin_instance_id
+            ):
+                return False
+            approval = await approval_getter(
+                company_id=company_id,
+                plugin_id=plugin_id,
+                manifest_version=instance.manifest_version,
+                artifact_digest=instance.artifact_digest,
+            )
+            return (
+                isinstance(approval, PluginPublicationApproval)
+                and approval.consumed_at is None
+                and approval.company_id == company_id
+                and approval.plugin_id == plugin_id
+                and approval.manifest_version == instance.manifest_version
+                and approval.artifact_digest == instance.artifact_digest
+            )
+
+        async def _regrant_allowed(
+            self,
+            record: CapabilityGrantRecord,
+            *,
+            company_id: str,
+            plugin_id: str,
+            plugin_instance_id: str,
+            secret_ref: str,
+        ) -> bool:
+            # Re-grant rotates the ref before the replacement ACTIVE grant exists.
+            # The revoked record's old ref/digest/expiry must not fence that rotation.
+            del secret_ref
+            if (
+                not isinstance(record, CapabilityGrantRecord)
+                or record.is_active
+                or record.revoked_at is None
+                or record.company_id != company_id
+                or record.plugin_id != plugin_id
+                or record.plugin_instance_id != plugin_instance_id
+            ):
+                return False
+            instance_getter = getattr(instances, "get", None)
+            approval_getter = getattr(approvals, "get", None)
+            if not callable(instance_getter) or not callable(approval_getter):
+                return False
+            instance = await instance_getter(company_id=company_id, plugin_id=plugin_id)
+            if (
+                not isinstance(instance, PluginInstanceRecord)
+                or instance.status
+                not in {
+                    PluginInstanceStatus.REVOKED,
+                    # Schema rotation has already completed, but the replacement
+                    # grant is not ACTIVE yet; consumed approval is still required.
+                    PluginInstanceStatus.INSTALLED,
+                }
+                or instance.company_id != company_id
+                or instance.plugin_id != plugin_id
+                or instance.plugin_instance_id != plugin_instance_id
+            ):
+                return False
+            approval = await approval_getter(
+                company_id=company_id,
+                plugin_id=plugin_id,
+                manifest_version=instance.manifest_version,
+                artifact_digest=instance.artifact_digest,
+            )
+            return (
+                isinstance(approval, PluginPublicationApproval)
+                and approval.consumed_at is not None
+                and approval.company_id == company_id
+                and approval.plugin_id == plugin_id
+                and approval.manifest_version == instance.manifest_version
+                and approval.artifact_digest == instance.artifact_digest
+            )
+
+        async def resolve(
+            self,
+            *,
+            company_id: str,
+            plugin_id: str,
+            plugin_instance_id: str,
+            secret_ref: str,
+        ) -> str:
+            getter = getattr(grants, "get", None)
+            if not callable(getter) or not isinstance(secret_ref, str) or not secret_ref.strip():
+                raise LookupError("webhook grant resolver is unavailable")
+            record = await getter(company_id=company_id, plugin_id=plugin_id)
+            if record is not None:
+                allowed = await self._active_grant_allowed(
+                    record,
+                    company_id=company_id,
+                    plugin_id=plugin_id,
+                    plugin_instance_id=plugin_instance_id,
+                    secret_ref=secret_ref,
+                )
+                if not allowed:
+                    allowed = await self._regrant_allowed(
+                        record,
+                        company_id=company_id,
+                        plugin_id=plugin_id,
+                        plugin_instance_id=plugin_instance_id,
+                        secret_ref=secret_ref,
+                    )
+            else:
+                allowed = await self._first_grant_allowed(
+                    company_id=company_id,
+                    plugin_id=plugin_id,
+                    plugin_instance_id=plugin_instance_id,
+                )
+            if not allowed:
+                raise LookupError("webhook grant or artifact binding is unavailable")
+            key = webhook_secret_key(
+                company_id=company_id,
+                plugin_id=plugin_id,
+                plugin_instance_id=plugin_instance_id,
+            )
+            stored = await secrets.get(key=key)
+            if (
+                not isinstance(stored, StoredSecret)
+                or stored.secret_ref != secret_ref
+                or not isinstance(stored.value, str)
+                or not stored.value.strip()
+            ):
+                raise LookupError("webhook secret is unavailable")
+            return stored.value
+
+    return _Resolver()
+
+
+def _secret_projection(runtime: Any, tenant_secrets: Any, webhook_resolver: Any = None) -> Any:
+    """Build projection only with a complete trusted lifecycle configuration."""
+    from prodavan.infrastructure.plugins.runtime.config import RuntimeConfig
+    from prodavan.infrastructure.plugins.runtime.errors import RuntimeConfigError
+    from prodavan.infrastructure.plugins.runtime.secret_projection import (
+        K8sSecretProjection,
+    )
+
+    try:
+        config = getattr(runtime, "config", None)
+        api = getattr(runtime, "lifecycle_api", None)
+        if not isinstance(config, RuntimeConfig) or not callable(
+            getattr(api, "request", None)
+        ):
+            raise RuntimeConfigError("shared lifecycle K8s client is not configured")
+        if isinstance(tenant_secrets, _UnwiredPort):
+            raise RuntimeConfigError("tenant SecretPort is not configured")
+        gateway_url = config.internal_gateway_url()
+        if gateway_url is None:
+            raise RuntimeConfigError("trusted internal gateway_url is not configured")
+        return K8sSecretProjection(
+            config=config,
+            tenant_secrets=tenant_secrets,
+            webhook_resolver=webhook_resolver,
+            gateway_url=gateway_url,
+            api=api,
+        )
+    except RuntimeConfigError as exc:
+        logger.warning(
+            "plugin SecretProjection is not configured (%s); lifecycle secret "
+            "projection stays unwired",
+            type(exc).__name__,
+        )
+        return _UnwiredPort("secret_projection")
+
+
+def _secret_delivery_control(
+    *,
+    store: Any,
+    projection: Any,
+    artifact_registry: Any,
+    max_secret_bytes: int = 65536,
+) -> Any | None:
+    """Build token-free pre-delivery only with the full approved artifact registry."""
+    if isinstance(projection, _UnwiredPort) or not all(
+        callable(getattr(projection, method, None))
+        for method in ("reconcile_secret_values", "revoke_secret")
+    ):
+        return None
+    if store is None or not callable(getattr(store, "get", None)):
+        return None
+    if not callable(getattr(artifact_registry, "get_async", None)):
+        return None
+    from prodavan.application.plugins.capabilities.adapters.secrets import (
+        ControlPlaneSecretDelivery,
+    )
+
+    return ControlPlaneSecretDelivery(
+        store=store,
+        projection=projection,
+        artifact_registry=artifact_registry,
+        max_secret_bytes=max_secret_bytes,
+    )
+
+
+def _deployment_admin(
+    runtime: Any,
+    repos: Any,
+    instance_store: Any,
+    artifact_store: Any | None = None,
+    secret_projection: Any | None = None,
+) -> Any:
+    """Build the real admin lifecycle on the shared runtime K8s client."""
+    from prodavan.infrastructure.plugins.runtime.deployment_admin import (
+        K8sDeploymentAdmin,
+    )
+    from prodavan.infrastructure.plugins.runtime.errors import RuntimeConfigError
+
+    lifecycle_api = getattr(runtime, "lifecycle_api", None)
+    if not callable(getattr(lifecycle_api, "request", None)):
+        raise RuntimeConfigError(
+            "DeploymentAdmin requires the shared short-lived lifecycle K8s client"
+        )
+    return K8sDeploymentAdmin(
+        config=getattr(runtime, "config", None),
+        artifact_store=artifact_store or repos.artifact_store,
+        instance_store=instance_store,
+        secret_projection=secret_projection,
+        api=lifecycle_api,
+    )
+
+
 def _admin_ports(
     runtime: Any, repos: Any, config: Any, ov: dict[str, Any], unwired: list[str],
-    services_out: dict[str, Any], in_memory: list[str],
+    services_out: dict[str, Any], in_memory: list[str], *, settings: Any = None,
 ) -> Any:
     """Шаг (c): ``PluginAdminPorts`` через ``build_plugin_admin_ports``.
 
-    Все 10 полей обязательны. preferably SQL-репозитории, а не in-memory:
+    Все 12 полей обязательны. preferably SQL-репозитории, а не in-memory:
     ``grant_store``/``audit`` из ``PluginRepositories``, ``artifact_store`` — SQL,
     ``revocation_source`` — ``DbGrantRevocation``, ``mint_secret`` из проверенного
     ``PluginPlatformConfig`` (без dev-фолбэков), ``platform`` — настоящая
@@ -622,7 +1452,11 @@ def _admin_ports(
         "prodavan.application.plugins.adapters.build",
         "build_plugin_admin_ports",
     )
-    services = _wrap("admin_ports", _zone_services, runtime, repos, config, ov, unwired)
+    zone_kwargs = {"settings": settings} if settings is not None else {}
+    services = _wrap(
+        "admin_ports", _zone_services, runtime, repos, config, ov, unwired,
+        **zone_kwargs,
+    )
     # ОДНИ и те же реальные сервисы зон использует и platform (шаг e), и gateway
     # (шаг d): иначе admin и capabilities смотрели бы в разные объекты зон.
     services_out.update(services)
@@ -643,29 +1477,104 @@ def _admin_ports(
         platform_admin = _wrap("admin_ports", BearerPlatformAdminAdapter)
     routes = ov.get("routes")
     if routes is None:
-        from prodavan.application.plugins.adapters.stores import InMemoryRouteRegistry
-
-        routes = _wrap("admin_ports", InMemoryRouteRegistry)
-        in_memory.append("routes (InMemoryRouteRegistry: кластеру нужна БД/Redis, A10)")
-    instance_resolver = ov.get("instance_resolver")
-    if instance_resolver is None:
-        from prodavan.application.plugins.adapters.activation_adapter import (
-            InMemoryInstanceResolver,
+        from prodavan.infrastructure.persistence.repositories.plugins.routes import (
+            SqlRouteRegistry,
         )
 
-        instance_resolver = _wrap("admin_ports", InMemoryInstanceResolver)
-        in_memory.append("instance_resolver (in-memory; кластеру нужна БД, A10)")
+        # The route registry must use the exact durable SQL unit-of-work owned
+        # by the repository bundle. Never substitute process-local route state.
+        grant_repository = repos.grant_store
+        session_factory = getattr(grant_repository, "_session_factory", None)
+        bound_session = getattr(grant_repository, "_session", None)
+        if session_factory is None and bound_session is None:
+            raise PluginCompositionError(
+                "admin_ports",
+                "SqlRouteRegistry requires the shared repository session factory",
+            )
+        routes = _wrap(
+            "admin_ports",
+            SqlRouteRegistry,
+            session_factory=session_factory,
+            session=bound_session,
+        )
+    instance_store = ov.get("instance_store") or getattr(repos, "instance_store", None)
+    if instance_store is None:
+        instance_store = need("instance_store")
+    instance_resolver = ov.get("instance_resolver") or instance_store
+    webhook_secrets = ov.get("webhook_secrets")
+    if webhook_secrets is None:
+        webhook_secrets = _tenant_db_secrets(ov.get("secret_store"))
+    if webhook_secrets is None:
+        webhook_secrets = need("webhook_secrets")
+    webhook_resolver = ov.get("webhook_secret_resolver")
+    if webhook_resolver is None:
+        webhook_resolver = _webhook_secret_resolver(repos, webhook_secrets)
+    secret_projection = ov.get("secret_projection")
+    if secret_projection is None:
+        secret_projection = _wrap(
+            "admin_ports",
+            _secret_projection,
+            runtime,
+            services["tenant_db_secrets"],
+            webhook_resolver,
+        )
+        if isinstance(secret_projection, _UnwiredPort):
+            unwired.append("secret_projection")
+    # Reuse this exact projection for optional typed capability delivery too.
+    # It remains owned by the runtime lifecycle, not by the secrets adapter.
+    services_out["secret_projection"] = secret_projection
+    secret_delivery_control = ov.get("secret_delivery_control")
+    if secret_delivery_control is None:
+        secret_delivery_control = _secret_delivery_control(
+            store=ov.get("secret_store"),
+            projection=secret_projection,
+            artifact_registry=services["artifact_registry"],
+            max_secret_bytes=ov.get("secret_max_bytes", 65536),
+        )
+    services_out["secret_delivery_control"] = secret_delivery_control
     deployment_admin = ov.get("deployment_admin")
     if deployment_admin is None:
-        # K8s lifecycle (ensure_deployment / purge_infra / runtime_status) пока
-        # не имеет отдельного адаптера в worktree: K8sScalePort умеет только
-        # 0→1 + readiness. Передаём ЯВНЫЙ fail-closed объект, реализующий
-        # DeploymentAdminPort: сборка платформы проходит (capabilities/gateway
-        # работают), но grant/uninstall БЕЗ реального создания Deployment
-        # честно отказывают, а не «тихо успешны». НЕ подмена источника истины.
-        deployment_admin = _UnwiredDeploymentAdmin()
-        unwired.append("deployment_admin (k8s create/purge ещё не подключён)")
+        # Real create/patch/status/scale/delete lifecycle; missing RuntimeConfig
+        # or durable stores is a startup error, never a silent successful grant.
+        deployment_admin = _wrap(
+            "admin_ports",
+            _deployment_admin,
+            runtime,
+            repos,
+            instance_store,
+            ov.get("artifact_store") or repos.artifact_store,
+            secret_projection,
+        )
+    update_lock = ov.get("update_lock")
+    if update_lock is None:
+        from prodavan.infrastructure.persistence.repositories.plugins.update_lock import (
+            SqlPluginUpdateLock,
+        )
 
+        session_factory = getattr(repos.grant_store, "_session_factory", None)
+        if session_factory is None:
+            raise PluginCompositionError(
+                "admin_ports",
+                "SqlPluginUpdateLock requires the shared process session factory",
+            )
+        update_lock = _wrap(
+            "admin_ports", SqlPluginUpdateLock, session_factory=session_factory
+        )
+    installation_scopes = ov.get("installation_scopes")
+    if installation_scopes is None:
+        from prodavan.application.plugins.installation_scope.repository import (
+            SqlInstallationScopeRepository,
+        )
+
+        session_factory = getattr(repos.grant_store, "_session_factory", None)
+        if session_factory is None:
+            raise PluginCompositionError(
+                "admin_ports",
+                "SqlInstallationScopeRepository requires the shared session factory",
+            )
+        installation_scopes = SqlInstallationScopeRepository(
+            session_factory=session_factory
+        )
     kwargs: dict[str, Any] = {
         "platform": platform_admin,
         "tenant_db_service": services["tenant_db"],
@@ -677,12 +1586,29 @@ def _admin_ports(
         "mint_secret": config.claims_secret,
         "activator": services["activator"],
         "instance_resolver": instance_resolver,
+        "instance_store": instance_store,
         "deployment_admin": deployment_admin,
+        # Required constructor kwarg of the current build_plugin_admin_ports
+        # signature (adapters/build.py); replace() below keeps the same value.
+        "webhook_secrets": webhook_secrets,
+        "update_lock": update_lock,
+        "installation_scopes": installation_scopes,
         "grant_store": ov.get("admin_grant_store") or repos.grant_store,
+        "publication_approvals": (
+            ov.get("publication_approvals")
+            or getattr(repos, "publication_approvals", None)
+        ),
         "routes": routes,
         "audit": ov.get("admin_audit") or repos.audit,
     }
-    return _wrap("admin_ports", build, **kwargs)
+    ports = _wrap("admin_ports", build, **kwargs)
+    return replace(
+        ports,
+        webhook_secrets=webhook_secrets,
+        secret_delivery=secret_delivery_control,
+        update_lock=update_lock,
+        installation_scopes=installation_scopes,
+    )
 
 
 def _gateway_sessions() -> Any | None:
@@ -716,7 +1642,7 @@ def _gateway_sessions() -> Any | None:
         return None
 
 
-def _gateway_grants(repos: Any) -> Any | None:
+def _gateway_grants(repos: Any, services: Mapping[str, Any] | None = None) -> Any | None:
     """Реальный ``GrantPort`` поверх SQL-репозитория ``CapabilityGrant``.
 
     ``GrantAdapter`` (infrastructure/plugins/adapters/gateway_adapters.py)
@@ -735,6 +1661,7 @@ def _gateway_grants(repos: Any) -> Any | None:
         store = getattr(repos, "grant_store", None)
         if store is None or not callable(getattr(store, "get", None)):
             return None
+        registry = (services or {}).get("artifact_registry")
 
         class _SqlGrantStore:
             def __init__(self, sql_store: Any) -> None:
@@ -749,12 +1676,43 @@ def _gateway_grants(repos: Any) -> Any | None:
                 if record is None:
                     return None
                 policy = record.egress_policy
+                if registry is None:
+                    raise RuntimeError("signed artifact registry is required for webhook routes")
+                get_async = getattr(registry, "get_async", None)
+                if not callable(get_async):
+                    raise RuntimeError("signed artifact registry async getter is required")
+                artifact = await get_async(
+                    plugin_id=record.plugin_id, version=record.manifest_version
+                )
+                if artifact is None or artifact.digest != record.artifact_digest:
+                    raise RuntimeError("signed manifest does not match grant artifact digest")
+                manifest = getattr(artifact, "manifest", None)
+                raw_webhooks = manifest.get("webhooks") if isinstance(manifest, Mapping) else None
+                if not isinstance(raw_webhooks, (list, tuple)) or any(
+                    not isinstance(path, str) or not path.startswith("/webhook/")
+                    for path in raw_webhooks
+                ):
+                    raise RuntimeError("signed manifest webhooks must be absolute /webhook/ paths")
+                webhooks = tuple(dict.fromkeys(raw_webhooks))
+                raw_public_pages = (
+                    manifest.get("public_pages", [])
+                    if isinstance(manifest, Mapping)
+                    else None
+                )
+                if not isinstance(raw_public_pages, (list, tuple)) or any(
+                    not isinstance(path, str) or not path.startswith("/")
+                    for path in raw_public_pages
+                ):
+                    raise RuntimeError("signed manifest public_pages must be absolute paths")
+                public_pages = frozenset(raw_public_pages)
                 return GrantRecord(
                     grant_id=record.grant_id,
                     plugin_id=record.plugin_id,
                     company_id=record.company_id,
+                    plugin_instance_id=record.plugin_instance_id,
                     active=bool(getattr(record, "is_active", True)),
                     operations=frozenset(record.capabilities),
+                    public_pages=public_pages,
                     egress_mode=str(getattr(policy, "mode", "none")),
                     egress_allowed_hosts=tuple(getattr(policy, "allowed_hosts", ()) or ()),
                     egress_allowed_paths=tuple(getattr(policy, "allowed_paths", ()) or ()),
@@ -762,9 +1720,11 @@ def _gateway_grants(repos: Any) -> Any | None:
                         getattr(policy, "approved_for_full", False)
                     ),
                     artifact_digest=record.artifact_digest,
+                    manifest_version=record.manifest_version,
+                    webhooks=webhooks,
                 )
 
-        return GrantAdapter(_SqlGrantStore(store))
+        return GrantAdapter(_SqlGrantStore(store), artifact_registry=registry)
     except Exception as exc:  # noqa: BLE001 — конфигурация/импорт ≠ падение startup
         logger.warning(
             "plugin gateway grant port is not configured (%s: %s); "
@@ -781,8 +1741,8 @@ def _gateway_secrets(repos: Any) -> Any | None:
     ``SecretAdapter`` сам ходит в существующий ``RoutingSecretStore`` и
     поддерживает ротацию пары ключей (§7.5). Резолвер здесь НЕ выдумывает
     secret_ref: он читает его из того же SQL-репозитория ``CapabilityGrant``,
-    что и ``gateway_grants``. Пока при grant не выдаётся
-    ``PLUGIN_WEBHOOK_SECRET`` (долг F11), резолвер возвращает ``None`` и
+    что и ``gateway_grants``. Ref выдаётся при grant и принимается только для
+    ACTIVE записи с совпадающим tenant. Legacy grant без ref возвращает ``None``;
     ``SecretAdapter`` даёт типизированный ``503 SECRET_UNAVAILABLE``, а не
     ``_UnwiredPort``/500. Fail-closed: вебхук без подписи НЕ принимается.
     """
@@ -803,7 +1763,15 @@ def _gateway_secrets(repos: Any) -> Any | None:
                 if callable(getter)
                 else None
             )
-            ref = getattr(record, "webhook_secret_ref", None) if record else None
+            if (
+                record is None
+                or not record.is_active
+                or record.revoked_at is not None
+                or record.company_id != company_id
+                or record.plugin_id != plugin_id
+            ):
+                return None
+            ref = getattr(record, "webhook_secret_ref", None)
             if not isinstance(ref, str) or not ref.strip():
                 return None
             return SecretKeyRing(active_ref=ref)
@@ -820,7 +1788,8 @@ def _gateway_secrets(repos: Any) -> Any | None:
 
 
 def _gateway_runtime(
-    runtime: Any, repos: Any, redis: Any, ov: dict[str, Any], unwired: list[str],
+    runtime: Any, repos: Any, redis: Any, config: Any,
+    ov: dict[str, Any], unwired: list[str],
     services: Mapping[str, Any] | None = None,
 ) -> Any:
     """Шаг (d): ``PluginGatewayRuntime`` через ``build_gateway_runtime``.
@@ -869,10 +1838,6 @@ def _gateway_runtime(
         audit = _wrap("gateway_runtime", AuditAdapter, _SinkWriter(repos.audit))
     activation = ov.get("gateway_activation_port")
     if activation is None:
-        from prodavan.application.plugins.adapters.activation_adapter import (
-            InMemoryInstanceResolver,
-        )
-
         # Тот же PluginActivator, что в admin/platform: один state_store/CAS
         # на все контуры (критерий №13/№14, «wake до доставки»).
         activator = (services or {}).get("activator") or _gateway_activator(
@@ -883,7 +1848,8 @@ def _gateway_runtime(
             ActivationAdapter,
             activator=activator,
             instance_resolver=ov.get("gateway_instance_resolver")
-            or _wrap("gateway_runtime", InMemoryInstanceResolver),
+            or getattr(repos, "instance_store", None)
+            or need("gateway_instance_resolver"),
             readiness=runtime.readiness,
         )
     sessions = ov.get("gateway_sessions")
@@ -893,7 +1859,7 @@ def _gateway_runtime(
         sessions = need("gateway_sessions")
     grants = ov.get("gateway_grants")
     if grants is None:
-        grants = _gateway_grants(repos)
+        grants = _gateway_grants(repos, services)
     if grants is None:
         grants = need("gateway_grants")
     secrets = ov.get("gateway_secrets")
@@ -901,17 +1867,35 @@ def _gateway_runtime(
         secrets = _gateway_secrets(repos)
     if secrets is None:
         secrets = need("gateway_secrets")
+    rate_limit = ov.get("gateway_rate_limit_port") or RedisRateLimitAdapter(redis)
+    required_rate_limit_methods = (
+        "allow",
+        "claim_delivery_lease",
+        "commit_delivery",
+        "release_delivery",
+    )
+    missing_rate_limit_methods = tuple(
+        name for name in required_rate_limit_methods
+        if not callable(getattr(rate_limit, name, None))
+    )
+    if missing_rate_limit_methods:
+        raise PluginCompositionError(
+            "gateway_runtime",
+            "RateLimitPort не реализует delivery lease contract: "
+            + ", ".join(missing_rate_limit_methods),
+        )
     kwargs: dict[str, Any] = {
         "sessions": sessions,
         "grants": grants,
         "secrets": secrets,
-        "rate_limit": ov.get("gateway_rate_limit_port") or RedisRateLimitAdapter(redis),
+        "rate_limit": rate_limit,
         "audit": audit,
         "hmac_verifier": ov.get("gateway_hmac_port") or Sha256HmacAdapter(),
         "activation": activation,
         "backend_http": ov.get("gateway_backend_http") or runtime.backend_http,
         "static_http": ov.get("gateway_static_http") or runtime.backend_http,
         "limits": ov.get("gateway_limits") or DEFAULT_LIMITS,
+        "shell_origin": config.shell_origin,
     }
     return _wrap("gateway_runtime", build, **kwargs)
 
@@ -936,9 +1920,407 @@ def _gateway_activator(runtime: Any, ov: dict[str, Any], need: Any) -> Any:
     )
 
 
+
+def _capability_runtime_bindings(
+    runtime: Any,
+    repos: Any,
+    ov: Mapping[str, Any],
+    services: Mapping[str, Any] | None = None,
+) -> tuple[Any, Any, Any]:
+    """Build canonical backend executors; no static Service or mounted SA fallback."""
+    from prodavan.infrastructure.plugins.runtime.egress_transport import (
+        DurableGrantEgressPolicy,
+        K8sEgressTransport,
+    )
+    from prodavan.infrastructure.plugins.runtime.pod_executor import K8sPodExecutor
+
+    instance_store = ov.get("instance_store") or getattr(repos, "instance_store", None)
+    artifact_store = ov.get("artifact_store") or getattr(repos, "artifact_store", None)
+    grant_store = ov.get("grant_store") or getattr(repos, "grant_store", None)
+    # The zone-composed activator is authoritative for every capability runtime.
+    # Overrides are considered only when that shared service is genuinely absent.
+    activator = (services or {}).get("activator")
+    if activator is None:
+        activator = ov.get("activator") or getattr(runtime, "activator", None)
+    common = {
+        "config": getattr(runtime, "config", None),
+        "instance_store": instance_store,
+        "artifact_store": artifact_store,
+        "api": getattr(runtime, "lifecycle_api", None),
+        "token_provider": getattr(runtime, "token_provider", None),
+        "activator": activator,
+    }
+    pod_executor = ov.get("pod_executor")
+    if pod_executor is None:
+        pod_executor = K8sPodExecutor(
+            **common,
+            allowlist=ov.get("pod_allowlist"),
+        )
+
+    durable_policy = None
+    if ov.get("egress_policy") is None or ov.get("egress_declaration") is None:
+        durable_policy = DurableGrantEgressPolicy(
+            grant_store,
+            hop_inspector=ov.get("egress_hop_inspector"),
+        )
+    egress_policy = ov.get("egress_policy") or durable_policy
+    declarations = ov.get("egress_declaration") or durable_policy
+    egress_transport = ov.get("egress_transport")
+    if egress_transport is None:
+        egress_transport = K8sEgressTransport(
+            **common,
+            declarations=declarations,
+        )
+
+    for name, resource in (
+        ("pod_executor", pod_executor),
+        ("egress_transport", egress_transport),
+    ):
+        if not callable(getattr(resource, "execute", None)):
+            raise PluginCompositionError(
+                "capability_adapters", f"{name} must implement typed execute()"
+            )
+        if getattr(resource, "scoped_identity", False) is not True:
+            raise PluginCompositionError(
+                "capability_adapters",
+                f"{name}: default mounted ServiceAccount is forbidden",
+            )
+        if getattr(resource, "digest_bound_channel", False) is not True:
+            raise PluginCompositionError(
+                "capability_adapters",
+                f"{name}: digest-bound backend channel is required",
+            )
+        if not callable(getattr(resource, "aclose", None)):
+            raise PluginCompositionError(
+                "capability_adapters", f"{name} must support idempotent aclose()"
+            )
+    return pod_executor, egress_transport, egress_policy
+
+
+def _validate_scoped_capability_transports(platform: Any) -> None:
+    """Verify the concrete registered adapters, including explicit overrides."""
+    try:
+        pods_adapter = platform.registry.resolve("pods")
+        network_adapter = platform.registry.resolve("network")
+        pod_executor = pods_adapter._executor
+        egress_transport = network_adapter._transport
+    except Exception as exc:
+        raise PluginCompositionError(
+            "capability_adapters",
+            "registered pods/network adapters do not expose their scoped runtimes",
+        ) from exc
+    for name, resource in (
+        ("pod_executor", pod_executor),
+        ("egress_transport", egress_transport),
+    ):
+        if (
+            not callable(getattr(resource, "execute", None))
+            or getattr(resource, "scoped_identity", False) is not True
+            or getattr(resource, "digest_bound_channel", False) is not True
+            or not callable(getattr(resource, "aclose", None))
+        ):
+            raise PluginCompositionError(
+                "capability_adapters",
+                f"registered {name} is not a scoped digest-bound runtime",
+            )
+    resolver = getattr(network_adapter, "_body_digest_resolver", None)
+    if not callable(getattr(resolver, "resolve_body_digest", None)):
+        raise PluginCompositionError(
+            "capability_adapters",
+            "enabled network adapter requires the singleton body digest resolver",
+        )
+
+
+def _secret_capability_adapter(
+    *,
+    repos: Any,
+    ov: Mapping[str, Any],
+    services: Mapping[str, Any] | None,
+) -> Any | None:
+    """Build digest reads with optional delivery; never construct a file store."""
+    supplied = dict(ov.get("capability_adapters") or {})
+    if ov.get("adapter_secrets") is not None or supplied.get("secrets") is not None:
+        return None
+    if ov.get("secret_store") is None:
+        return None
+
+    from prodavan.application.plugins.capabilities.adapters.secrets import (
+        SecretStoreSecretsAdapter,
+        SignedManifestSecretDeliveryPolicy,
+    )
+
+    projection = ov.get("secret_delivery_projection")
+    if projection is None:
+        candidate = ov.get("secret_projection")
+        if candidate is None and services is not None:
+            candidate = services.get("secret_projection")
+        if not isinstance(candidate, _UnwiredPort):
+            projection = candidate
+    if not all(
+        callable(getattr(projection, method, None))
+        for method in ("deliver_secret", "revoke_secret")
+    ):
+        # Digest-only read remains wired; optional delivery is typed-unwired.
+        projection = None
+
+    policy = ov.get("secret_delivery_policy")
+    if projection is not None and policy is None:
+        registry = (services or {}).get("artifact_registry") or ov.get("artifact_registry")
+        grants = ov.get("grant_store") or getattr(repos, "grant_store", None)
+        if callable(getattr(registry, "get_async", None)) and callable(
+            getattr(grants, "get_by_grant_id", None)
+        ):
+            policy = SignedManifestSecretDeliveryPolicy(
+                artifact_registry=registry,
+                grant_store=grants,
+            )
+
+    supplied_objects = (
+        ov.get("adapter_objects") is not None or supplied.get("objects") is not None
+    )
+    owns_object_resources = not supplied_objects and bool(
+        ov.get("own_object_resources", True)
+    )
+    return SecretStoreSecretsAdapter(
+        store=ov.get("secret_store"),
+        max_secret_bytes=ov.get("secret_max_bytes", 65536),
+        owns_store=not owns_object_resources,
+        projection=projection,
+        delivery_policy=policy,
+    )
+
+
+def _event_integration_overrides(
+    *, ov: Mapping[str, Any], repos: Any, runtime: Any,
+    services: Mapping[str, Any] | None, settings: Any = None,
+) -> dict[str, Any]:
+    """Build the signed dispatcher handler/wake pair or fail typed-unwired."""
+
+    from prodavan.application.plugins.events.dispatch import (
+        ActivatingPluginEventHandler,
+        HmacPluginEventSigner,
+        SignedEventHandler,
+    )
+    from prodavan.application.plugins.events.errors import PluginEventError
+    from prodavan.application.plugins.wiring.config import (
+        PluginPlatformConfig,
+        PluginPlatformConfigError,
+        validate_event_signing_secret_ref,
+    )
+
+    raw_supplied = ov.get("capability_adapters") or {}
+    if not isinstance(raw_supplied, Mapping):
+        raise PluginCompositionError(
+            "event_handler", "typed unwired: capability_adapters must be a mapping"
+        )
+    supplied = dict(raw_supplied)
+    if ov.get("adapter_events") is not None or supplied.get("events") is not None:
+        dispatcher = ov.get("event_dispatcher")
+        if dispatcher is None:
+            raise PluginCompositionError(
+                "event_handler",
+                "typed unwired: adapter_events override requires its real event_dispatcher",
+            )
+        return {"event_dispatcher": dispatcher}
+
+    handler = ov.get("event_handler")
+    wake_hook = ov.get("event_wake_hook")
+    if (handler is None) != (wake_hook is None):
+        raise PluginCompositionError(
+            "event_handler",
+            "typed unwired: event_handler and event_wake_hook must be configured together",
+        )
+    try:
+        handler_signer = getattr(handler, "event_signer", None)
+        signer = ov.get("event_signer") or handler_signer
+        if (
+            ov.get("event_signer") is not None
+            and handler_signer is not None
+            and ov.get("event_signer") is not handler_signer
+        ):
+            raise PluginCompositionError(
+                "event_handler", "typed unwired: conflicting event signers"
+            )
+        if signer is None:
+            secret_ref = ov.get("event_signing_secret_ref")
+            if secret_ref is None and settings is not None:
+                secret_ref = PluginPlatformConfig.from_settings(
+                    settings
+                ).event_signing_secret_ref
+            # No direct-environment, claims-secret or development fallback.
+            secret_ref = validate_event_signing_secret_ref(secret_ref, required=True)
+            signer = HmacPluginEventSigner(
+                secret_store=ov.get("secret_store"), secret_ref=secret_ref
+            )
+        if not all(callable(getattr(signer, method, None)) for method in ("sign", "verify")):
+            raise PluginCompositionError(
+                "event_handler", "typed unwired: event signer contract is invalid"
+            )
+        validate = getattr(signer, "validate", None)
+        if callable(validate):
+            validated = validate()
+            if inspect.isawaitable(validated):
+                raise PluginCompositionError(
+                    "event_handler", "typed unwired: async signer validation is unsupported"
+                )
+
+        if handler is None:
+            if not callable(getattr(signer, "signed_wire", None)):
+                raise PluginCompositionError(
+                    "event_handler", "typed unwired: signed_wire is required for backend delivery"
+                )
+            activator = (services or {}).get("activator") or ov.get("activator")
+            delivery = ActivatingPluginEventHandler(
+                activator=activator,
+                proxy=getattr(runtime, "proxy", None),
+                grant_store=repos.grant_store,
+                signer=signer,
+                timeout_seconds=float(ov.get("event_backend_timeout_seconds", 30.0)),
+                wake_timeout=ov.get("event_wake_timeout_seconds"),
+            )
+            return {"event_handler": delivery, "event_wake_hook": delivery}
+
+        if not callable(getattr(handler, "handle", None)):
+            raise PluginCompositionError(
+                "event_handler", "typed unwired: event handler must implement handle()"
+            )
+        if not callable(wake_hook) and not callable(getattr(wake_hook, "wake", None)):
+            raise PluginCompositionError(
+                "event_wake_hook", "typed unwired: wake hook must implement wake()"
+            )
+        if handler_signer is None:
+            handler = SignedEventHandler(handler=handler, signer=signer)
+        return {"event_handler": handler, "event_wake_hook": wake_hook}
+    except PluginCompositionError:
+        raise
+    except PluginPlatformConfigError as exc:
+        raise PluginCompositionError(
+            "event_handler", f"typed unwired: {exc}"
+        ) from None
+    except PluginEventError as exc:
+        raise PluginCompositionError(
+            "event_handler", f"typed unwired: {exc.code.value}"
+        ) from None
+    except Exception as exc:
+        raise PluginCompositionError(
+            "event_handler", f"typed unwired: {type(exc).__name__}"
+        ) from None
+
+
+def _job_integration_override(
+    *, ov: Mapping[str, Any], repos: Any, services: Mapping[str, Any] | None, redis: Any
+) -> dict[str, Any]:
+    """Build the manifest/digest resolver and concrete Celery queue adapter."""
+
+    from prodavan.application.plugins.jobs.tasks import (
+        JobTaskError,
+        ManifestJobTasks,
+        RedisJobExecutionStore,
+    )
+    from prodavan.application.plugins.capabilities.adapters.jobs import CeleryJobsAdapter
+    from prodavan.core.infra.worker_manager import get_celery_app, get_worker_manager
+    from prodavan.core.jobs.async_runner import run_async
+    from prodavan.infrastructure.plugins.capabilities.redis import ManagerRedisClient
+
+    raw_supplied = ov.get("capability_adapters") or {}
+    if not isinstance(raw_supplied, Mapping):
+        raise PluginCompositionError(
+            "job_tasks", "typed unwired: capability_adapters must be a mapping"
+        )
+    supplied = dict(raw_supplied)
+    if ov.get("adapter_jobs") is not None or supplied.get("jobs") is not None:
+        return {}
+    try:
+        declarations = ov.get("job_tasks")
+        if not isinstance(declarations, Mapping) or not declarations:
+            raise PluginCompositionError(
+                "job_tasks", "typed unwired: server-owned job_tasks mapping is required"
+            )
+        redis_client = ov.get("redis_client") or ManagerRedisClient(redis)
+        execution_store = ov.get("job_execution_store") or RedisJobExecutionStore(
+            redis=redis_client
+        )
+        runner = ov.get("job_async_runner") or run_async
+        tasks = ManifestJobTasks(
+            tasks=declarations,
+            grant_store=repos.grant_store,
+            artifact_registry=(services or {}).get("artifact_registry")
+            or ov.get("artifact_registry"),
+            execution_store=execution_store,
+            async_runner=runner,
+        )
+        configured_app = ov.get("job_celery_app")
+        registration_hook = ov.get("job_worker_registration")
+        if (
+            ov.get("job_queue") is None
+            and configured_app is None
+            and registration_hook is None
+        ):
+            raise PluginCompositionError(
+                "job_tasks",
+                "typed unwired: separate Celery worker registration hook is required",
+            )
+        if configured_app is not None:
+            tasks.register(configured_app)
+        if registration_hook is not None:
+            if not callable(registration_hook):
+                raise PluginCompositionError(
+                    "job_tasks", "typed unwired: job_worker_registration must be callable"
+                )
+            registered = registration_hook(tasks)
+            if inspect.isawaitable(registered):
+                raise PluginCompositionError(
+                    "job_tasks", "typed unwired: async worker registration is unsupported"
+                )
+
+        worker_provider = ov.get("job_worker_provider") or get_worker_manager
+        celery_provider = ov.get("job_celery_provider") or get_celery_app
+
+        def registered_worker() -> Any:
+            app = celery_provider()
+            tasks.register(app)
+            return worker_provider()
+
+        def registered_celery() -> Any:
+            app = celery_provider()
+            tasks.register(app)
+            return app
+
+        queue = ov.get("job_queue")
+        if queue is None:
+            from prodavan.infrastructure.plugins.capabilities.celery import (
+                RedisCeleryJobQueue,
+            )
+
+            queue = RedisCeleryJobQueue(
+                redis=redis_client,
+                worker_provider=registered_worker,
+                celery_provider=registered_celery,
+            )
+        return {
+            "adapter_jobs": CeleryJobsAdapter(
+                queue=queue,
+                allowed_tasks=tasks,
+                owns_queue=bool(ov.get("own_job_queue", False)),
+                owns_tasks=True,
+            )
+        }
+    except PluginCompositionError:
+        raise
+    except JobTaskError as exc:
+        raise PluginCompositionError(
+            "job_tasks", f"typed unwired: {exc.code}"
+        ) from None
+    except Exception as exc:
+        raise PluginCompositionError(
+            "job_tasks", f"typed unwired: {type(exc).__name__}"
+        ) from None
+
+
 def _platform_overrides(
     repos: Any, runtime: Any, admin_ports: Any, gateway_runtime: Any,
     admin_service: Any, ov: dict[str, Any], services: Mapping[str, Any] | None = None,
+    settings: Any = None, redis: Any = None,
 ) -> dict[str, Any]:
     """Overrides шага (e) в ТОЧНЫХ именах ``PORT_OVERRIDES``/``SERVICE_OVERRIDES``.
 
@@ -966,20 +2348,193 @@ def _platform_overrides(
         # Единый admin-сервис: и в platform.admin, и в app.state.
         "admin": admin_service,
     }
+    if services is not None:
+        # The admin/gateway pair and the platform must accept evidence sealed by
+        # exactly the same verifier.  Passing only the SQL store here would make
+        # build_plugin_platform construct a second verifier with another seal.
+        for key in (
+            "artifact_verifier", "artifact_registry", "tenant_db", "object_store",
+            "activator", "object_buckets", "object_sts", "object_presigner",
+            "tenant_db_secrets",
+        ):
+            value = services.get(key)
+            if value is not None:
+                out[key] = value
     # ``RuntimePorts.as_platform_overrides()``: cosign / activation_scale /
     # activation_readiness / activation_state_store / activation_proxy /
     # gateway_backend_http. У тестовых даблов метод может отсутствовать.
     if hasattr(runtime, "as_platform_overrides"):
         for key, value in _wrap("runtime_ports", runtime.as_platform_overrides).items():
             out.setdefault(key, value)
+    from prodavan.application.plugins.capabilities.adapters.build import (
+        build_capability_adapters,
+    )
+
+    pod_executor, egress_transport, egress_policy = _wrap(
+        "capability_adapters", _capability_runtime_bindings, runtime, repos, ov, services
+    )
+    capability_overrides = dict(ov)
+    event_bindings = _wrap(
+        "event_handler",
+        _event_integration_overrides,
+        ov=capability_overrides,
+        repos=repos,
+        runtime=runtime,
+        services=services,
+        settings=settings,
+    )
+    capability_overrides.update(event_bindings)
+    if "event_dispatcher" in event_bindings:
+        out["event_dispatcher"] = event_bindings["event_dispatcher"]
+
+    # One lifecycle-managed Redis wrapper and one claim registry are shared by
+    # publish, per-subscription factories, raw DLQ and jobs. Explicit test or
+    # standalone overrides are preserved without creating a second registry.
+    from prodavan.infrastructure.plugins.capabilities.redis import ManagerRedisClient
+    from prodavan.infrastructure.plugins.adapters.redis_event_claims import (
+        RedisDeliveryClaimStore,
+    )
+
+    if ov.get("redis_client") is None and redis is None:
+        raise PluginCompositionError(
+            "event_delivery_claims",
+            "shared lifecycle-managed Redis is required for delivery claims",
+        )
+    redis_client = ov.get("redis_client") or ManagerRedisClient(redis)
+    # Normalize explicit None as absent: every downstream path must receive the
+    # same wrapper, not independently construct A/B/C wrappers around redis.
+    capability_overrides["redis_client"] = redis_client
+    platform_claims = (ov.get("platform_overrides") or {}).get("event_delivery_claims")
+    direct_claims = ov.get("event_delivery_claims")
+    if direct_claims is not None and platform_claims is not None and direct_claims is not platform_claims:
+        raise PluginCompositionError(
+            "event_delivery_claims",
+            "conflicting direct and platform delivery claim stores",
+        )
+    delivery_claims = direct_claims or platform_claims
+    if delivery_claims is None:
+        delivery_claims = RedisDeliveryClaimStore(
+            redis=redis_client,
+            prefix=ov.get(
+                "event_delivery_claim_prefix",
+                "agentscale:plugin:events:delivery-claims:",
+            ),
+        )
+    capability_overrides["event_delivery_claims"] = delivery_claims
+    out["event_delivery_claims"] = delivery_claims
+    capability_overrides.update(
+        _wrap(
+            "job_tasks",
+            _job_integration_override,
+            ov=capability_overrides,
+            repos=repos,
+            services=services,
+            redis=redis,
+        )
+    )
+    capability_overrides["pod_executor"] = pod_executor
+    capability_overrides["egress_transport"] = egress_transport
+    capability_overrides["egress_policy"] = egress_policy
+    secret_adapter = _wrap(
+        "capability_adapters",
+        _secret_capability_adapter,
+        repos=repos,
+        ov=capability_overrides,
+        services=services,
+    )
+    if secret_adapter is not None:
+        capability_overrides["adapter_secrets"] = secret_adapter
+    resolver_factory = capability_overrides.get("body_digest_resolver_factory")
+    if resolver_factory is not None:
+        capability_overrides["body_digest_resolver"] = resolver_factory()
+    supplied_network = capability_overrides.get("adapter_network") or (
+        capability_overrides.get("capability_adapters") or {}
+    ).get("network")
+    if supplied_network is None:
+        from prodavan.application.plugins.capabilities.adapters.network import (
+            K8sEgressNetworkAdapter,
+        )
+
+        capability_overrides["adapter_network"] = K8sEgressNetworkAdapter(
+            transport=egress_transport,
+            egress=capability_overrides.get("egress_service") or egress_policy,
+            initial_policy=egress_policy,
+            body_digest_resolver=capability_overrides.get("body_digest_resolver"),
+            owns_transport=bool(capability_overrides.get("own_egress_transport", True)),
+        )
+    out.update(
+        _wrap(
+            "capability_adapters",
+            build_capability_adapters,
+            redis=redis,
+            repos=repos,
+            runtime=runtime,
+            services=services or {},
+            settings=settings,
+            overrides=capability_overrides,
+        )
+    )
     # Явные overrides родителя имеют приоритет, но НЕ могут обнулить порт.
     for key, value in dict(ov.get("platform_overrides") or {}).items():
         if value is None:
             raise PluginCompositionError(
                 "platform", f"platform_overrides[{key!r}] is None; fail-closed"
             )
+        if key == "event_delivery_claims" and value is not delivery_claims:
+            raise PluginCompositionError(
+                "event_delivery_claims",
+                "platform override must use the shared delivery claim store",
+            )
         out[key] = value
+
+    final_dispatcher = out.get("event_dispatcher")
+    if final_dispatcher is None:
+        raise PluginCompositionError(
+            "event_delivery_claims",
+            "production event dispatcher is missing after composition",
+        )
+    if getattr(final_dispatcher, "_delivery_claims", None) is not delivery_claims:
+        raise PluginCompositionError(
+            "event_delivery_claims",
+            "final event dispatcher ownership store differs from shared claims",
+        )
     return out
+
+
+def _mcp_discovery(platform: Any, repos: Any, ov: Mapping[str, Any]) -> Any:
+    """Build discovery and its signed RPC backend broker on exact platform instances."""
+    from prodavan.application.plugins.mcp.broker import DurableMcpBroker
+    from prodavan.application.plugins.mcp.discovery import (
+        ArtifactGrantMcpManifestSource,
+        DurableMcpDiscovery,
+    )
+
+    adapter = platform.registry.resolve("mcp")
+    store = ov.get("mcp_registration_store") or adapter.registration_store
+    source = ov.get("mcp_manifest_source") or ArtifactGrantMcpManifestSource(
+        grant_store=ov.get("mcp_grant_store") or repos.grant_store,
+        artifact_registry=ov.get("mcp_artifact_registry") or platform.artifact_registry,
+        timeout_seconds=float(ov.get("mcp_discovery_timeout_seconds", 3.0)),
+    )
+    consumer = DurableMcpDiscovery(
+        store=store,
+        manifest_source=source,
+        gateway=ov.get("mcp_gateway") or platform.capability_service,
+        max_arguments_bytes=int(ov.get("mcp_max_arguments_bytes", 64 * 1024)),
+        max_response_bytes=int(ov.get("mcp_max_response_bytes", 64 * 1024)),
+        max_tools=int(ov.get("mcp_max_tools", 64)),
+        timeout_seconds=float(ov.get("mcp_discovery_timeout_seconds", 3.0)),
+    )
+    broker = ov.get("mcp_backend_broker") or DurableMcpBroker(
+        discovery=consumer,
+        manifest_source=source,
+        grant_store=ov.get("mcp_grant_store") or repos.grant_store,
+        backend_proxy=ov.get("mcp_backend_proxy") or platform.gateway_proxy,
+        max_arguments_bytes=int(ov.get("mcp_max_arguments_bytes", 64 * 1024)),
+        max_response_bytes=int(ov.get("mcp_max_response_bytes", 64 * 1024)),
+    )
+    adapter.attach_broker(broker)
+    return consumer
 
 
 # ---------------------------------------------------------------------------
@@ -1035,11 +2590,19 @@ def install_plugin_platform(
     composer = _Composer(app)
     unwired: list[str] = []
     in_memory: list[str] = []
+    runtime: Any = None
+    platform: Any = None
+    payload_store: Any = None
+    mcp_discovery: Any = None
     # ОДНИ и те же реальные сервисы зон использует и admin (шаг c), и gateway
     # (шаг d), и platform (шаг e): иначе capability-запросы, отзыв и wake
     # смотрели бы в разные объекты зон.
     zone_services: dict[str, Any] = {}
     try:
+        # One control-plane store is resolved once, never in request handlers.
+        # The same object goes to objects, secrets, Kafka and MinIO; no runtime backend.
+        ov["secret_store"] = _wrap("secret_store", _shared_secret_store, ov)
+
         # --- i) guard ДО attach (решение по transport/guard.py) -------------
         _register_guard_once(app, composer)
 
@@ -1058,6 +2621,16 @@ def install_plugin_platform(
         if repos is None:
             raise PluginCompositionError("repositories", "build_plugin_repositories вернул None")
 
+        # Build before capability adapters so the network owner can inject this
+        # exact factory without a second Redis-backed store or app.state lookup.
+        payload_store = _wrap(
+            "payload_store", _publish_digest_payload_store, redis, ov, composer
+        )
+        ov["digest_payload_store"] = payload_store
+        ov["body_digest_resolver_factory"] = getattr(
+            composer._state, BODY_DIGEST_RESOLVER_FACTORY_STATE_KEY
+        )
+
         # --- b) runtime-порты: cosign/k8s/state/proxy ----------------------
         runtime = ov.get("runtime_ports")
         if runtime is None:
@@ -1066,17 +2639,34 @@ def install_plugin_platform(
                 "prodavan.infrastructure.plugins.runtime.build",
                 "build_runtime_ports",
             )
+            runtime_kwargs = dict(ov.get("runtime_kwargs") or {})
+            if (
+                "instance_store" not in runtime_kwargs
+                and "resource_name_resolver" not in runtime_kwargs
+                and (ov.get("instance_store") or getattr(repos, "instance_store", None))
+                is not None
+            ):
+                # Async durable lookup restores canonical names after restart.
+                runtime_kwargs["instance_store"] = (
+                    ov.get("instance_store") or repos.instance_store
+                )
             runtime = _wrap(
                 "runtime_ports", build_runtime, settings,
-                **dict(ov.get("runtime_kwargs") or {}),
+                **runtime_kwargs,
             )
         if runtime is None:
             raise PluginCompositionError("runtime_ports", "build_runtime_ports вернул None")
 
-        # --- c) PluginAdminPorts (10 полей) + PluginAdminService ------------
+        # One real admin adapter for the whole app; lifespan opens/closes it.
+        if ov.get("admin_ports") is None and ov.get("tenant_db_admin") is None:
+            tenant_db_admin = _wrap("tenant_db_admin", _tenant_db_admin, settings)
+            if tenant_db_admin is not None:
+                ov["tenant_db_admin"] = tenant_db_admin
+
+        # --- c) PluginAdminPorts (12 полей) + PluginAdminService ------------
         admin_ports = ov.get("admin_ports") or _wrap(
             "admin_ports", _admin_ports, runtime, repos, config, ov, unwired,
-            zone_services, in_memory,
+            zone_services, in_memory, settings=settings,
         )
         admin_service = ov.get("admin_service")
         if admin_service is None:
@@ -1088,19 +2678,27 @@ def install_plugin_platform(
 
         # --- d) PluginGatewayRuntime ----------------------------------------
         gateway_runtime = ov.get("gateway_runtime") or _wrap(
-            "gateway_runtime", _gateway_runtime, runtime, repos, redis, ov, unwired,
-            zone_services,
+            "gateway_runtime", _gateway_runtime, runtime, repos, redis, config,
+            ov, unwired, zone_services,
         )
         if gateway_runtime is None:
             raise PluginCompositionError("gateway_runtime", "build_gateway_runtime вернул None")
 
+        if unwired:
+            raise PluginCompositionError(
+                "required_ports",
+                "enabled platform forbids _UnwiredPort on required paths: "
+                + ", ".join(sorted(set(unwired))),
+            )
+
         # --- e) build_plugin_platform ---------------------------------------
-        platform_overrides = _wrap(
-            "platform", _platform_overrides,
-            repos, runtime, admin_ports, gateway_runtime, admin_service, ov,
-        )
         platform = ov.get("platform")
         if platform is None:
+            platform_overrides = _wrap(
+                "platform", _platform_overrides,
+                repos, runtime, admin_ports, gateway_runtime, admin_service, ov,
+                zone_services, settings, redis,
+            )
             build_platform = _load(
                 "platform",
                 "prodavan.application.plugins.wiring.platform",
@@ -1111,6 +2709,27 @@ def install_plugin_platform(
             raise PluginCompositionError(
                 "platform", "build_plugin_platform вернул None при enabled=True"
             )
+        if zone_services:
+            if platform.artifact_verifier is not zone_services.get("artifact_verifier"):
+                raise PluginCompositionError(
+                    "platform", "artifact verifier identity differs from admin/gateway services"
+                )
+            if platform.artifact_registry is not zone_services.get("artifact_registry"):
+                raise PluginCompositionError(
+                    "platform", "artifact registry identity differs from admin/gateway services"
+                )
+
+        mcp_discovery = ov.get("mcp_discovery") or _wrap(
+            "mcp_discovery", _mcp_discovery, platform, repos, ov
+        )
+        attach_discovery = _load(
+            "mcp_discovery",
+            "prodavan.application.plugins.wiring.adapters",
+            "attach_mcp_discovery",
+        )
+        _wrap(
+            "mcp_discovery", attach_discovery, platform.registry, mcp_discovery
+        )
 
         # --- f) attach_plugin_platform -> STATE_KEYS wiring (19) -------------
         attach = _load(
@@ -1122,6 +2741,8 @@ def install_plugin_platform(
 
         _wrap("attach_platform", attach, app, platform)
         composer.mark(*STATE_KEYS)
+        setattr(composer._state, MCP_DISCOVERY_STATE_KEY, mcp_discovery)
+        composer.mark(MCP_DISCOVERY_STATE_KEY)
 
         # --- g) install_plugin_gateway_runtime --------------------------------
         install_runtime = _load(
@@ -1150,23 +2771,613 @@ def install_plugin_platform(
         setattr(composer._state, IN_MEMORY_PORTS_STATE_KEY, tuple(sorted(set(in_memory))))
         composer.mark(IN_MEMORY_PORTS_STATE_KEY)
 
+        _register_digest_payload_shutdown(app, payload_store, composer, overrides=ov)
+
+        # Runtime shutdown is attached only after every build/attach step succeeds.
+        # RuntimePorts.aclose() is idempotent, so repeated lifespan signals close once.
+        _register_runtime_shutdown(app, runtime, composer, overrides=ov)
+        _register_tenant_db_admin_lifecycle(
+            app,
+            _TenantDbAdminLifecycle(ov.get("tenant_db_admin")),
+            composer,
+            overrides=ov,
+        )
+        object_sts = zone_services.get("object_sts") or ov.get("object_sts")
+        if object_sts is None and bool(
+            getattr(ov.get("minio_config"), "sts_probe_enabled", False)
+        ):
+            raise PluginCompositionError(
+                "minio_sts_probe", "probe is enabled but the shared MinioSts adapter is absent",
+            )
+        _register_minio_sts_lifecycle(app, object_sts, composer, overrides=ov)
+        # Capability shutdown registers BEFORE the final app.state verify: its
+        # lifecycle key is part of _OWN_STATE_KEYS. The position right after
+        # minio keeps the same manager registration order (payload, runtime,
+        # tenant, minio, capability) and the same reverse shutdown order.
+        _register_capability_shutdown(app, platform, composer, overrides=ov)
+
         # Финальная сверка: ни одного «почти привязанного» ключа.
         for key in _OWN_STATE_KEYS:
             if not hasattr(composer._state, key):
                 raise PluginCompositionError(
                     "verify", f"app.state.{key} отсутствует после композиции"
                 )
-        if unwired:
-            logger.warning(
-                "plugin platform installed with %d unwired ports (F11 debt): %s",
-                len(set(unwired)), ", ".join(sorted(set(unwired))),
+        adapter_report = platform.report().get("adapters", {})
+        if adapter_report.get("stub_count"):
+            raise PluginCompositionError(
+                "verify", "enabled platform contains UnavailableAdapter"
             )
-        else:
-            logger.info("plugin platform installed: all app.state keys bound, guard once")
+        from prodavan.application.plugins.capabilities.contracts import CapabilityName
+
+        expected_capabilities = {item.value for item in CapabilityName}
+        if set(adapter_report.get("registered", ())) != expected_capabilities:
+            raise PluginCompositionError(
+                "verify", "enabled platform registry does not contain all capabilities"
+            )
+        for capability in expected_capabilities:
+            if not callable(getattr(platform.registry.resolve(capability), "quota_usage", None)):
+                raise PluginCompositionError(
+                    "verify", f"capability {capability} has no quota_usage hook"
+                )
+        _wrap(
+            "capability_adapters", _validate_scoped_capability_transports, platform
+        )
+        logger.info("plugin platform installed: all app.state keys bound, guard once")
         return platform
     except Exception:
         composer.rollback()
+        _close_runtime_after_failed_build(runtime)
+        if platform is not None and platform is not runtime:
+            _close_runtime_after_failed_build(platform)
+        if payload_store is not None:
+            _close_runtime_after_failed_build(payload_store)
+        if mcp_discovery is not None:
+            _close_runtime_after_failed_build(mcp_discovery)
         raise
+
+
+# ---------------------------------------------------------------------------
+# Emergency-disabled GitHub Actions CI publication (no install/deploy wiring).
+# ---------------------------------------------------------------------------
+
+
+def plugin_ci_publication_enabled(
+    environ: Mapping[str, str] | None = None,
+) -> bool:
+    """Read the independent CI flag strictly; an invalid value fails closed."""
+    source = os.environ if environ is None else environ
+    raw = str(source.get(PLUGIN_CI_PUBLICATION_ENABLED_ENV, "") or "").strip().lower()
+    if not raw or raw in {"0", "false", "no", "off", "disabled"}:
+        return False
+    if raw in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    raise PluginCompositionError(
+        "ci_publication_config",
+        f"{PLUGIN_CI_PUBLICATION_ENABLED_ENV} must be an explicit boolean",
+    )
+
+
+def _ci_required_env(source: Mapping[str, str], name: str, *, step: str) -> str:
+    value = source.get(name)
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or any(character.isspace() for character in value)
+    ):
+        raise PluginCompositionError(
+            step,
+            f"{name} is required when {PLUGIN_CI_PUBLICATION_ENABLED_ENV}=true; "
+            "no anonymous or cross-auth fallback is allowed",
+        )
+    return value
+
+
+class _PluginCiPublicationLifecycle:
+    """Close only resources created by the standalone CI composition."""
+
+    def __init__(
+        self,
+        *,
+        artifact_store: Any = None,
+        registry_authorizer: Any = None,
+    ) -> None:
+        self._artifact_store = artifact_store
+        self._registry_authorizer = registry_authorizer
+
+    @property
+    def name(self) -> str:
+        return _PLUGIN_CI_LIFESPAN_NAME
+
+    async def startup(self) -> None:
+        # SQL sessions and the sync bridge loop are lazy. GitHub App is a
+        # borrowed provider owned by the source composition, not by this resource.
+        return None
+
+    async def shutdown(self) -> None:
+        try:
+            if self._registry_authorizer is not None:
+                close_authorizer = getattr(self._registry_authorizer, "aclose", None)
+                if callable(close_authorizer):
+                    await close_authorizer()
+        finally:
+            close = getattr(self._artifact_store, "close", None)
+            if callable(close):
+                await asyncio.to_thread(close)
+
+    async def health(self) -> None:
+        return None
+
+
+def _close_ci_store_after_failed_build(store: Any) -> None:
+    close = getattr(store, "close", None)
+    if not callable(close):
+        return
+    try:
+        close()
+    except Exception:  # noqa: BLE001 — rollback must preserve the startup error
+        logger.warning("CI publication rollback could not close its artifact store")
+
+
+def install_plugin_ci_publication(
+    app: Any,
+    settings: Any,
+    *,
+    session_factory: Any = None,
+    lifespan_manager: Any = None,
+    managed_organization: Any = None,
+    github_app: Any = None,
+    source_config: Any = None,
+    approval_reader: Any = None,
+    environ: Mapping[str, str] | None = None,
+    overrides: Mapping[str, Any] | None = None,
+) -> Any | None:
+    """Build one CI publication service, without enabling install/deploy.
+
+    Enabled composition requires a dedicated GitHub OIDC audience, a trusted
+    ManagedOrganization plus GitHubAppClient for registry_read tokens, a durable
+    PublicationApproval reader, the existing cosign identity, and the shared SQL
+    session factory. Source, approval and artifact repositories use that exact
+    factory. There is no static-token or ACTIVE-grant fallback, anonymous GHCR
+    loader, Keycloak/employee validator, in-memory store, installer, deployment
+    admin, grant writer call, or plugin-platform side effect.
+
+    If the full platform is already attached, its verifier/registry pair is
+    reused.  Otherwise the CI contour creates that pair once and owns its SQL
+    artifact store through the supplied lifespan manager. The separate source
+    composition owns the request-service factory and GitHub App lifecycle. Any
+    failure restores CI-owned app.state values and closes only an owned store;
+    the borrowed provider and source factory are left untouched.
+    """
+    source = os.environ if environ is None else environ
+    if not plugin_ci_publication_enabled(source):
+        return None
+
+    from prodavan.api.internal.plugin_artifacts import (
+        PLUGIN_CI_PUBLICATION_SERVICE_STATE,
+    )
+    from prodavan.application.plugins.artifacts.oidc import GitHubActionsOidcValidator
+    from prodavan.application.plugins.artifacts.publication import (
+        DurablePluginInstanceScopeResolver,
+        HttpxOciArtifactLoader,
+        PluginCiPublicationService,
+    )
+    from prodavan.application.plugins.artifacts.registry import PluginArtifactRegistry
+    from prodavan.application.plugins.artifacts.verification import (
+        PLATFORM_VERSION,
+        ArtifactVerifier,
+        CompatibilityGate,
+        CosignPort,
+    )
+    from prodavan.application.plugins.sources.repository import SqlModuleSourceRepository
+    from prodavan.application.plugins.sources.service import ModuleSourceProvisioningConfig
+    from prodavan.infrastructure.persistence.repositories.plugins.artifacts import (
+        SqlArtifactRegistryStore,
+    )
+    from prodavan.infrastructure.persistence.repositories.plugins.grants import (
+        SqlCapabilityGrantRepository,
+    )
+    from prodavan.infrastructure.persistence.repositories.plugins.instances import (
+        SqlPluginInstanceRepository,
+    )
+    from prodavan.infrastructure.persistence.repositories.plugins.publication_approvals import (
+        SqlPluginPublicationApprovalRepository,
+    )
+    from prodavan.infrastructure.plugins.artifacts.ghcr_auth import (
+        GhcrRegistryAuthorizer,
+    )
+    from prodavan.infrastructure.plugins.sources.github_app import GitHubAppClient
+    from prodavan.infrastructure.plugins.sources.models import (
+        ManagedOrganization,
+        validate_branch,
+    )
+
+    state = getattr(app, "state", None)
+    if state is None:
+        raise PluginCompositionError("ci_state", "app has no .state")
+    existing_service = getattr(state, PLUGIN_CI_PUBLICATION_SERVICE_STATE, None)
+    if existing_service is not None:
+        if not isinstance(existing_service, PluginCiPublicationService):
+            raise PluginCompositionError(
+                "ci_state",
+                f"app.state.{PLUGIN_CI_PUBLICATION_SERVICE_STATE} has an unexpected type",
+            )
+        return existing_service
+    if session_factory is None:
+        raise PluginCompositionError(
+            "ci_repositories",
+            "enabled CI publication requires get_session_factory(); "
+            "a request-scoped or in-memory replacement is forbidden",
+        )
+    if lifespan_manager is None or not callable(getattr(lifespan_manager, "register", None)):
+        raise PluginCompositionError(
+            "ci_lifecycle",
+            "enabled CI publication requires the application lifespan manager",
+        )
+
+    ov: dict[str, Any] = dict(overrides or {})
+    managed_organization = managed_organization or ov.get("managed_organization")
+    github_app = github_app or ov.get("github_app")
+    source_config = source_config or ov.get("source_config")
+    approval_reader = approval_reader or ov.get("approval_reader")
+    state_verifier = getattr(state, "plugin_artifact_verifier", None)
+    state_registry = getattr(state, "plugin_artifact_registry", None)
+    owned_store: Any = None
+    owned_authorizer: Any = None
+    state_touched = False
+    keys = (
+        "plugin_artifact_verifier",
+        "plugin_artifact_registry",
+        PLUGIN_CI_PUBLICATION_SERVICE_STATE,
+    )
+    before = {
+        key: (hasattr(state, key), getattr(state, key, None))
+        for key in keys
+    }
+
+    try:
+        # Publication consumes durable exact pre-approvals, never an ACTIVE
+        # CapabilityGrant. The concrete SQL reader shares the process factory;
+        # no compatibility adapter or in-memory fallback is accepted.
+        if approval_reader is None:
+            approval_reader = SqlPluginPublicationApprovalRepository(
+                session_factory=session_factory
+            )
+        if not isinstance(approval_reader, SqlPluginPublicationApprovalRepository):
+            raise PluginCompositionError(
+                "ci_approval",
+                "CI publication requires SqlPluginPublicationApprovalRepository; "
+                "ACTIVE grant and in-memory fallbacks are forbidden",
+            )
+        if getattr(approval_reader, "_session_factory", None) is not session_factory:
+            raise PluginCompositionError(
+                "ci_approval",
+                "approval reader does not use the shared process session factory",
+            )
+
+        # Dedicated OIDC is built before any repository.  In particular, do not
+        # pass get_jwt_validator()/Keycloak settings into this trust contour.
+        oidc_validator = ov.get("oidc_validator")
+        if oidc_validator is None:
+            audience = _ci_required_env(
+                source, PLUGIN_CI_OIDC_AUDIENCE_ENV, step="ci_oidc"
+            )
+            oidc_validator = _wrap(
+                "ci_oidc", GitHubActionsOidcValidator, audience=audience
+            )
+        if not callable(getattr(oidc_validator, "validate_for_source", None)):
+            raise PluginCompositionError(
+                "ci_oidc", "oidc_validator must implement validate_for_source()"
+            )
+
+        artifact_loader = ov.get("artifact_loader")
+        registry_authorizer = ov.get("registry_authorizer")
+        if artifact_loader is None:
+            if managed_organization is None:
+                raise PluginCompositionError(
+                    "ci_registry_auth",
+                    "GHCR registry_read requires ManagedOrganization configuration "
+                    "for the GitHub App installation",
+                )
+            if not isinstance(managed_organization, ManagedOrganization):
+                raise PluginCompositionError(
+                    "ci_registry_auth",
+                    "managed_organization must be ManagedOrganization; installation_id "
+                    "is never request input",
+                )
+            if github_app is None:
+                raise PluginCompositionError(
+                    "ci_registry_auth",
+                    "GHCR registry_read requires the shared GitHubAppClient "
+                    "installation-token provider",
+                )
+            if not isinstance(github_app, GitHubAppClient):
+                raise PluginCompositionError(
+                    "ci_registry_auth",
+                    "github_app must be the real GitHubAppClient, not a static "
+                    "token or fake production provider",
+                )
+            if not callable(getattr(github_app, "installation_token", None)):
+                raise PluginCompositionError(
+                    "ci_registry_auth",
+                    "github_app must expose the shared installation_token() delegate",
+                )
+            provider_organization = _wrap(
+                "ci_registry_auth", github_app._organization, managed_organization.name
+            )
+            if provider_organization != managed_organization:
+                raise PluginCompositionError(
+                    "ci_registry_auth",
+                    "GitHubAppClient managed organization/installation binding differs "
+                    "from the GHCR configuration",
+                )
+            if registry_authorizer is None:
+                registry_authorizer = _wrap(
+                    "ci_registry_auth",
+                    GhcrRegistryAuthorizer,
+                    organization=managed_organization.name,
+                    installation_id=managed_organization.installation_id,
+                    token_provider=github_app,
+                )
+                owned_authorizer = registry_authorizer
+            if not callable(getattr(registry_authorizer, "authorization_for", None)):
+                raise PluginCompositionError(
+                    "ci_registry_auth",
+                    "registry_authorizer must implement authorization_for()",
+                )
+            artifact_loader = _wrap(
+                "ci_loader",
+                HttpxOciArtifactLoader,
+                allowed_registries=("ghcr.io",),
+                authorizer=registry_authorizer,
+            )
+        for method in ("load_manifest", "load_blob"):
+            if not callable(getattr(artifact_loader, method, None)):
+                raise PluginCompositionError(
+                    "ci_loader", f"artifact_loader must implement {method}()"
+                )
+
+        if not isinstance(source_config, ModuleSourceProvisioningConfig):
+            raise PluginCompositionError(
+                "ci_source_config",
+                "source provisioning requires ModuleSourceProvisioningConfig; "
+                "the mounted source API stays fail-closed without it",
+            )
+        if source_config.organization is not managed_organization:
+            raise PluginCompositionError(
+                "ci_source_config",
+                "source config and GHCR must use the identical ManagedOrganization",
+            )
+        _wrap("ci_source_config", source_config.trust.validate)
+        _wrap("ci_source_config", validate_branch, source_config.default_branch)
+
+        identity = getattr(settings, "plugin_cosign_identity", "")
+        issuer = getattr(settings, "plugin_cosign_issuer", "")
+        if not isinstance(identity, str) or not identity.strip():
+            raise PluginCompositionError(
+                "ci_verifier", "PLUGIN_COSIGN_IDENTITY is required for CI publication"
+            )
+        if not isinstance(issuer, str) or not issuer.strip():
+            raise PluginCompositionError(
+                "ci_verifier", "PLUGIN_COSIGN_ISSUER is required for CI publication"
+            )
+
+        sources = ov.get("source_repository")
+        if sources is None:
+            sources = SqlModuleSourceRepository(session_factory=session_factory)
+        if not isinstance(sources, SqlModuleSourceRepository):
+            raise PluginCompositionError(
+                "ci_repositories", "CI publication requires SqlModuleSourceRepository"
+            )
+
+        instance_scope_resolver = ov.get("instance_scope_resolver")
+        scope_grants = ov.get("instance_scope_grant_store")
+        scope_instances = ov.get("instance_scope_instance_store")
+        if instance_scope_resolver is not None:
+            if not isinstance(
+                instance_scope_resolver,
+                DurablePluginInstanceScopeResolver,
+            ):
+                raise PluginCompositionError(
+                    "ci_instance_scope",
+                    "CI publication requires the durable SQL scope resolver; "
+                    "an in-memory fallback is forbidden",
+                )
+            if scope_grants is None:
+                scope_grants = instance_scope_resolver._grant_store
+            if scope_instances is None:
+                scope_instances = instance_scope_resolver._instance_store
+            if (
+                scope_grants is not instance_scope_resolver._grant_store
+                or scope_instances is not instance_scope_resolver._instance_store
+            ):
+                raise PluginCompositionError(
+                    "ci_instance_scope",
+                    "resolver and scope repositories must be the identical objects",
+                )
+        else:
+            # Reuse the attached platform's exact repositories when available.
+            # Standalone CI builds the same SQL ports on the one process factory.
+            admin_ports = getattr(state, "plugin_admin_ports", None)
+            if scope_grants is None:
+                scope_grants = getattr(admin_ports, "grant_store", None)
+            if scope_instances is None:
+                scope_instances = getattr(admin_ports, "instance_store", None)
+        if scope_grants is None:
+            scope_grants = SqlCapabilityGrantRepository(
+                session_factory=session_factory
+            )
+        if scope_instances is None:
+            scope_instances = SqlPluginInstanceRepository(
+                session_factory=session_factory
+            )
+        for label, repository, expected_type in (
+            ("grant", scope_grants, SqlCapabilityGrantRepository),
+            ("instance", scope_instances, SqlPluginInstanceRepository),
+        ):
+            if not isinstance(repository, expected_type):
+                raise PluginCompositionError(
+                    "ci_instance_scope",
+                    f"{label} scope repository must be durable SQL; "
+                    "an in-memory fallback is forbidden",
+                )
+            if (
+                getattr(repository, "_session_factory", None) is not session_factory
+                or getattr(repository, "_session", None) is not None
+            ):
+                raise PluginCompositionError(
+                    "ci_instance_scope",
+                    f"{label} scope repository does not use the shared process "
+                    "session factory",
+                )
+        if instance_scope_resolver is None:
+            instance_scope_resolver = DurablePluginInstanceScopeResolver(
+                grant_store=scope_grants,
+                instance_store=scope_instances,
+            )
+
+        verifier = ov.get("artifact_verifier") or state_verifier
+        registry = ov.get("artifact_registry") or state_registry
+        if verifier is None and registry is not None:
+            verifier = getattr(registry, "_verifier", None)
+        if verifier is None:
+            cosign = ov.get("cosign")
+            if cosign is None:
+                from prodavan.infrastructure.plugins.runtime.cosign_adapter import (
+                    CliCosignPort,
+                )
+
+                timeout_raw = str(source.get("PLUGIN_RUNTIME_COSIGN_TIMEOUT", "60.0"))
+                try:
+                    timeout = float(timeout_raw)
+                except ValueError as exc:
+                    raise PluginCompositionError(
+                        "ci_verifier", "PLUGIN_RUNTIME_COSIGN_TIMEOUT must be numeric"
+                    ) from exc
+                cosign = _wrap(
+                    "ci_verifier",
+                    CliCosignPort,
+                    binary=str(source.get("PLUGIN_RUNTIME_COSIGN_BIN", "cosign")),
+                    timeout_seconds=timeout,
+                    kms_key_ref=str(source.get("PLUGIN_RUNTIME_KMS_KEY_REF", "") or "") or None,
+                    runner=ov.get("cosign_runner"),
+                    attestation_verifier=ov.get("attestation_verifier"),
+                )
+            if not isinstance(cosign, CosignPort):
+                raise PluginCompositionError(
+                    "ci_verifier", "cosign must implement CosignPort"
+                )
+            verifier = _wrap(
+                "ci_verifier",
+                ArtifactVerifier,
+                cosign,
+                validator=ov.get("manifest_validator"),
+                identity=identity,
+                issuer=issuer,
+                compatibility=CompatibilityGate(platform_version=PLATFORM_VERSION),
+                clock=ov.get("clock"),
+            )
+        if not isinstance(verifier, ArtifactVerifier):
+            raise PluginCompositionError(
+                "ci_verifier", "artifact_verifier must be ArtifactVerifier"
+            )
+
+        if registry is None:
+            artifact_store = ov.get("artifact_store")
+            if artifact_store is None:
+                artifact_store = SqlArtifactRegistryStore(
+                    session_factory=session_factory
+                )
+                owned_store = artifact_store
+            registry = _wrap(
+                "ci_registry",
+                PluginArtifactRegistry,
+                store=artifact_store,
+                verifier=verifier,
+                clock=ov.get("clock"),
+            )
+        if not isinstance(registry, PluginArtifactRegistry):
+            raise PluginCompositionError(
+                "ci_registry", "artifact_registry must be PluginArtifactRegistry"
+            )
+        if getattr(registry, "_verifier", None) is not verifier:
+            raise PluginCompositionError(
+                "ci_verifier",
+                "ArtifactVerifier and PluginArtifactRegistry have different evidence seals",
+            )
+        if state_verifier is not None and state_verifier is not verifier:
+            raise PluginCompositionError(
+                "ci_verifier", "refusing to replace the attached platform verifier"
+            )
+        if state_registry is not None and state_registry is not registry:
+            raise PluginCompositionError(
+                "ci_registry", "refusing to replace the attached platform registry"
+            )
+
+        artifact_store = getattr(registry, "_store", None)
+        if not isinstance(artifact_store, SqlArtifactRegistryStore):
+            raise PluginCompositionError(
+                "ci_repositories",
+                "CI publication requires durable SqlArtifactRegistryStore; "
+                "an in-memory production fallback is forbidden",
+            )
+        for label, repository in (
+            ("source", sources),
+            ("approval", approval_reader),
+            ("artifact", artifact_store),
+        ):
+            if (
+                getattr(repository, "_session_factory", None) is not session_factory
+                or getattr(repository, "_session", None) is not None
+            ):
+                raise PluginCompositionError(
+                    "ci_repositories",
+                    f"{label} store does not use the shared process session factory",
+                )
+
+        service = PluginCiPublicationService(
+            source_repository=sources,
+            oidc_validator=oidc_validator,
+            artifact_loader=artifact_loader,
+            verifier=verifier,
+            artifact_registry=registry,
+            approval_reader=approval_reader,
+            instance_scope_resolver=instance_scope_resolver,
+            manifest_validator=ov.get("manifest_validator"),
+        )
+
+        state_touched = True
+        setattr(state, "plugin_artifact_verifier", verifier)
+        setattr(state, "plugin_artifact_registry", registry)
+        setattr(state, PLUGIN_CI_PUBLICATION_SERVICE_STATE, service)
+        if owned_store is not None or owned_authorizer is not None:
+            _wrap(
+                "ci_lifecycle",
+                lifespan_manager.register,
+                _PluginCiPublicationLifecycle(
+                    artifact_store=owned_store,
+                    registry_authorizer=owned_authorizer,
+                ),
+            )
+        return service
+    except Exception as exc:
+        if state_touched:
+            for key in reversed(keys):
+                existed, old_value = before[key]
+                if existed:
+                    setattr(state, key, old_value)
+                else:
+                    try:
+                        delattr(state, key)
+                    except AttributeError:
+                        pass
+        if owned_store is not None:
+            _close_ci_store_after_failed_build(owned_store)
+        if isinstance(exc, PluginCompositionError):
+            raise
+        raise PluginCompositionError(
+            "ci_publication", f"composition failed with {type(exc).__name__}"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1236,6 +3447,17 @@ def install_plugin_platform_for_tests(
                 "platform", "build_plugin_platform вернул None при enabled=True"
             )
 
+        mcp_discovery = fakes.get("mcp_discovery")
+        if mcp_discovery is not None:
+            attach_discovery = _load(
+                "mcp_discovery",
+                "prodavan.application.plugins.wiring.adapters",
+                "attach_mcp_discovery",
+            )
+            _wrap(
+                "mcp_discovery", attach_discovery, platform.registry, mcp_discovery
+            )
+
         gateway_runtime = fakes.get("gateway_runtime")
         admin_ports = fakes.get("admin_ports")
         admin_service = fakes.get("admin_service")
@@ -1253,6 +3475,9 @@ def install_plugin_platform_for_tests(
 
         _wrap("attach_platform", attach, app, platform)
         composer.mark(*STATE_KEYS)
+        if mcp_discovery is not None:
+            setattr(composer._state, MCP_DISCOVERY_STATE_KEY, mcp_discovery)
+            composer.mark(MCP_DISCOVERY_STATE_KEY)
 
         if gateway_runtime is not None:
             install_runtime = _load(

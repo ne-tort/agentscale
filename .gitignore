@@ -63,3 +63,11 @@ infra/.kube/*
 # Scratch files: probes, tsc dumps, junit captures written during a run
 apps/*/_*.txt
 apps/*/_probe_*.py
+
+# Raw local verification captures (sanitized evidence lives in reports/module-audit/).
+.scratch-evidence/
+apps/api/artifacts/
+
+
+# Local verification tool binaries downloaded during audit (never commit)
+.scratch-evidence/tools/

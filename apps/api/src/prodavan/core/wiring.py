@@ -157,7 +157,14 @@ def build_lifespan_manager() -> LifespanManager:
             platform_jobs_group=settings.kafka_platform_jobs_group,
         )
     )
-    manager.register(worker_manager_from_settings())
+    # Both HTTP entrypoints bind the install-created ManifestJobTasks through
+    # this typed hook in their shared jobs composition helper. The enabled hook
+    # deliberately has no independent API factory.
+    manager.register(
+        worker_manager_from_settings(
+            plugin_jobs_enabled=settings.plugin_platform_enabled,
+        )
+    )
     if settings.kafka_consumer_enabled:
         manager.register(MetricsConsumerResource())
     manager.register(PlatformBootstrapResource())

@@ -23,6 +23,7 @@ from prodavan.application.plugins.tenantdb import (
     INVALID_IDENTIFIER,
     NOT_FOUND,
     PRIVILEGE_DENIED,
+    ROTATION_REQUIRED,
     TenantDbError,
     plugin_role_name,
     plugin_schema_name,
@@ -46,7 +47,8 @@ async def test_ensure_company_database_creates_once() -> None:
     assert result == DB
     assert DB in admin.databases
     assert admin.count("CREATE DATABASE") == 1
-    assert admin.count("SELECT 1 FROM pg_database") == 1
+    # One pre-check and one mandatory post-CREATE confirmation.
+    assert admin.count("SELECT 1 FROM pg_database") == 2
 
 
 async def test_ensure_company_database_second_call_does_not_recreate() -> None:
@@ -56,7 +58,8 @@ async def test_ensure_company_database_second_call_does_not_recreate() -> None:
     await service.ensure_company_database(COMPANY)
     await service.ensure_company_database(COMPANY)
     assert admin.count("CREATE DATABASE") == 1
-    assert admin.count("SELECT 1 FROM pg_database") == 3
+    # First call checks before and after CREATE; replays only pre-check.
+    assert admin.count("SELECT 1 FROM pg_database") == 4
     assert admin.databases == {DB}
 
 
@@ -144,8 +147,8 @@ async def test_grant_plugin_creates_role_schema_and_search_path() -> None:
     assert "v1" not in sp[0] and "v2" not in sp[0]
 
 
-async def test_grant_plugin_second_call_is_idempotent_but_rotates_dsn() -> None:
-    """Повторный grant: CREATE DATABASE/ROLE/SCHEMA — по разу, DSN ротируется."""
+async def test_grant_plugin_second_call_preserves_password_and_dsn() -> None:
+    """Replay: CREATE DATABASE/ROLE/SCHEMA — по разу, пароль/DSN сохраняются."""
     service, admin, secrets, audit = make_service()
     first = await service.grant_plugin(COMPANY, PLUGIN)
     second = await service.grant_plugin(COMPANY, PLUGIN)
@@ -154,12 +157,11 @@ async def test_grant_plugin_second_call_is_idempotent_but_rotates_dsn() -> None:
     assert admin.count("CREATE ROLE") == 1
     assert admin.count("CREATE SCHEMA") == 1
     assert admin.count("ALTER ROLE") >= 6  # 3 + 3 (password/login/search_path/таймауты)
-    assert second.rotated is True
-    assert second.secret_ref != first.secret_ref
-    assert len(secrets.rotates) == 1
-    # Ротация = ALTER ROLE .. PASSWORD, а не второй CREATE ROLE.
-    assert admin.count("ALTER ROLE") >= 6
-    assert any("PASSWORD" in t for t in admin.texts(prefix="ALTER ROLE"))
+    assert second.rotated is False
+    assert second.secret_ref == first.secret_ref
+    assert secrets.rotates == []
+    # Повторный ensure не делает ALTER ROLE PASSWORD и не ломает текущий DSN.
+    assert not any("PASSWORD" in t for t in admin.texts(prefix="ALTER ROLE"))
     assert "rotated" in audit.all_payload_text()
 
 
@@ -168,7 +170,7 @@ async def test_grant_plugin_after_revoke_restores_login() -> None:
     service, admin, _secrets, _audit = make_service()
     await service.grant_plugin(COMPANY, PLUGIN)
     await service.revoke_plugin(COMPANY, PLUGIN)
-    await service.grant_plugin(COMPANY, PLUGIN)
+    await service.rotate_plugin(COMPANY, PLUGIN)
     assert any("LOGIN" in t and "NOLOGIN" not in t for t in admin.texts(prefix="ALTER ROLE"))
     assert admin.count("CREATE ROLE") == 1  # всё ещё один раз
 
@@ -248,18 +250,16 @@ async def test_sqlstate_42501_maps_to_privilege_denied() -> None:
     assert ei.value.http_status == 403
 
 
-async def test_not_found_on_revoke_without_grant() -> None:
-    service, _admin, _secrets, _audit = make_service()
-    with pytest.raises(TenantDbError) as ei:
-        await service.revoke_plugin(COMPANY, PLUGIN)
-    assert ei.value.code == NOT_FOUND
+async def test_revoke_without_role_is_idempotent_and_cleans_secret() -> None:
+    service, _admin, secrets, _audit = make_service()
+    await service.revoke_plugin(COMPANY, PLUGIN)
+    assert secrets.values == {}
 
 
-async def test_not_found_on_uninstall_without_grant() -> None:
-    service, _admin, _secrets, _audit = make_service()
-    with pytest.raises(TenantDbError) as ei:
-        await service.uninstall_plugin(COMPANY, PLUGIN)
-    assert ei.value.code == NOT_FOUND
+async def test_uninstall_without_role_is_idempotent() -> None:
+    service, _admin, secrets, _audit = make_service()
+    await service.uninstall_plugin(COMPANY, PLUGIN)
+    assert secrets.values == {}
 
 
 async def test_not_found_on_drop_missing_company_database() -> None:
@@ -285,8 +285,8 @@ async def test_revoke_keeps_database_and_schema() -> None:
     assert admin.count("DROP DATABASE") == 0
     assert any("NOLOGIN" in t for t in admin.texts(prefix="ALTER ROLE"))
     assert admin.count("REVOKE CONNECT") == 1
-    # Старый DSN инвалидирован, plaintext не остался.
-    assert all(v == "" for v in secrets.values.values())
+    # Старый DSN удалён, plaintext не остался.
+    assert secrets.values == {}
     assert "kept" in audit.all_payload_text()
 # endregion
 
@@ -392,9 +392,9 @@ async def test_drop_company_database_validates_id() -> None:
 
 # region Протоколы и контракты
 def test_error_codes_contract_is_complete() -> None:
-    """Все пять кодов из задания F3 существуют и уникальны."""
+    """Все коды, включая явный ROTATION_REQUIRED, существуют и уникальны."""
     assert ALL_CODES == frozenset(
-        {INVALID_IDENTIFIER, ADMIN_UNAVAILABLE, ALREADY_EXISTS, NOT_FOUND, PRIVILEGE_DENIED}
+        {INVALID_IDENTIFIER, ADMIN_UNAVAILABLE, ALREADY_EXISTS, NOT_FOUND, PRIVILEGE_DENIED, ROTATION_REQUIRED}
     )
     # Каждая фабрика даёт свой код и безопасный http_status.
     assert TenantDbError.invalid_identifier("x", kind="company_id").code == INVALID_IDENTIFIER

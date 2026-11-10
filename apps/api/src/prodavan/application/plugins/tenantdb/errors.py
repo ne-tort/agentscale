@@ -31,6 +31,9 @@ NOT_FOUND = "NOT_FOUND"
 
 PRIVILEGE_DENIED = "PRIVILEGE_DENIED"
 """PostgreSQL отклонил DDL по привилегиям (SQLSTATE 42501 и аналоги)."""
+
+ROTATION_REQUIRED = "ROTATION_REQUIRED"
+"""DSN secret отсутствует/не совпадает; ensure не выполняет скрытую ротацию."""
 # endregion
 
 ALL_CODES: frozenset[str] = frozenset(
@@ -40,6 +43,7 @@ ALL_CODES: frozenset[str] = frozenset(
         ALREADY_EXISTS,
         NOT_FOUND,
         PRIVILEGE_DENIED,
+        ROTATION_REQUIRED,
     }
 )
 """Полный набор кодов — для проверки контракта в тестах и в CI."""
@@ -52,6 +56,7 @@ _HTTP_STATUS: dict[str, int] = {
     ALREADY_EXISTS: 409,
     NOT_FOUND: 404,
     PRIVILEGE_DENIED: 403,
+    ROTATION_REQUIRED: 409,
 }
 
 _TITLES: dict[str, str] = {
@@ -60,6 +65,7 @@ _TITLES: dict[str, str] = {
     ALREADY_EXISTS: "Tenant database object already exists",
     NOT_FOUND: "Tenant database object not found",
     PRIVILEGE_DENIED: "Privilege denied by PostgreSQL",
+    ROTATION_REQUIRED: "Explicit tenant DSN rotation required",
 }
 
 
@@ -164,5 +170,14 @@ class TenantDbError(Exception):
             operation=operation,
             detail=f"privilege denied for {safe_name} (SQLSTATE 42501)",
             http_status=_HTTP_STATUS[PRIVILEGE_DENIED],
+        )
+    @classmethod
+    def rotation_required(cls, operation: str, *, safe_name: str) -> TenantDbError:
+        """Ensure обнаружил отсутствующий/чужой DSN; rotate должен быть явным."""
+        return cls(
+            code=ROTATION_REQUIRED,
+            operation=operation,
+            detail=f"tenant DSN secret missing or mismatched for {safe_name}",
+            http_status=_HTTP_STATUS[ROTATION_REQUIRED],
         )
     # endregion

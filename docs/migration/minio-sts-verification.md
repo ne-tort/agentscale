@@ -159,12 +159,31 @@ policy ⊆ родительская» и поведение пересечени
 максимальное значения, а также точный XML-формат ответа `AssumeRole` не получены.
 
 Что заложено у нас (не является границами MinIO): `ports.py:25-30` —
-`MIN_TTL_SECONDS=60`, `MAX_TTL_SECONDS=3600`, `DEFAULT_TTL_SECONDS=900`, единая
-`validate_ttl()` для STS и presigned, отказ вне диапазона вместо клампа
-(`ports.py:44-60`). As-built `minio_store.py:190,206` использует
-`ExpiresIn=max(60, int(ttl_seconds))` — **верхней границы нет**, и это одна из причин,
-почему v4 вводит `MAX_TTL_SECONDS=3600`. Для fallback это ограничение уже
-применимо к `presign()` (`service.py:493` → `validate_ttl`).
+`MIN_TTL_SECONDS=60`, `MAX_TTL_SECONDS=3600`, `DEFAULT_TTL_SECONDS=900` для
+presigned через `validate_ttl()`; отдельный STS contract использует
+`MIN_STS_TTL_SECONDS=900`, `MAX_STS_TTL_SECONDS=3600` и `validate_sts_ttl()`.
+Оба отклоняют выход за диапазон вместо клампа. As-built
+`minio_store.py:190,206` использует `ExpiresIn=max(60, int(ttl_seconds))` —
+**верхней границы нет**, и это одна из причин, почему v4 вводит
+`MAX_TTL_SECONDS=3600`. Для fallback это ограничение уже применимо к
+`presign()` (`service.py:493` → `validate_ttl`).
+
+**Breaking STS-only contract migration (2026-11-10):** real disposable matrix
+показала `DurationSeconds=60` → HTTP 400 `InvalidParameterValue` и для admin, и
+для root, а `DurationSeconds=900` → HTTP 200 с полными temporary credentials и
+`EXPIRES_IN=900`. Поэтому STS переведён на 900..3600 с отдельным typed
+`validate_sts_ttl()` на service и adapter границах; presign сохраняет 60..3600.
+Обычная botocore model validation восстановлена, `parameter_validation=False`
+не используется. Probe запрашивает 900 и отбрасывает credentials. Отдельная
+canary-only session policy разрешает unconditioned `s3:ListBucket` только на
+dedicated configured probe bucket (это авторизует `HeadBucket`) и
+`s3:GetObject` только на fixed canary key; tenant data, Put/Delete и другие
+buckets не входят в canary policy. Основные tenant scoped credentials не
+получают canary access или unscoped ListBucket; tenant List без prefix denied.
+Точный HTTP 403 с кодом `AccessDenied` либо numeric `403` является denial,
+missing bucket/key с реальным 403/404 остаётся unwired. Финальный disposable
+acceptance: **29 collected / 29 passed / 0 skipped** ([JUnit](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/minio-plugin-acceptance-junit.xml),
+[summary](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/summary.json)); production/live остаётся unverified.
 Проверка фактического `X-Amz-Expires`/`X-Amz-Signature` и (при будущем включении STS)
 полей ответа вынесена в чек-лист, п. 6.
 

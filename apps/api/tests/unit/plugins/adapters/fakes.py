@@ -44,25 +44,31 @@ class Recorder:
 
 
 @dataclass
-class FakeSyncRevocation(Recorder):
-    """Синхронный ``identity.RevocationPort``: revoke(grant_id) + is_active."""
+class FakeAsyncRevocation(Recorder):
+    """Canonical async ``identity.RevocationPort`` с независимым typed result."""
 
     revoked: set[str] = field(default_factory=set)
     active_override: dict[str, bool] = field(default_factory=dict)
+    revoke_result: bool = True
 
-    def revoke(self, grant_id: str) -> None:
+    async def revoke(self, grant_id: str) -> bool:
         self._record("revoke", grant_id)
         self.revoked.add(grant_id)
+        return self.revoke_result
 
-    def is_active(self, grant_id: str, *, now: datetime | None = None) -> bool:
+    async def is_active(self, grant_id: str, *, now: datetime | None = None) -> bool:
         self._record("is_active", grant_id, now=now)
         if grant_id in self.active_override:
             return self.active_override[grant_id]
         return grant_id not in self.revoked
 
-    def is_revoked(self, grant_id: str) -> bool:
+    async def is_revoked(self, grant_id: str) -> bool:
         self._record("is_revoked", grant_id)
-        return not self.is_active(grant_id)
+        return not await self.is_active(grant_id)
+
+
+# Compatibility для теста сборки, который передаёт fake, но не вызывает методы.
+FakeSyncRevocation = FakeAsyncRevocation
 
 
 # --------------------------------------------------------------------------- tenantdb
@@ -74,6 +80,12 @@ class FakeAdminConnection(Recorder):
 
     existing_databases: set[str] = field(default_factory=set)
     fail: bool = False
+    _state: Any = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        from tests.unit.plugins.tenantdb.conftest import FakeAdminConnection as StatefulAdmin
+
+        self._state = StatefulAdmin(databases=set(self.existing_databases))
 
     async def execute(
         self,
@@ -85,25 +97,41 @@ class FakeAdminConnection(Recorder):
         self._record("execute", text, params, target=target)
         if self.fail:
             raise RuntimeError("admin connection down")
-        from prodavan.application.plugins.tenantdb.service import ExecuteResult
-
-        name = (params or {}).get("name")
-        rows = ((1,),) if name in self.existing_databases else ()
-        return ExecuteResult(rows=rows)
+        return await self._state.execute(text, params, target=target)
 
 
 @dataclass
 class FakeSecretPort(Recorder):
+    values: dict[str, str] = field(default_factory=dict)
+    refs: dict[str, str] = field(default_factory=dict)
+
+    async def get(self, *, key: str) -> Any | None:
+        from prodavan.application.plugins.tenantdb.service import StoredSecret
+
+        if key not in self.values:
+            return None
+        return StoredSecret(secret_ref=self.refs[key], value=self.values[key])
+
     async def put(self, *, key: str, value: str) -> str:
         self._record("put", key=key, value=value)
-        return f"secret_ref://{key}"
+        ref = f"secret_ref://{key}"
+        self.values[key] = value
+        self.refs[key] = ref
+        return ref
 
     async def rotate(self, *, key: str, value: str) -> str:
         self._record("rotate", key=key, value=value)
-        return f"secret_ref://{key}#rotated"
+        ref = f"secret_ref://{key}#rotated"
+        self.values[key] = value
+        self.refs[key] = ref
+        return ref
 
     async def delete(self, *, secret_ref: str) -> None:
         self._record("delete", secret_ref=secret_ref)
+        for key, ref in list(self.refs.items()):
+            if ref == secret_ref:
+                self.values.pop(key, None)
+                self.refs.pop(key, None)
 
 
 @dataclass
@@ -187,7 +215,11 @@ def make_artifact_record(
         RegistryOutcome,
         RegistryReason,
     )
-    from prodavan.application.plugins.artifacts.registry import PluginArtifactRecord
+    from prodavan.application.plugins.artifacts.registry import (
+        PluginArtifactRecord,
+        PublicationMetadata,
+    )
+    from prodavan.application.plugins.artifacts.verification import VerificationEvidence
     from prodavan.domain.dynamic_apps.types import AppLifecycleStatus
 
     now = datetime(2026, 11, 8, 9, 0, tzinfo=UTC)
@@ -202,6 +234,21 @@ def make_artifact_record(
         if quarantine
         else None
     )
+    verification = VerificationEvidence(
+        image_ref=f"ghcr.io/ne-tort/plugins/{plugin_id}@{digest}",
+        artifact_digest=digest,
+        manifest_fingerprint="f" * 64,
+        identity="ci@agentscale",
+        issuer="https://token.actions.githubusercontent.com",
+        sbom_verified=True,
+        provenance_verified=True,
+        scan_verified=True,
+        csp_verified=True,
+        observed_at=now,
+        outcome=RegistryOutcome.APPLIED,
+        quarantine=None,
+        seal=object(),
+    ) if published and applied and not quarantine and published_at else None
     return PluginArtifactRecord(
         plugin_id=plugin_id,
         version=version,
@@ -218,6 +265,14 @@ def make_artifact_record(
         quarantine=evidence,
         published_at=now if published_at else None,
         created_at=now,
+        verification=verification,
+        publication=PublicationMetadata(
+            source_id="agentscale/plugins",
+            commit_sha="a" * 40,
+            backend_digest=DIGEST_OTHER,
+            backend_image_ref="registry.example/backend@" + DIGEST_OTHER,
+            run_url="https://github.com/agentscale/plugins/actions/runs/42",
+        ),
     )
 
 
@@ -230,6 +285,8 @@ class FakeDeploymentAdmin(Recorder):
 
     deployments: dict[tuple[str, str], str] = field(default_factory=dict)
     statuses: dict[tuple[str, str], Any] = field(default_factory=dict)
+    artifact_pins: dict[tuple[str, str], str] = field(default_factory=dict)
+    update_owner_pins: dict[tuple[str, str], str | None] = field(default_factory=dict)
     purge_result: bool = True
 
     async def ensure_deployment(
@@ -240,6 +297,7 @@ class FakeDeploymentAdmin(Recorder):
         plugin_instance_id: str,
         artifact_digest: str,
         dsn_ref: str,
+        webhook_secret_ref: str,
     ) -> str:
         self._record(
             "ensure_deployment",
@@ -248,17 +306,74 @@ class FakeDeploymentAdmin(Recorder):
             plugin_instance_id=plugin_instance_id,
             artifact_digest=artifact_digest,
             dsn_ref=dsn_ref,
+            webhook_secret_ref=webhook_secret_ref,
         )
         from prodavan.application.plugins.admin.contracts import PluginRuntimeStatus
 
         name = f"{company_id}-{plugin_id}"
         self.deployments[(company_id, plugin_id)] = name
         self.statuses[(company_id, plugin_id)] = PluginRuntimeStatus.IDLE
+        self.artifact_pins[(company_id, plugin_id)] = artifact_digest
+        self.update_owner_pins.setdefault((company_id, plugin_id), None)
+        return name
+
+    async def update_deployment(
+        self,
+        *,
+        company_id: str,
+        plugin_id: str,
+        plugin_instance_id: str,
+        artifact_digest: str,
+        expected_current_artifact_digest: str,
+        update_owner_token: str | None,
+        expected_current_update_owner_token: str | None,
+        dsn_ref: str,
+        webhook_secret_ref: str,
+    ) -> str:
+        self._record(
+            "update_deployment",
+            company_id=company_id,
+            plugin_id=plugin_id,
+            plugin_instance_id=plugin_instance_id,
+            artifact_digest=artifact_digest,
+            expected_current_artifact_digest=expected_current_artifact_digest,
+            update_owner_token=update_owner_token,
+            expected_current_update_owner_token=expected_current_update_owner_token,
+            dsn_ref=dsn_ref,
+            webhook_secret_ref=webhook_secret_ref,
+        )
+        from prodavan.application.plugins.admin.contracts import PluginRuntimeStatus
+
+        key = (company_id, plugin_id)
+        name = f"{company_id}-{plugin_id}"
+        self.deployments[key] = name
+        self.statuses.setdefault(key, PluginRuntimeStatus.IDLE)
+        live_owner = self.update_owner_pins.get(key)
+        live_digest = self.artifact_pins.get(key)
+        owned_target = live_digest == artifact_digest and live_owner == update_owner_token
+        if not owned_target and (
+            live_digest != expected_current_artifact_digest
+            or (
+                expected_current_update_owner_token is not None
+                and live_owner != expected_current_update_owner_token
+            )
+        ):
+            from prodavan.application.plugins.admin.errors import PluginAdminError
+            raise PluginAdminError(
+                code="PLUGIN_UPDATE_CONFLICT",
+                detail="live owner/digest mismatch",
+                status=409,
+                extra={"patch_attempted": False},
+            )
+        self.artifact_pins[key] = artifact_digest
+        self.update_owner_pins[key] = update_owner_token
         return name
 
     async def purge_infra(self, *, company_id: str, plugin_id: str) -> bool:
         self._record("purge_infra", company_id=company_id, plugin_id=plugin_id)
         self.deployments.pop((company_id, plugin_id), None)
+        self.artifact_pins.pop((company_id, plugin_id), None)
+        self.update_owner_pins.pop((company_id, plugin_id), None)
         return self.purge_result
 
     async def runtime_status(self, *, company_id: str, plugin_id: str) -> Any:
@@ -266,6 +381,17 @@ class FakeDeploymentAdmin(Recorder):
         from prodavan.application.plugins.admin.contracts import PluginRuntimeStatus
 
         return self.statuses.get((company_id, plugin_id), PluginRuntimeStatus.ABSENT)
+
+    async def runtime_binding(self, *, company_id: str, plugin_id: str) -> Any:
+        from prodavan.application.plugins.admin.contracts import PluginRuntimeBinding
+        key = (company_id, plugin_id)
+        if key not in self.artifact_pins:
+            raise RuntimeError("Deployment binding absent")
+        return PluginRuntimeBinding(
+            plugin_instance_id=INSTANCE,
+            artifact_digest=self.artifact_pins[key],
+            update_owner_token=self.update_owner_pins.get(key),
+        )
 
 
 def make_activator_wake_result(*, token: str = "fresh.jwt.token") -> Any:
@@ -278,7 +404,14 @@ def make_activator_wake_result(*, token: str = "fresh.jwt.token") -> Any:
         plugin_instance_id=INSTANCE,
         token=token,
         jti="jti-wake-1",
-        claims={"sub": f"plugin:{PLUGIN}:{COMPANY}:{INSTANCE}"},
+        claims={
+            "sub": f"plugin:{PLUGIN}:{COMPANY}:{INSTANCE}",
+            "company_id": COMPANY,
+            "plugin_id": PLUGIN,
+            "plugin_instance_id": INSTANCE,
+            "artifact_digest": DIGEST,
+            "grant_id": "grant-1",
+        },
         issued_at=now,
         expires_at=now + timedelta(seconds=300),
         ready_at=now,
@@ -297,6 +430,7 @@ __all__ = [
     "SECRET",
     "Call",
     "FakeAdminConnection",
+    "FakeAsyncRevocation",
     "FakeBucketAdmin",
     "FakeDeploymentAdmin",
     "FakeObjectAudit",

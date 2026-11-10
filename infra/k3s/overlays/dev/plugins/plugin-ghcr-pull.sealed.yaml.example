@@ -1,0 +1,27 @@
+# DEV-ONLY EXAMPLE — do not add this .example file to kustomization resources.
+# Create a GHCR pull Secret of type kubernetes.io/dockerconfigjson named
+# plugin-ghcr-pull in namespace agentscale-dev, then seal it with the dev
+# Sealed Secrets controller certificate and namespace/name scope.
+#
+# Commit only kubeseal output as plugin-ghcr-pull.sealed.yaml and add THAT file
+# to kustomization. Never commit the source Secret, plaintext/base64
+# .dockerconfigjson, registry_read token, username, or password.
+# Managed runtime config may reference only the NAME via
+# PLUGIN_RUNTIME_IMAGE_PULL_SECRET=plugin-ghcr-pull. Without that setting,
+# DeploymentAdmin omits imagePullSecrets; neither Deployment nor plugin Pods
+# receive registry_read credentials as environment variables or mounted files.
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: plugin-ghcr-pull
+  namespace: agentscale-dev
+spec:
+  encryptedData:
+    # Placeholder only: replace with kubeseal ciphertext for the complete
+    # kubernetes.io/dockerconfigjson value; no plaintext is stored here.
+    .dockerconfigjson: SEALED_CIPHERTEXT_REQUIRED
+  template:
+    metadata:
+      name: plugin-ghcr-pull
+      namespace: agentscale-dev
+    type: kubernetes.io/dockerconfigjson

@@ -63,20 +63,26 @@ event loop. Клиент создаётся лениво и инжектируе
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any, Protocol, runtime_checkable
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from prodavan.application.plugins.objects import errors as err
 from prodavan.application.plugins.objects import policy as iam
 from prodavan.application.plugins.objects import ports
 from prodavan.application.plugins.objects.service import AUDIT_EVENT
+from prodavan.infrastructure.plugins.minio.config import (
+    DEFAULT_CHECKSUM_MAX_BYTES,
+    MAX_CHECKSUM_MAX_BYTES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +105,26 @@ _ALLOWED_POLICY_TOP_KEYS = frozenset({"Version", "Statement"})
 _ALLOWED_STATEMENT_KEYS = frozenset(
     {"Sid", "Effect", "Action", "Resource", "Condition", "Principal"}
 )
+
+# Local guards remain mandatory alongside botocore's restored model validation.
+# MinIO STS has a separate 900..3600-second contract; presign stays 60..3600.
+_STS_ROLE_ARN_RE = re.compile(r"^arn:aws:iam::[0-9]{12}:role/plugin-object-access$")
+_STS_ROLE_SESSION_NAME_RE = re.compile(r"^[A-Za-z0-9_+=,.@-]{2,64}$")
+_ASSUME_ROLE_PARAMETER_NAMES = frozenset(
+    {"RoleArn", "RoleSessionName", "DurationSeconds", "Policy"}
+)
+
+
+def _validate_sts_role_arn(value: Any) -> str:
+    if not isinstance(value, str) or _STS_ROLE_ARN_RE.fullmatch(value) is None:
+        raise err.StsUnavailable("STS RoleArn failed typed validation")
+    return value
+
+
+def _validate_sts_role_session_name(value: Any) -> str:
+    if not isinstance(value, str) or _STS_ROLE_SESSION_NAME_RE.fullmatch(value) is None:
+        raise err.StsUnavailable("STS RoleSessionName failed typed validation")
+    return value
 
 
 def _validate_bucket(bucket: str) -> str:
@@ -429,6 +455,84 @@ async def _call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
+class _ChecksumStreamFailure(RuntimeError):
+    """Internal fixed-code failure; never carries backend text or object bytes."""
+
+
+def _head_sha256(raw: Mapping[str, Any]) -> str | None:
+    """Read only a genuine SHA-256 field, never an S3 ETag."""
+    metadata = raw.get("Metadata") or {}
+    if isinstance(metadata, Mapping):
+        for name, candidate in metadata.items():
+            if str(name).lower() not in {"sha256", "x-amz-meta-sha256"}:
+                continue
+            if not isinstance(candidate, str):
+                continue
+            value = candidate.strip().lower()
+            if value.startswith("sha256:"):
+                value = value[len("sha256:"):]
+            if len(value) == 64 and all(ch in "0123456789abcdef" for ch in value):
+                return f"sha256:{value}"
+    checksum = raw.get("ChecksumSHA256")
+    if isinstance(checksum, str):
+        try:
+            decoded = base64.b64decode(checksum.strip(), validate=True)
+        except (ValueError, TypeError):
+            decoded = b""
+        if len(decoded) == 32:
+            return f"sha256:{decoded.hex()}"
+    return None
+
+
+def _stream_sha256(
+    body: Any,
+    *,
+    max_bytes: int,
+    chunk_size: int,
+    expected_size: int | None,
+) -> str:
+    """Hash a boto body with a hard byte cap and close it exactly once."""
+    digest = hashlib.sha256()
+    total = 0
+    chunks: Any = None
+    try:
+        if expected_size is not None and expected_size > max_bytes:
+            raise _ChecksumStreamFailure("object_checksum_size_cap_exceeded")
+        iter_chunks = getattr(body, "iter_chunks", None)
+        read = getattr(body, "read", None)
+        if not callable(iter_chunks) and not callable(read):
+            raise _ChecksumStreamFailure("object_checksum_body_invalid")
+        chunks = iter_chunks(chunk_size=chunk_size) if callable(iter_chunks) else None
+        while True:
+            if chunks is not None:
+                try:
+                    chunk = next(chunks)
+                except StopIteration:
+                    break
+            else:
+                chunk = read(chunk_size)
+                if chunk == b"":
+                    break
+            if not isinstance(chunk, bytes):
+                raise _ChecksumStreamFailure("object_checksum_chunk_invalid")
+            total += len(chunk)
+            if total > max_bytes:
+                raise _ChecksumStreamFailure("object_checksum_size_cap_exceeded")
+            digest.update(chunk)
+        if expected_size is not None and total != expected_size:
+            raise _ChecksumStreamFailure("object_checksum_size_mismatch")
+        return f"sha256:{digest.hexdigest()}"
+    finally:
+        close_chunks = getattr(chunks, "close", None)
+        try:
+            if callable(close_chunks):
+                close_chunks()
+        finally:
+            close = getattr(body, "close", None)
+            if callable(close):
+                close()
+
+
 # ---------------------------------------------------------------------------
 # Порт квот (MinIO Admin API, НЕ входит в boto3 S3-клиент)
 # ---------------------------------------------------------------------------
@@ -497,8 +601,26 @@ class MinioBucketAdmin:
     #: bucket-per-tenant по умолчанию. Не из пользовательского ввода.
     owns_bucket: bool = True
     clock: Any = time
+    checksum_max_bytes: int | None = None
+    checksum_chunk_size: int = 64 * 1024
 
     def __post_init__(self) -> None:
+        if self.checksum_max_bytes is None:
+            self.checksum_max_bytes = getattr(
+                self.config, "checksum_max_bytes", DEFAULT_CHECKSUM_MAX_BYTES
+            )
+        if (
+            not isinstance(self.checksum_max_bytes, int)
+            or isinstance(self.checksum_max_bytes, bool)
+            or not 1 <= self.checksum_max_bytes <= MAX_CHECKSUM_MAX_BYTES
+        ):
+            raise err.BucketUnavailable("invalid SHA-256 streaming size cap")
+        if (
+            not isinstance(self.checksum_chunk_size, int)
+            or isinstance(self.checksum_chunk_size, bool)
+            or not 1 <= self.checksum_chunk_size <= 1024 * 1024
+        ):
+            raise err.BucketUnavailable("invalid SHA-256 streaming chunk size")
         if self.quota_admin is None:
             self.quota_admin = UnavailableQuotaAdmin()
         if self.client is None and self.config is None:
@@ -794,7 +916,172 @@ class MinioBucketAdmin:
                     etag=str(etag).strip('"') if etag else None,
                 )
             )
+
         return out
+
+    async def list_prefix_page(
+        self,
+        *,
+        bucket: str,
+        prefix: str,
+        limit: int,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Return one bounded S3 page without loading the whole prefix."""
+        safe_bucket = _validate_bucket(bucket)
+        safe_prefix = _normalize_prefix(prefix)
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1000:
+            raise err.BucketUnavailable("list page limit must be within 1..1000")
+        kwargs: dict[str, Any] = {
+            "Bucket": safe_bucket,
+            "Prefix": safe_prefix,
+            "MaxKeys": limit,
+        }
+        if cursor is not None:
+            if not cursor or len(cursor) > 4096 or any(ord(ch) < 32 for ch in cursor):
+                raise err.ObjectAccessDenied("invalid S3 continuation cursor")
+            kwargs["ContinuationToken"] = cursor
+        try:
+            raw = await _call(self.client.list_objects_v2, **kwargs)
+        except Exception as exc:  # noqa: BLE001
+            raise err.BucketUnavailable(
+                f"list_prefix_page({safe_prefix!r}) failed: {type(exc).__name__}"
+            ) from exc
+        if not isinstance(raw, Mapping):
+            raise err.BucketUnavailable("S3 list page is not a mapping")
+        objects: list[ports.ObjectInfo] = []
+        for item in raw.get("Contents") or []:
+            if not isinstance(item, Mapping):
+                raise err.BucketUnavailable("S3 list item is invalid")
+            key = str(item.get("Key") or "")
+            if not key.startswith(safe_prefix) or ".." in key:
+                raise err.ObjectAccessDenied("S3 list escaped the plugin prefix")
+            etag = item.get("ETag")
+            objects.append(
+                ports.ObjectInfo(
+                    key=key,
+                    size=int(item.get("Size") or 0),
+                    etag=str(etag).strip('"') if etag else None,
+                )
+            )
+        if len(objects) > limit:
+            raise err.BucketUnavailable("S3 list exceeded MaxKeys")
+        next_cursor = raw.get("NextContinuationToken")
+        if next_cursor is not None and not isinstance(next_cursor, str):
+            raise err.BucketUnavailable("S3 continuation cursor is invalid")
+        return {"objects": objects, "next_cursor": next_cursor}
+
+    async def content_sha256(
+        self, *, bucket: str, key: str, expected_size: int | None = None
+    ) -> str:
+        """Return metadata SHA-256 or hash a bounded GET; ETag is never a digest."""
+        safe_bucket = _validate_bucket(bucket)
+        safe_key = _normalize_key(key)
+        if expected_size is not None and (
+            not isinstance(expected_size, int)
+            or isinstance(expected_size, bool)
+            or expected_size < 0
+        ):
+            raise err.BucketUnavailable("expected object size is invalid")
+        try:
+            raw = await _call(
+                self.client.head_object,
+                Bucket=safe_bucket,
+                Key=safe_key,
+                ChecksumMode="ENABLED",
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise err.BucketUnavailable(
+                f"head_object checksum failed: {type(exc).__name__}"
+            ) from None
+        if not isinstance(raw, Mapping):
+            raise err.BucketUnavailable("head_object returned invalid metadata")
+        declared = raw.get("ContentLength")
+        if declared is not None and (
+            not isinstance(declared, int) or isinstance(declared, bool) or declared < 0
+        ):
+            raise err.BucketUnavailable("object ContentLength is invalid")
+        if expected_size is not None and declared != expected_size:
+            raise err.BucketUnavailable("object_list_size_mismatch")
+        metadata_digest = _head_sha256(raw)
+        if metadata_digest is not None:
+            return metadata_digest
+        if declared is not None and declared > int(self.checksum_max_bytes):
+            raise err.BucketUnavailable("object_checksum_size_cap_exceeded")
+        try:
+            response = await _call(
+                self.client.get_object,
+                Bucket=safe_bucket,
+                Key=safe_key,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise err.BucketUnavailable(
+                f"get_object checksum failed: {type(exc).__name__}"
+            ) from None
+        if not isinstance(response, Mapping) or "Body" not in response:
+            raise err.BucketUnavailable("get_object returned no checksum body")
+        stream_size = declared if declared is not None else expected_size
+        if stream_size is None:
+            response_size = response.get("ContentLength")
+            if response_size is not None and (
+                not isinstance(response_size, int)
+                or isinstance(response_size, bool)
+                or response_size < 0
+            ):
+                close = getattr(response["Body"], "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception:  # noqa: BLE001 - preserve the sanitized size error
+                        pass
+                raise err.BucketUnavailable("object ContentLength is invalid")
+            stream_size = response_size
+        try:
+            return await _call(
+                _stream_sha256,
+                response["Body"],
+                max_bytes=int(self.checksum_max_bytes),
+                chunk_size=self.checksum_chunk_size,
+                expected_size=stream_size,
+            )
+        except _ChecksumStreamFailure as exc:
+            raise err.BucketUnavailable(str(exc)) from None
+        except Exception as exc:  # noqa: BLE001
+            raise err.BucketUnavailable(
+                f"object SHA-256 streaming failed: {type(exc).__name__}"
+            ) from None
+
+    async def delete_object(self, *, bucket: str, key: str) -> bool:
+        """Delete exactly one plugin object and report prior existence truthfully."""
+        safe_bucket = _validate_bucket(bucket)
+        safe_key = _normalize_key(key)
+        try:
+            await _call(self.client.head_object, Bucket=safe_bucket, Key=safe_key)
+        except Exception as exc:  # noqa: BLE001
+            response = getattr(exc, "response", None)
+            status = int((response or {}).get("ResponseMetadata", {}).get("HTTPStatusCode", 0))
+            code = str((response or {}).get("Error", {}).get("Code", ""))
+            if status == 404 or code in {"404", "NoSuchKey", "NotFound"}:
+                return False
+            raise err.BucketUnavailable(
+                f"head_object before delete failed: {type(exc).__name__}"
+            ) from exc
+        try:
+            await _call(self.client.delete_object, Bucket=safe_bucket, Key=safe_key)
+        except Exception as exc:  # noqa: BLE001
+            raise err.BucketUnavailable(
+                f"delete_object failed: {type(exc).__name__}"
+            ) from exc
+        return True
+
+    async def aclose(self) -> None:
+        """Close an owned boto client once; shared clients are not passed here."""
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+        close = getattr(self.client, "close", None)
+        if callable(close):
+            await _call(close)
 
 
 # ---------------------------------------------------------------------------
@@ -807,7 +1094,7 @@ class MinioSts:
     """``StsPort``: MinIO STS ``AssumeRole`` с session policy (v4 §5.4, §12.8).
 
     Контракт fail-closed:
-      * ``sts_available=False`` (по умолчанию, документ не подтверждён) →
+      * до успешного async post-probe и после expiry/error/close →
         ``StsUnavailable`` НЕМЕДЛЕННО, без сетевого вызова;
       * ``sts_client`` отсутствует/упал/вернул мусор → ``StsUnavailable``;
       * НИКОГДА не возвращаем ``admin_access_key``/``admin_secret_key``, root
@@ -816,20 +1103,285 @@ class MinioSts:
         из ответа ``AssumeRole``;
       * перепроверяем, что сессия выдана ровно на ожидаемые ``bucket`` и
         ``prefix`` и что ``session_policy`` та же, что передал сервис;
-      * ``expires_at`` считаем из ``Expiration`` ответа (или ``now+ttl`` как
-        верхняя граница, НЕ как «продление»), TTL уже проверен ``validate_ttl``.
+      * expires_at принимается только из проверяемого Expiration ответа;
+        отсутствующий, истёкший или превышающий TTL срок является ошибкой.
 
     ВАЖНО: поддержка ``AssumeRole`` + ``Policy=`` + ``DurationSeconds`` и
     ``StringLike`` по ``s3:prefix`` конкретным образом
     ``RELEASE.2024-10-02T17-50-41Z`` ТРЕБУЕТ ПОДТВЕРЖДЕНИЯ официальной
-    документацией MinIO. До подтверждения фабрика не создаёт этот адаптер.
+    документацией MinIO. До подтверждения фабрика создаёт только typed-unwired
+    вариант: сетевой AssumeRole запрещён, static credentials не подставляются.
     """
 
     config: Any = None
     sts_client: Any = None
-    #: Явное подтверждение поддержки STS конкретным образом MinIO.
-    sts_available: bool = False
     clock: Any = time
+    #: Optional injected S3 canary IO factory. It never bypasses AssumeRole or
+    #: authorization checks; production builds a client from issued temp credentials.
+    canary_client_factory: Any = None
+    _probe_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    _probe_invoked: bool = field(default=False, init=False, repr=False)
+    _probe_succeeded_at: float | None = field(default=None, init=False, repr=False)
+    _last_probe_failure_at: float | None = field(default=None, init=False, repr=False)
+    _probe_attempt: int = field(default=0, init=False, repr=False)
+
+    def _probe_fresh(self, now: float | None = None) -> bool:
+        if self._probe_succeeded_at is None:
+            return False
+        current = float(self.clock.time()) if now is None else now
+        max_age = int(getattr(self.config, "sts_probe_revalidate_seconds", 300))
+        age = current - self._probe_succeeded_at
+        return 0 <= age < max_age
+
+    @property
+    def scoped_credentials_wired(self) -> bool:
+        """True only for fresh successful AssumeRole plus S3 canary evidence."""
+        if (
+            self.config is None
+            or not bool(getattr(self.config, "sts_enabled", False))
+            or getattr(self, "_closed", False)
+        ):
+            return False
+        return bool(getattr(self.config, "sts_probe_enabled", False)) and self._probe_fresh()
+
+    @property
+    def sts_available(self) -> bool:
+        """Read-only compatibility projection; it cannot be used as proof input."""
+        return self.scoped_credentials_wired
+
+    def invalidate(self) -> None:
+        """Drop availability without retaining any probe response or credentials."""
+        self._probe_succeeded_at = None
+
+    def _probe_session_policy(self, company_id: str, plugin_id: str) -> dict[str, Any]:
+        """Canary-only policy: no tenant data, writes, or foreign buckets."""
+        del company_id, plugin_id  # The configured dedicated target is authoritative.
+        bucket = self.config.sts_probe_bucket
+        key = self.config.sts_probe_key
+        return {
+            "Version": iam.POLICY_VERSION,
+            "Statement": [
+                {
+                    "Sid": "ListDedicatedStsCanaryBucket",
+                    "Effect": "Allow",
+                    "Action": ["s3:ListBucket"],
+                    "Resource": [f"arn:aws:s3:::{bucket}"],
+                },
+                {
+                    "Sid": "GetDedicatedStsCanaryObject",
+                    "Effect": "Allow",
+                    "Action": ["s3:GetObject"],
+                    "Resource": [f"arn:aws:s3:::{bucket}/{key}"],
+                },
+            ],
+        }
+
+    @staticmethod
+    def _s3_status_and_code(value: Any) -> tuple[int | None, str]:
+        response = value if isinstance(value, Mapping) else getattr(value, "response", None)
+        if not isinstance(response, Mapping):
+            return None, ""
+        metadata = response.get("ResponseMetadata") or {}
+        raw_status = metadata.get("HTTPStatusCode") if isinstance(metadata, Mapping) else None
+        try:
+            status = int(raw_status) if raw_status is not None else None
+        except (TypeError, ValueError):
+            status = None
+        error = response.get("Error") or {}
+        code = str(error.get("Code") or "") if isinstance(error, Mapping) else ""
+        return status, code
+
+    def _make_canary_client(
+        self, credentials: ports.ScopedCredentials, timeout_seconds: int,
+    ) -> Any:
+        if self.canary_client_factory is not None:
+            return self.canary_client_factory(
+                credentials=credentials, timeout_seconds=timeout_seconds,
+            )
+        import boto3
+        from botocore.client import Config
+
+        # Only the just-issued temporary session is used for authorization IO.
+        # Admin/static credentials never leave the STS client configuration.
+        return boto3.client(
+            "s3",
+            endpoint_url=self.config.endpoint,
+            aws_access_key_id=credentials.access_key,
+            aws_secret_access_key=credentials.secret_key,
+            aws_session_token=credentials.session_token,
+            region_name=self.config.region,
+            config=Config(
+                signature_version="s3v4",
+                connect_timeout=timeout_seconds,
+                read_timeout=timeout_seconds,
+                retries={"max_attempts": 0},
+            ),
+        )
+
+    def _probe_identity(self) -> tuple[str, str, str, str, str]:
+        bucket = self.config.sts_probe_bucket
+        key = self.config.sts_probe_key
+        company_id = bucket[len("tenant-") :]
+        prefix = key.split("/", 1)[0] + "/"
+        # Here prefix already ends in the separator, so drop exactly that slash.
+        plugin_id = prefix[len("module-") : -1]
+        return company_id, plugin_id, bucket, key, prefix
+
+    async def _canary_bucket_and_object(self, client: Any, bucket: str, key: str) -> None:
+        # A missing synthetic bucket is NOT an authorization success. Require an
+        # actual provisioned bucket and its fixed zero-byte object, both HTTP 200.
+        try:
+            bucket_result = await _call(client.head_bucket, Bucket=bucket)
+        except Exception as exc:
+            status, code = self._s3_status_and_code(exc)
+            if status == 404 and code.lower() == "nosuchbucket":
+                raise err.StsUnavailable("STS canary bucket is not provisioned") from None
+            raise err.StsUnavailable("STS canary bucket is missing or unauthorized") from None
+        bucket_status, _ = self._s3_status_and_code(bucket_result)
+        if not isinstance(bucket_result, Mapping) or bucket_status != 200:
+            raise err.StsUnavailable("STS canary bucket HEAD is ambiguous")
+        try:
+            object_result = await _call(client.head_object, Bucket=bucket, Key=key)
+        except Exception as exc:
+            # NoSuchKey after a proven existing bucket is distinguished from
+            # NoSuchBucket, but the required provisioned object is still missing.
+            status, code = self._s3_status_and_code(exc)
+            if status == 404 and code.lower() == "nosuchkey":
+                raise err.StsUnavailable("STS canary fixed object is not provisioned") from None
+            raise err.StsUnavailable("STS canary fixed object is missing or unauthorized") from None
+        object_status, _ = self._s3_status_and_code(object_result)
+        if not isinstance(object_result, Mapping) or object_status != 200:
+            raise err.StsUnavailable("STS canary fixed object HEAD is ambiguous")
+        if object_result.get("ContentLength") != 0:
+            raise err.StsUnavailable("STS canary fixed object must be zero-byte")
+
+    async def _canary_denied(self, call: Any, **kwargs: Any) -> None:
+        """Accept only an unambiguous HTTP 403 with Error.Code=AccessDenied."""
+        try:
+            result = await _call(call, **kwargs)
+        except Exception as exc:
+            status, code = self._s3_status_and_code(exc)
+            if status == 403 and code.lower() in {"accessdenied", "403"}:
+                return
+            raise err.StsUnavailable("STS canary denial returned an ambiguous error") from None
+        status, code = self._s3_status_and_code(result)
+        if status == 403 and code.lower() in {"accessdenied", "403"}:
+            return
+        raise err.StsUnavailable("STS canary foreign/list operation was not denied")
+
+    async def _run_scoped_canary(
+        self, credentials: ports.ScopedCredentials, timeout_seconds: int,
+    ) -> None:
+        """Authorize exact GetObject scope, then require foreign/ListBucket 403."""
+        timeout = timeout_seconds
+        client = await _call(self._make_canary_client, credentials, timeout)
+        if client is None:
+            raise err.StsUnavailable("STS canary client is unavailable")
+        _company, plugin, bucket, key, prefix = self._probe_identity()
+        try:
+            await self._canary_bucket_and_object(client, bucket, key)
+            await self._canary_denied(
+                client.head_object,
+                Bucket=bucket,
+                Key=f"module-{plugin}-foreign/__authorization_canary__",
+            )
+            # HeadBucket requires s3:ListBucket on the dedicated bucket. A
+            # foreign-bucket ListBucket must still be denied by the scoped policy.
+            await self._canary_denied(
+                client.list_objects_v2,
+                Bucket=f"{bucket}-foreign",
+                Prefix=prefix,
+                MaxKeys=1,
+            )
+        finally:
+            close = getattr(client, "close", None)
+            if callable(close):
+                try:
+                    await _call(close)
+                except Exception:
+                    raise err.StsUnavailable("STS canary client close failed") from None
+
+    async def probe(self, *, force: bool = False) -> bool:
+        """Validate MinIO STS once, discarding the short-lived probe credentials.
+
+        No caller receives the probe session. A bounded 900-second canonical
+        AssumeRole is shared by concurrent callers. Failures are typed-unwired,
+        use bounded retry backoff, and never fall back to static/admin credentials.
+        """
+        self._probe_invoked = True
+        if (
+            self.config is None
+            or not bool(getattr(self.config, "sts_enabled", False))
+            or not bool(getattr(self.config, "sts_probe_enabled", False))
+            or getattr(self, "_closed", False)
+        ):
+            self.invalidate()
+            return False
+        attempt = self._probe_attempt
+        async with self._probe_lock:
+            now = float(self.clock.time())
+            if getattr(self, "_closed", False):
+                self.invalidate()
+                return False
+            if force and attempt != self._probe_attempt:
+                return self._probe_fresh(now)
+            if not force and self._probe_fresh(now):
+                return True
+            if (
+                not force
+                and self._last_probe_failure_at is not None
+                and 0 <= now - self._last_probe_failure_at < int(
+                    getattr(self.config, "sts_probe_retry_seconds", 30)
+                )
+            ):
+                return False
+
+            company_id, plugin_id, _bucket, _key, _prefix = self._probe_identity()
+            policy = self._probe_session_policy(company_id, plugin_id)
+            ttl = ports.MIN_STS_TTL_SECONDS
+            try:
+                async with asyncio.timeout(int(getattr(self.config, "sts_probe_timeout_seconds", 5))):
+                    issued = await self._issue_scoped_credentials(
+                        company_id=company_id,
+                        plugin_id=plugin_id,
+                        ttl_seconds=ttl,
+                        session_policy=policy,
+                        client_timeout_seconds=int(
+                            getattr(self.config, "sts_probe_timeout_seconds", 5)
+                        ),
+                        probe=True,
+                    )
+                    # Server-side authorization, not typed fields populated by this
+                    # adapter, proves the actual session scope before availability.
+                    await self._run_scoped_canary(
+                        issued,
+                        int(getattr(self.config, "sts_probe_timeout_seconds", 5)),
+                    )
+                now = float(self.clock.time())
+                if (
+                    issued.expires_at <= now
+                    or issued.expires_at > now + ttl + 1
+                    or not all((issued.access_key, issued.secret_key, issued.session_token))
+                ):
+                    raise err.StsUnavailable("STS probe expiration or credentials mismatch")
+                if (
+                    issued.access_key == getattr(self.config, "admin_access_key", None)
+                    or issued.secret_key == getattr(self.config, "admin_secret_key", None)
+                ):
+                    raise err.StsUnavailable("STS probe returned admin credentials")
+            except Exception:
+                self.invalidate()
+                self._last_probe_failure_at = float(self.clock.time())
+                self._probe_attempt += 1
+                return False
+
+            # Do not store, return, log, or reuse the probe session. Only the
+            # validation timestamp becomes availability evidence.
+            del issued
+            self._probe_succeeded_at = now
+            self._last_probe_failure_at = None
+            self._probe_attempt += 1
+            return True
 
     async def assume_role(
         self,
@@ -839,35 +1391,90 @@ class MinioSts:
         ttl_seconds: int,
         session_policy: dict,
     ) -> ports.ScopedCredentials:
-        ttl = ports.validate_ttl(ttl_seconds)
-        expected_bucket = iam.bucket_name(company_id)
+        # Startup/lifespan must attempt the first probe. Before that, and after
+        # stale/failed evidence, the operation remains typed-unwired. A stale
+        # initialized adapter may revalidate asynchronously under singleflight.
+        if not self.scoped_credentials_wired:
+            if self._probe_invoked:
+                await self.probe()
+            if not self.scoped_credentials_wired:
+                raise err.StsUnavailable(
+                    "MinIO STS is disabled or has no fresh successful post-probe"
+                )
+        try:
+            return await self._issue_scoped_credentials(
+                company_id=company_id,
+                plugin_id=plugin_id,
+                ttl_seconds=ttl_seconds,
+                session_policy=session_policy,
+            )
+        except Exception:
+            self.invalidate()
+            self._last_probe_failure_at = float(self.clock.time())
+            raise
+
+    async def _issue_scoped_credentials(
+        self,
+        *,
+        company_id: str,
+        plugin_id: str,
+        ttl_seconds: int,
+        session_policy: dict,
+        client_timeout_seconds: int | None = None,
+        probe: bool = False,
+    ) -> ports.ScopedCredentials:
+        if not isinstance(ttl_seconds, int) or isinstance(ttl_seconds, bool):
+            raise err.InvalidTtl("STS DurationSeconds must be an integer")
+        ttl = ports.validate_sts_ttl(ttl_seconds)
+        expected_bucket = self.config.sts_probe_bucket if probe else iam.bucket_name(company_id)
         expected_prefix = _module_prefix(plugin_id)
+        role_arn = _validate_sts_role_arn(self.config.sts_role_arn)
+        role_session_name = _validate_sts_role_session_name(
+            f"plugin-{plugin_id}-{company_id}"[:64]
+        )
 
         # Проверяем session policy ДО любого сетевого вызова: она обязана быть
         # ровно той, что сгенерировал доверенный сервис (один генератор в
         # policy.py), и не содержать ничего шире своего бакета/префикса.
-        canonical = iam.session_policy(company_id, plugin_id)
-        if not isinstance(session_policy, Mapping) or dict(session_policy) != canonical:
-            raise err.StsUnavailable(
-                "session policy не совпадает с канонической — выдача creds запрещена"
-            )
+        canonical = (
+            self._probe_session_policy(company_id, plugin_id)
+            if probe
+            else iam.session_policy(company_id, plugin_id)
+        )
+        if not isinstance(session_policy, Mapping):
+            raise err.StsUnavailable("session policy is not a mapping")
+        canonical_by_sid = {
+            statement.get("Sid"): statement for statement in canonical["Statement"]
+        }
+        statements = session_policy.get("Statement")
+        if not isinstance(statements, list) or not statements:
+            raise err.StsUnavailable("session policy is empty")
+        for statement in statements:
+            if not isinstance(statement, Mapping):
+                raise err.StsUnavailable("session policy statement is invalid")
+            parent = canonical_by_sid.get(statement.get("Sid"))
+            if parent is None:
+                raise err.StsUnavailable("session policy statement is not canonical")
+            parent_actions = set(parent.get("Action", []))
+            requested_actions = set(statement.get("Action", []))
+            if not requested_actions or not requested_actions.issubset(parent_actions):
+                raise err.StsUnavailable("session policy exceeds canonical actions")
+            if dict(statement) != {**dict(parent), "Action": statement.get("Action")}:
+                raise err.StsUnavailable("session policy broadens resources or conditions")
         _validate_bucket_policy(session_policy, expected_bucket)
 
-        if not self.sts_available:
-            # Документация MinIO STS в этой сессии недоступна: НЕ деградируем до
-            # root-кредов и НЕ подписываем URL от service user'а «вместо» STS.
-            raise err.StsUnavailable(
-                "MinIO STS AssumeRole/session policy не подтверждены официальной "
-                "документацией для RELEASE.2024-10-02T17-50-41Z; временные creds "
-                "не выданы (используйте только scoped presigned)"
-            )
+        if getattr(self, "_closed", False):
+            raise err.StsUnavailable("MinIO STS adapter is closed")
+        configured_duration = getattr(self.config, "sts_session_duration_seconds", 900)
+        if ttl > configured_duration:
+            raise err.StsUnavailable("requested STS session exceeds the configured cap")
         if self.sts_client is None:
             try:
-                self.sts_client = self._build_sts_client()
+                self.sts_client = self._build_sts_client(client_timeout_seconds)
             except Exception as exc:  # noqa: BLE001
                 raise err.StsUnavailable(
                     f"STS-клиент недоступен: {type(exc).__name__}"
-                ) from exc
+                ) from None
         if self.sts_client is None:
             raise err.StsUnavailable("STS-клиент не сконфигурирован")
 
@@ -875,20 +1482,22 @@ class MinioSts:
             # SessionPolicy передаётся КАК ЕСТЬ (канонический JSON), без
             # ``${aws:username}`` / ``${jwt:*}`` — policy variables являются
             # опцией MinIO и не подтверждены (policy.py, §12.8).
-            response = await _call(
-                self.sts_client.assume_role,
-                RoleArn="arn:aws:iam::000000000000:role/plugin-object-access",
-                RoleSessionName=f"plugin-{plugin_id}-{company_id}"[:64],
-                DurationSeconds=ttl,
-                Policy=json.dumps(canonical, sort_keys=True, separators=(",", ":")),
-            )
+            request = {
+                "RoleArn": role_arn,
+                "RoleSessionName": role_session_name,
+                "DurationSeconds": ttl,
+                "Policy": json.dumps(session_policy, sort_keys=True, separators=(",", ":")),
+            }
+            if set(request) != _ASSUME_ROLE_PARAMETER_NAMES:
+                raise err.StsUnavailable("STS AssumeRole request shape invariant failed")
+            response = await _call(self.sts_client.assume_role, **request)
         except err.PluginObjectError:
             raise
         except Exception as exc:  # noqa: BLE001
             # Ни текста исключения, ни ответа в лог: там могут быть токены.
             raise err.StsUnavailable(
                 f"AssumeRole недоступен: {type(exc).__name__}; root-креды не выдаются"
-            ) from exc
+            ) from None
 
         if not isinstance(response, Mapping):
             raise err.StsUnavailable("STS вернул некорректный ответ")
@@ -919,12 +1528,11 @@ class MinioSts:
 
         expiration = creds.get("Expiration")
         now = float(self.clock.time())
-        if hasattr(expiration, "timestamp"):
-            expires_at = float(expiration.timestamp())
-        else:
-            # Без Expiration НЕ «продлеваем» сессию: верхняя граница = now+ttl.
-            expires_at = now + ttl
-        expires_at = min(expires_at, now + ttl)
+        if not hasattr(expiration, "timestamp"):
+            raise err.StsUnavailable("STS returned no verifiable expiration")
+        expires_at = float(expiration.timestamp())
+        if expires_at <= now or expires_at > now + ttl + 1:
+            raise err.StsUnavailable("STS expiration exceeds the requested session")
 
         return ports.ScopedCredentials(
             access_key=access_key,
@@ -933,22 +1541,51 @@ class MinioSts:
             bucket=expected_bucket,
             prefix=expected_prefix,
             expires_at=expires_at,
-            policy=dict(canonical),
+            policy=dict(session_policy),
         )
 
-    def _build_sts_client(self) -> Any:
-        """Ленивый STS-клиент. Возврат None = STS недоступен (fail-closed)."""
+    def _build_sts_client(self, timeout_seconds: int | None = None) -> Any:
+        """Build STS IO with optional hard connect/read timeout and no retries."""
         if self.config is None:
             return None
         import boto3
 
+        kwargs: dict[str, Any] = {}
+        from botocore.client import Config
+
+        options: dict[str, Any] = {
+            # The 900-second STS minimum satisfies the standard botocore model.
+            # No validation bypass remains; local guards also validate every field.
+            "retries": {"max_attempts": 0},
+        }
+        if timeout_seconds is not None:
+            options["connect_timeout"] = timeout_seconds
+            options["read_timeout"] = timeout_seconds
+        kwargs["config"] = Config(**options)
         return boto3.client(
             "sts",
-            endpoint_url=self.config.endpoint,
+            endpoint_url=self.config.sts_endpoint_url,
             aws_access_key_id=self.config.admin_access_key,
             aws_secret_access_key=self.config.admin_secret_key,
             region_name=self.config.region,
+            **kwargs,
         )
+
+    async def aclose(self) -> None:
+        """Invalidate availability, then close the owned STS client once."""
+        async with self._probe_lock:
+            if getattr(self, "_closed", False):
+                return
+            self._closed = True
+            self.invalidate()
+            close = getattr(self.sts_client, "close", None)
+            if callable(close):
+                try:
+                    await _call(close)
+                except Exception as exc:  # noqa: BLE001
+                    raise err.StsUnavailable(
+                        f"STS client close failed: {type(exc).__name__}"
+                    ) from None
 
 
 # ---------------------------------------------------------------------------
@@ -1017,9 +1654,15 @@ class MinioPresigner:
     async def presign_put(self, *, bucket: str, key: str, ttl_seconds: int) -> str:
         return await self._sign("put_object", bucket, key, ttl_seconds)
 
+    async def presign_head(self, *, bucket: str, key: str, ttl_seconds: int) -> str:
+        # S3 HeadObject is authorized by s3:GetObject; it does not grant listing.
+        return await self._sign("head_object", bucket, key, ttl_seconds)
+
     async def _sign(
         self, operation: str, bucket: str, key: str, ttl_seconds: int
     ) -> str:
+        if getattr(self, "_closed", False):
+            raise err.BucketUnavailable("MinIO presigner is closed")
         # Единый валидатор задачи 06: вне [60, 3600] → InvalidTtl, НЕ кламп
         # (as-built minio_store делает только max(60, ...) без верхней границы).
         ttl = ports.validate_ttl(ttl_seconds)
@@ -1036,7 +1679,7 @@ class MinioPresigner:
                 operation,
                 Params={"Bucket": safe_bucket, "Key": safe_key},
                 ExpiresIn=ttl,
-                HttpMethod="GET" if operation == "get_object" else "PUT",
+                HttpMethod={"get_object": "GET", "put_object": "PUT", "head_object": "HEAD"}[operation],
             )
         except err.PluginObjectError:
             raise
@@ -1046,6 +1689,21 @@ class MinioPresigner:
             ) from exc
         if not isinstance(url, str) or not url:
             raise err.BucketUnavailable("PresignPort вернул пустой URL")
+        # The signer must never serialize admin material or its own secret key.
+        # X-Amz-Credential (the scoped access key id) and X-Amz-Signature are the
+        # standard presign fields; secret/static admin values are never legitimate.
+        if self.config is not None:
+            forbidden_values = (
+                getattr(self.config, "admin_access_key", None),
+                getattr(self.config, "admin_secret_key", None),
+                getattr(self.config, "presign_secret_key", None),
+            )
+            decoded_url = unquote(url)
+            if any(
+                isinstance(value, str) and value and (value in url or value in decoded_url)
+                for value in forbidden_values
+            ):
+                raise err.BucketUnavailable("presigned URL contains credential material — отказ")
 
         # Подпись обязана быть на СКОНФИГУРИРОВАННЫЙ endpoint подписанта
         # (``presign_endpoint`` = внешний host или in-cluster endpoint), а не
@@ -1064,6 +1722,20 @@ class MinioPresigner:
                     "presigned URL подписан на другой endpoint — отказ"
                 )
         return url
+
+    async def aclose(self) -> None:
+        """Close the dedicated signing client once; never close the admin client."""
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+        close = getattr(self.client, "close", None)
+        if callable(close):
+            try:
+                await _call(close)
+            except Exception as exc:  # noqa: BLE001
+                raise err.BucketUnavailable(
+                    f"presign client close failed: {type(exc).__name__}"
+                ) from None
 
 
 # ---------------------------------------------------------------------------

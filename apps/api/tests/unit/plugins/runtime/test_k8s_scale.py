@@ -14,11 +14,16 @@ import pytest
 
 from prodavan.application.plugins.activation.errors import NotReady, ScaleUnavailable
 from prodavan.application.plugins.activation.ports import ReadinessPort, ScalePort
+from prodavan.infrastructure.plugins.runtime.errors import RuntimeConfigError
 from prodavan.infrastructure.plugins.runtime.k8s_scale import (
+    K8sRawResponse,
     K8sScalePort,
     ReadinessMode,
+    default_deployment_name,
     normalize_k8s_name,
     plugin_deployment_name,
+    plugin_resource_name,
+    plugin_service_name,
 )
 from tests.unit.plugins.runtime.conftest import (
     TEST_DEPLOYMENT,
@@ -34,6 +39,10 @@ from tests.unit.plugins.runtime.conftest import (
 
 
 def _port(config, api: FakeK8sApi, probe: FakeProbe | None = None, **over):  # type: ignore[no-untyped-def]
+    over.setdefault(
+        "deployment_name_resolver",
+        lambda instance: plugin_deployment_name("mod_equipment", instance),
+    )
     return K8sScalePort(config=config, api=api, probe=probe or FakeProbe(), **over)
 
 
@@ -50,9 +59,41 @@ def _deployment_path(name: str = TEST_DEPLOYMENT) -> str:
 
 def test_dynamic_deployment_names() -> None:
     assert normalize_k8s_name("inst_equipment_001") == "inst-equipment-001"
-    assert plugin_deployment_name("mod_equipment", "inst_equipment_001") == (
-        "plugin-mod-equipment-inst-equipment-001"
-    )
+    expected = "plugin-mod-equipment-inst-equipment-001"
+    assert plugin_deployment_name("mod_equipment", "inst_equipment_001") == expected
+    assert plugin_service_name("mod_equipment", "inst_equipment_001") == expected
+
+
+def test_long_colliding_ids_get_distinct_dns1035_names() -> None:
+    shared = "mod_" + ("Equipment_" * 12)
+    first_id = shared + "Alpha"
+    second_id = shared + "Beta"
+    instance = "inst_" + ("VeryLongCompany_" * 10)
+    first = plugin_resource_name(first_id, instance)
+    second = plugin_resource_name(second_id, instance)
+
+    assert first != second, "plain truncation схлопнул бы общий префикс"
+    assert len(first) <= 63 and len(second) <= 63
+    assert re.fullmatch(r"[a-z](?:[-a-z0-9]*[a-z0-9])?", first)
+    assert re.fullmatch(r"[a-z](?:[-a-z0-9]*[a-z0-9])?", second)
+    assert re.search(r"-[0-9a-f]{16}$", first)
+    assert re.search(r"-[0-9a-f]{16}$", second)
+    assert first == plugin_deployment_name(first_id, instance)
+    assert first == plugin_service_name(first_id, instance)
+
+
+def test_naming_is_lowercase_and_prefix_has_one_dash() -> None:
+    name = plugin_resource_name("MOD_Equipment", "INST_One", prefix="plugin")
+    assert name == "plugin-mod-equipment-inst-one"
+    assert name == name.lower()
+
+
+def test_instance_only_default_name_is_rejected(config) -> None:  # type: ignore[no-untyped-def]
+    with pytest.raises(RuntimeConfigError):
+        default_deployment_name(TEST_INSTANCE)
+    port = K8sScalePort(config=config, api=FakeK8sApi(), probe=FakeProbe())
+    with pytest.raises(RuntimeConfigError):
+        port.deployment_name(TEST_INSTANCE)
 
 
 def test_explicit_deployment_name_mapping(config) -> None:  # type: ignore[no-untyped-def]
@@ -157,6 +198,56 @@ async def test_scale_response_not_confirming_replicas_is_failure(config) -> None
         await _port(config, api).scale_to(TEST_INSTANCE, 1)
 
 
+async def test_scale_to_zero_accepts_omitted_replicas_field(config) -> None:  # type: ignore[no-untyped-def]
+    """autoscaling/v1 не сериализует spec.replicas=0: omitted = ноль, не сбой."""
+    from prodavan.infrastructure.plugins.runtime.k8s_scale import K8sRawResponse
+
+    api = FakeK8sApi()
+    api.on(
+        "PATCH",
+        _scale_path(),
+        K8sRawResponse(status_code=200, body={"kind": "Scale", "spec": {}}),
+    )
+    await _port(config, api).scale_to(TEST_INSTANCE, 0)
+
+
+async def test_scale_to_one_rejects_omitted_replicas_field(config) -> None:  # type: ignore[no-untyped-def]
+    """Omitted spec.replicas означает ТОЛЬКО ноль: wake без подтверждения запрещён."""
+    from prodavan.infrastructure.plugins.runtime.k8s_scale import K8sRawResponse
+
+    api = FakeK8sApi()
+    api.on(
+        "PATCH",
+        _scale_path(),
+        K8sRawResponse(status_code=200, body={"kind": "Scale", "spec": {}}),
+    )
+    with pytest.raises(ScaleUnavailable, match="не подтвердил replicas=1"):
+        await _port(config, api).scale_to(TEST_INSTANCE, 1)
+
+
+async def test_current_replicas_zero_accepts_omitted_replicas_field(config) -> None:  # type: ignore[no-untyped-def]
+    from prodavan.infrastructure.plugins.runtime.k8s_scale import K8sRawResponse
+
+    api = FakeK8sApi()
+    api.on(
+        "GET",
+        _scale_path(),
+        K8sRawResponse(status_code=200, body={"kind": "Scale", "spec": {}}),
+    )
+    assert await _port(config, api).current_replicas(TEST_INSTANCE) == 0
+
+
+async def test_scale_response_wrong_kind_is_failure(config) -> None:  # type: ignore[no-untyped-def]
+    api = FakeK8sApi()
+    api.on(
+        "PATCH",
+        _scale_path(),
+        K8sRawResponse(status_code=200, body={"kind": "Deployment", "spec": {"replicas": 1}}),
+    )
+    with pytest.raises(ScaleUnavailable, match="не объект Scale"):
+        await _port(config, api).scale_to(TEST_INSTANCE, 1)
+
+
 # --------------------------------------------------------------------------- readiness
 
 
@@ -182,7 +273,7 @@ async def test_is_ready_true_status_and_probe(config) -> None:  # type: ignore[n
     probe = FakeProbe(results=[ProbeResult(status_code=200)])
     assert await _port(config, api, probe).is_ready(TEST_INSTANCE) is True
     assert probe.urls == [
-        "http://plugin-inst-equipment-001.agentscale-dev.svc:8080/health"
+        "http://plugin-mod-equipment-inst-equipment-001.agentscale-dev.svc:8080/health"
     ]
 
 
