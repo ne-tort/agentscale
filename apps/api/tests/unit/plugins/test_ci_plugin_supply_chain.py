@@ -167,6 +167,10 @@ class CanonicalLayoutTests(unittest.TestCase):
         self.assertLessEqual(set(schema["required"]), set(schema["properties"]))
         self.assertEqual(set(schema["properties"]), required | optional)
         self.assertEqual(set(builder.MANIFEST_FIELDS), required)
+        # The builder must accept exactly the schema surface: every optional v1
+        # field the platform validator accepts is allowed into the canonical
+        # payload, and nothing else is.
+        self.assertEqual(set(builder.OPTIONAL_MANIFEST_FIELDS), optional)
         self.assertEqual(schema["properties"]["plugin_id"]["pattern"], builder._PLUGIN_ID_RE.pattern)
         for value in ("0.1.0", "1.0.0-rc.1+build.7"):
             self.assertIsNotNone(re.fullmatch(schema["properties"]["version"]["pattern"], value))

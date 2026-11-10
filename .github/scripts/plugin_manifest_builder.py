@@ -61,12 +61,17 @@ BACKEND_BUILD_TYPE = "https://agentscale.dev/plugin-backend-buildx/v1"
 BUNDLE_BUILD_TYPE = "https://agentscale.dev/plugin-oci-bundle/v1"
 
 FORBIDDEN_SELF_REFERENCE_KEYS = frozenset({"artifact_digest", "signature"})
+#: Required v1 source fields.
 MANIFEST_FIELDS = frozenset(
     {
         "plugin_id", "version", "protocol", "frontend", "backend", "capabilities",
         "migrations", "egress_ref", "public_pages", "webhooks", "min_platform_version",
     }
 )
+#: Optional v1 source fields that the signed manifest schema defines and the
+#: production validator accepts. They are carried into the canonical payload
+#: verbatim, so the builder must not reject a manifest that the platform accepts.
+OPTIONAL_MANIFEST_FIELDS = frozenset({"mcp_servers", "pods", "rpc_operations", "secret_delivery"})
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _PLUGIN_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -252,10 +257,17 @@ def validate_source_manifest(manifest: Any) -> dict[str, Any]:
     """Validate the closed v1 source contract without optional dependencies."""
     if not isinstance(manifest, dict):
         _fail(ManifestErrorCode.INVALID_MANIFEST, "source manifest must be an object")
-    if set(manifest) != MANIFEST_FIELDS:
+    missing = sorted(MANIFEST_FIELDS - set(manifest))
+    if missing:
         _fail(
             ManifestErrorCode.INVALID_MANIFEST,
-            f"source fields must be exactly {sorted(MANIFEST_FIELDS)}",
+            f"source fields are missing: {missing}",
+        )
+    unknown = sorted(set(manifest) - MANIFEST_FIELDS - OPTIONAL_MANIFEST_FIELDS)
+    if unknown:
+        _fail(
+            ManifestErrorCode.INVALID_MANIFEST,
+            f"source fields must be exactly {sorted(MANIFEST_FIELDS | OPTIONAL_MANIFEST_FIELDS)}",
         )
     _assert_no_forbidden_keys(manifest)
     _require_plugin_id(manifest["plugin_id"])
