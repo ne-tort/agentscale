@@ -229,6 +229,12 @@ async def seed_bootstrap_identity(
             owner_company_id=config.company_id,
             status="active",
         ))
+        # cabinet_company_grants and cabinet_employee_assignments have real
+        # foreign keys to cabinet_instances, but the ORM declares no
+        # relationship between them, so SQLAlchemy derives no table ordering
+        # and emitted the grant INSERT first. Flush the parent explicitly; the
+        # single commit below still wraps the whole seed atomically.
+        await session.flush()
         session.add(CabinetCompanyGrantRow(
             id="ccg_entrypoint",
             cabinet_id=config.cabinet_id,

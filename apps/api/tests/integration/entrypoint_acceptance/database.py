@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -38,8 +40,24 @@ def _engine_for(url: str) -> Any:
     return create_async_engine(_sqlalchemy_dsn(url), echo=False, pool_pre_ping=True)
 
 
+@asynccontextmanager
+async def _engine_scope(url: str) -> AsyncIterator[Any]:
+    """Yield a short-lived engine and always dispose its pool.
+
+    ``create_async_engine`` returns an ``AsyncEngine`` that implements neither
+    ``__aenter__`` nor ``aclose``; only ``dispose()`` is async. Using
+    ``async with create_async_engine(...)`` raised TypeError before any network
+    call, so every engine use goes through this scope instead.
+    """
+    engine = _engine_for(url)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
 async def _drop_database(admin_dsn: str, name: str) -> None:
-    async with _engine_for(admin_dsn) as admin:
+    async with _engine_scope(admin_dsn) as admin:
         async with admin.connect() as conn:
             conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
             await conn.execute(
@@ -83,7 +101,7 @@ class DisposablePostgres:
         base = base.set(drivername="postgresql+asyncpg")
         name = f"plugin_pg_{uuid.uuid4().hex[:20]}"
         assert _NAME.fullmatch(name) is not None
-        async with _engine_for(admin_dsn) as admin_engine:
+        async with _engine_scope(admin_dsn) as admin_engine:
             async with admin_engine.connect() as conn:
                 conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
                 await conn.execute(text(f'CREATE DATABASE "{name}" OWNER "{owner}"'))
@@ -93,7 +111,7 @@ class DisposablePostgres:
 
         result = cls(admin_dsn=admin_dsn, database=DisposableDatabase(name=name, dsn=dsn))
         try:
-            async with _engine_for(dsn) as probe:
+            async with _engine_scope(dsn) as probe:
                 async with probe.connect() as conn:
                     await _assert_clean_database(conn, name)
             await _alembic_run(dsn, "upgrade", "head")

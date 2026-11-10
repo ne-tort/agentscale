@@ -23,6 +23,41 @@ from .world import (
 pytestmark = [pytest.mark.integration, pytest.mark.entrypoint_acceptance]
 
 
+def test_disposable_engines_are_disposed_without_async_context_manager() -> None:
+    """`create_async_engine` returns an AsyncEngine, which is not an async CM.
+
+    `async with create_async_engine(...)` raised TypeError before any network
+    call, so the whole world fixture could never open on any OS. Engines must
+    go through the explicit `_engine_scope` helper instead.
+    """
+    from sqlalchemy.ext.asyncio import AsyncEngine
+
+    from . import database
+
+    assert not hasattr(AsyncEngine, "__aenter__")
+    assert not hasattr(AsyncEngine, "aclose")
+    assert hasattr(AsyncEngine, "dispose")
+    source = inspect.getsource(database)
+    assert "async with _engine_for(" not in source
+    assert "async with _engine_scope(" in source
+
+
+def test_cabinet_parent_is_flushed_before_dependent_seed_rows() -> None:
+    """The seed must not rely on ORM ordering for real foreign keys.
+
+    `cabinet_company_grants` references `cabinet_instances`, but no ORM
+    relationship connects those models, so SQLAlchemy emitted the grant INSERT
+    first and PostgreSQL raised ForeignKeyViolationError.
+    """
+    from . import durable
+
+    source = inspect.getsource(durable.seed_bootstrap_identity)
+    parent = source.index("CabinetInstanceRow(")
+    flush = source.index("await session.flush()", parent)
+    dependent = source.index("CabinetCompanyGrantRow(", parent)
+    assert parent < flush < dependent
+
+
 def test_processes_use_api_root_not_tests_for_cwd_pythonpath_and_helpers() -> None:
     expected = Path(__file__).resolve().parents[3]
     assert API_ROOT.resolve() == expected.resolve()
