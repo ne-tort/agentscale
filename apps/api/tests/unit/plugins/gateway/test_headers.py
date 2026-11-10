@@ -244,3 +244,58 @@ def test_claim_grant_digest_mismatch_is_not_forwarded(claims) -> None:
     )
     with pytest.raises(ValueError, match="artifact_digest mismatch"):
         build_trusted_headers(claims, grant)
+
+
+# ---------------------------------------------------------------------------
+# Webhook-ветка: подпись восстанавливается ТОЛЬКО из успешной GatewayAuth.
+# ---------------------------------------------------------------------------
+
+def _verified(**overrides):
+    from prodavan.application.plugins.gateway.ports import VerifiedWebhook
+
+    fields = {
+        "signature": "sha256=trusted",
+        "event": "document.created",
+        "delivery_id": "dlv-1",
+    }
+    fields.update(overrides)
+    return VerifiedWebhook(**fields)
+
+
+def test_verified_webhook_headers_are_restored_after_sanitize(claims, grant) -> None:
+    """Клиентская подпись удаляется, доверенная восстанавливается."""
+    incoming = {
+        "X-Prodavan-Signature": "sha256=forged",
+        "X-Prodavan-Event": "forged.event",
+        "X-Prodavan-Delivery": "dlv-forged",
+        "Accept": "application/json",
+    }
+    out = build_forward_headers(incoming, claims, grant, verified_webhook=_verified())
+    assert out["X-Prodavan-Signature"] == "sha256=trusted"
+    assert out["X-Prodavan-Event"] == "document.created"
+    assert out["X-Prodavan-Delivery"] == "dlv-1"
+    # Санитизация не сломала обычный заголовок.
+    assert out["Accept"] == "application/json"
+
+
+def test_without_verified_webhook_the_client_signature_never_survives(claims, grant) -> None:
+    """Без успешной HMAC-проверки клиент не может «заявить» подпись."""
+    out = build_forward_headers({"X-Prodavan-Signature": "sha256=forged"}, claims, grant)
+    assert "X-Prodavan-Signature" not in out
+
+
+def test_legacy_webhook_omits_version_and_timestamp(claims, grant) -> None:
+    out = build_forward_headers({}, claims, grant, verified_webhook=_verified())
+    assert "X-Prodavan-Signature-Version" not in out
+    assert "X-Prodavan-Timestamp" not in out
+
+
+def test_versioned_webhook_carries_version_and_timestamp(claims, grant) -> None:
+    out = build_forward_headers(
+        {},
+        claims,
+        grant,
+        verified_webhook=_verified(signature_version="v2", timestamp="1700000000"),
+    )
+    assert out["X-Prodavan-Signature-Version"] == "v2"
+    assert out["X-Prodavan-Timestamp"] == "1700000000"
