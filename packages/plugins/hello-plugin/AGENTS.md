@@ -141,8 +141,13 @@
   `LIQUIBASE_SHA256` обязан совпасть с скачанным tar.gz до распаковки.
 - Установка из `requirements.txt` запрещена. Dockerfile требует полный
   `backend/requirements.lock` и вызывает pip с `--require-hashes --no-deps`.
-  Сейчас lock намеренно отсутствует: доступный `infra/ops/poetry.lock` содержит
-  лишь часть transitive packages и не даёт полного resolution для hello.
+  Lock **есть** и сгенерирован из реального индекса, а не собран из
+  `infra/ops/poetry.lock` (тот содержит лишь часть transitive packages):
+  `uv pip compile requirements.txt --python-version 3.13
+  --python-platform x86_64-manylinux_2_28 --generate-hashes`. Полный граф —
+  22 пакета, 658 хешей; проверено, что `--require-hashes --no-deps`
+  разрешается полностью. Это статическое разрешение, а не доказательство
+  сборки: CI всё ещё требует базовый образ, liquibase и семь repo-переменных.
 - Для разблокировки CI нужны verified inputs: (1) проверенный multi-arch digest
   `python:3.13-slim`; (2) независимо подтверждённый SHA256 официального
   `liquibase-4.24.0.tar.gz`; (3) reviewed lock полного direct+transitive graph
