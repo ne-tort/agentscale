@@ -56,6 +56,7 @@ template-репозитория, из которого продукт генер
 | 9 | Диагностика in-memory портов всегда пуста | Ничто не наполняло список → проверки вхолостую | Обнаружение по классу порта |
 | 10 | Manifest builder отвергал `FROM ${ARG}` | Любой Dockerfile с базой из build-arg падал, хотя это штатная форма | ARG-дефолт разрешается, тег-only по-прежнему отвергается |
 | 11 | Workflow не передавал `--build-arg` | Dockerfile объявляет `ARG` без дефолта (дефолт запрещён тестом) ⇒ образ не собрался бы даже с раннерами и переменными | Обе сборки (dry-run и release) передают оба аргумента из repo-переменных |
+| 12 | `prepare` не принимал base image | Валидатор Dockerfile падал на `INVALID_LAYOUT` **до** сборки, т.е. раньше починенного build-arg | Добавлен `--base-image-arg`, передан в обоих вызовах workflow; проверено локальным прогоном end-to-end |
 
 ## 3. Что проверено независимо и НЕ подтвердилось
 
@@ -94,7 +95,7 @@ template-репозитория, из которого продукт генер
 
 | Набор | Результат |
 |---|---|
-| Backend plugin (unit + integration + acceptance) | **3920 passed** |
+| Backend plugin (unit + integration + acceptance) | **3921 passed** |
 | Frontend | **897 passed** / 102 файла, `tsc --noEmit` чистый |
 | Infra/ops | **122 passed** + `prodavan-ops validate` ok |
 | Disposable PG / Redis / Kafka / K8s / MinIO | 27/27, 22/22, 16/16, 19/19, 29/29 |
