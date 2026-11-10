@@ -452,6 +452,38 @@ GitHub environment `vars` (default в workflow — пустая строка), �
 содержит platform endpoint, pinned Trivy image и exact provisioned ModuleSource
 bindings; source/OIDC/ref/workflow checks выполняются до registry writes.
 
+**Схема конфига** (ровно эти ключи, `additionalProperties` запрещён — лишний
+ключ даёт `PROTECTED_CONFIG_INVALID`):
+
+```json
+{
+  "schema_version": 1,
+  "publication_base_url": "https://<platform-host>",
+  "scanner_image": "aquasec/trivy:<major>.<minor>.<patch>@sha256:<64 lowercase hex>",
+  "sources": [
+    {
+      "source_id": "<id модуля-источника>",
+      "company_id": "<company_id>",
+      "plugin_id": "<plugin_id>",
+      "repository": "<owner>/<repo>",
+      "repository_id": 123456789,
+      "ref": "refs/heads/main",
+      "trusted_workflow_ref": "ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@refs/heads/main",
+      "static_origin": null
+    }
+  ]
+}
+```
+
+`static_origin`, если он указан, принимает ровно `url_template`,
+`plugin_shell_origin` и `security_headers`; `null` означает, что CSP-проба для
+этого источника не выполняется. `scanner_image` обязан иметь и точную версию, и
+привязку по digest (`aquasec/trivy:<semver>@sha256:…`) — одно без другого
+отвергается. `trusted_workflow_ref` — **только** канонический workflow платформы
+с суффиксом `@<40-hex-sha>` или `@refs/heads/<branch>`, причём для direct push
+ветка обязана совпасть с `ref`.
+Это описание **статической схемы**, а не evidence выполненной публикации.
+
 После digest promotion отдельный `release_verify` повторно проверяет actual
 release refs/referrers. Затем `plugin_publication.py publish`:
 
