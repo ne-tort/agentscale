@@ -576,6 +576,13 @@ class WorkflowPassesRequiredBuildArgs(unittest.TestCase):
             self.assertIn("--base-image-arg", line)
             self.assertIn("$PYTHON_BASE_IMAGE", line)
 
+    def test_release_job_passes_the_repository_id_the_trust_gate_compares(self) -> None:
+        # ReleaseTrust сверяет EXPECTED_REPOSITORY_ID с GITHUB_REPOSITORY_ID;
+        # без второго значения release падает до любой записи.
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        self.assertIn("GITHUB_REPOSITORY_ID: ${{ github.repository_id }}", workflow)
+        self.assertIn("EXPECTED_REPOSITORY_ID:", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -329,6 +329,10 @@ jobs:
         id: trust
         env:
           EXPECTED_REPOSITORY: ${{ inputs.expected_repository || github.repository }}
+          # ReleaseTrust сверяет это значение с GITHUB_REPOSITORY_ID, поэтому
+          # обе стороны обязаны прийти: иначе release падает на
+          # GITHUB_SOURCE_CONTEXT_INVALID ещё до любой записи.
+          GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
           EXPECTED_REPOSITORY_ID: ${{ inputs.expected_repository_id || vars.PLUGIN_PLATFORM_REPOSITORY_ID || '' }}
           EXPECTED_REF: ${{ inputs.default_branch_ref || format('refs/heads/{0}', github.event.repository.default_branch) }}
           INPUT_WORKFLOW_REF: ${{ inputs.trusted_workflow_ref }}
