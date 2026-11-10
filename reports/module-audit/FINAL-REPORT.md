@@ -93,7 +93,7 @@ template-репозитория, из которого продукт генер
 | Набор | Результат |
 |---|---|
 | Backend plugin (unit + integration + acceptance) | **3913 passed** |
-| Frontend | **896 passed** / 102 файла, `tsc --noEmit` чистый |
+| Frontend | **897 passed** / 102 файла, `tsc --noEmit` чистый |
 | Infra/ops | **122 passed** + `prodavan-ops validate` ok |
 | Disposable PG / Redis / Kafka / K8s / MinIO | 27/27, 22/22, 16/16, 19/19, 29/29 |
 
@@ -105,6 +105,17 @@ template-репозитория, из которого продукт генер
 
 - 0 из 5 self-hosted раннеров online → `CI Gate` / `CI E2E` не запускаются.
   Последний успешный Gate — 2026-11-07.
+- `Plugin OCI Artifacts` падает **до** сборки, потому что в репозитории вообще нет
+  required переменных: `gh variable list` пуст, а workflow читает 7 значений
+  (`PLUGIN_COSIGN_2_4_1_LINUX_AMD64_SHA256`, `PLUGIN_ORAS_1_2_3_LINUX_AMD64_SHA256`,
+  `PLUGIN_BUILDKIT_IMAGE`, `PLUGIN_PLATFORM_PUBLICATION_CONFIG`,
+  `PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST`, `PLUGIN_PLATFORM_REPOSITORY_ID`,
+  `PLUGIN_GRANTED_CAPABILITIES`). Это environment-owned конфигурация, а не код.
+- `requirements.lock` отсутствует намеренно. Я проверил, что хеши технически
+  разрешимы (Docker отдаёт digest `python:3.13-slim`, PyPI отдаёт артефакты), но
+  политика требует хеши ВСЕХ допустимых wheel **и** sdist для полного
+  direct+transitive графа — это supply-chain артефакт с reviewed-подписью, а не
+  то, что следует генерировать автоматически в рамках аудита.
 - `Plugin OCI Artifacts` корректно падает на незакреплённом базовом образе: нужны
   реальные `PYTHON_BASE_IMAGE`, `LIQUIBASE_SHA256` и полный `requirements.lock`.
 
