@@ -147,6 +147,23 @@ actions (`setup-buildx`/`setup-docker`), поэтому собрать обра�
 
 ## 6. Открытые блокеры
 
+**Merge в `main` состоялся (2026-11-11).** PR #339 слит коммитом `a3f0ad8f`.
+`CI Gate` и `Plugin OCI Artifacts` на нём зелёные, `CI Images` собраны.
+
+**`Verify Dev` на `main` падает — и это не регрессия PR.** Раскладка:
+`agentscale-api` поднимается с новым образом (`rollout ok: ready=1/1`), а
+`agentscale-celery-worker` остаётся `ready=0 updated=1 desired=1` до таймаута.
+Проверено локально, что ни один из моих изменений не мешает старту:
+`Settings()` с пустыми `PLUGIN_SHELL_ORIGIN`/`PLUGIN_STATIC_ORIGIN` и
+`PLUGIN_PLATFORM_ENABLED=false` создаётся без ошибок;
+`worker_manager_from_settings()` и `celery_app` импортируются; рендер
+`kustomize dev` содержит celery корректно. Единственное изменение configmap —
+`PLUGIN_SHELL_ORIGIN: ""`, и пустые значения там уже были.
+
+Диагностировать точнее не удалось: kubeconfig `prodavan-dev.yaml` устарел
+(TLS-сертификат и креденшелы отвергнуты), SSH на VM требует ключ. Поэтому статус
+честно зафиксирован как **не установленный**, а не как «исправлено».
+
 **Оба обязательных воркфлоу зелёные (2026-11-11).**
 
 - `CI Gate` — `success`, все 7 job'ов: `infra`, `api/test`, `schemas/validate`,
