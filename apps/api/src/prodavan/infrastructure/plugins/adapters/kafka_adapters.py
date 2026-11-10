@@ -48,6 +48,7 @@ from prodavan.application.plugins.events.contracts import (
     CONSUMER_AUTO_OFFSET_RESET,
     CONSUMER_ENABLE_AUTO_COMMIT,
     MAX_DELIVERY_ATTEMPTS,
+    ConsumerAssignment,
     consumer_config,
 )
 from prodavan.application.plugins.events.ports import ConsumedRecord
@@ -147,12 +148,16 @@ class AiokafkaProducerAdapter:
         bootstrap_servers: str,
         client_id: str = "prodavan-plugin-events-producer",
         producer: Any = None,
+        security: Any = None,
     ) -> None:
         if not isinstance(bootstrap_servers, str) or not bootstrap_servers.strip():
             raise KafkaAdapterError("bootstrap_servers is required (no dev fallback)")
         self._bootstrap = bootstrap_servers.strip()
         self._client_id = client_id
         self._producer = producer  # для тестов / явной подстановки
+        self._security_kwargs = (
+            dict(security.as_aiokafka_kwargs()) if security is not None else {}
+        )
         self._owns_producer = producer is None
         self.sent: list[dict[str, Any]] = []
         self.flushes: int = 0
@@ -169,6 +174,7 @@ class AiokafkaProducerAdapter:
             client_id=self._client_id,
             acks="all",
             enable_idempotence=True,
+            **self._security_kwargs,
         )
         try:
             await self._producer.start()
@@ -313,6 +319,7 @@ class AiokafkaConsumerAdapter:
         client_id: str = "prodavan-plugin-events-consumer",
         consumer: Any = None,
         config: Mapping[str, Any] | None = None,
+        security: Any = None,
     ) -> None:
         if not isinstance(bootstrap_servers, str) or not bootstrap_servers.strip():
             raise KafkaAdapterError("bootstrap_servers is required (no dev fallback)")
@@ -328,6 +335,10 @@ class AiokafkaConsumerAdapter:
         self._topic = topic
         self._client_id = client_id
         self._consumer = consumer
+        self._pending_getone: asyncio.Task[Any] | None = None
+        self._security_kwargs = (
+            dict(security.as_aiokafka_kwargs()) if security is not None else {}
+        )
         self._owns_consumer = consumer is None
         self.start_kwargs: dict[str, Any] = {}
         self.polls: int = 0
@@ -370,6 +381,10 @@ class AiokafkaConsumerAdapter:
             "value_deserializer": lambda raw: raw,  # decoder применяется в _wrap
         }
         self.start_kwargs = dict(kwargs)
+        if self._security_kwargs:
+            self.start_kwargs["security_protocol"] = self._security_kwargs.get("security_protocol")
+            self.start_kwargs["sasl_mechanism"] = self._security_kwargs.get("sasl_mechanism")
+        kwargs.update(self._security_kwargs)
         if self._consumer is not None:
             return  # уже стартован / подставлен интегратором
         try:
@@ -393,16 +408,36 @@ class AiokafkaConsumerAdapter:
     async def poll(self, *, timeout_ms: int = 1000) -> ConsumedRecord | None:
         consumer = await self._require_started()
         self.polls += 1
-        # Без asyncio.wait_for: aiokafka.getone сам соблюдает timeout_ms.
-        # Никакого автокоммита — offset живёт до явного commit().
+        # aiokafka 0.11/0.12 getone принимает только partitions, но не timeout_ms.
+        # Сохраняем ОДИН pending getone между poll'ами: shield ограничивает только
+        # ожидание caller'а, не отменяя fetch и не оставляя aiokafka fetch_context
+        # открытым. Полученная позже запись остаётся в task до следующего poll.
+        pending = self._pending_getone
+        if pending is None:
+            pending = asyncio.create_task(consumer.getone())
+            self._pending_getone = pending
         try:
-            record = await consumer.getone(timeout_ms=int(timeout_ms))
+            timeout_seconds = max(0, int(timeout_ms)) / 1000.0
+            record = await asyncio.wait_for(asyncio.shield(pending), timeout=timeout_seconds)
         except asyncio.TimeoutError:
-            # Простой консьюмера: НИКАКОГО коммита, НИКАКОЙ потери записи.
-            # Это и есть отличие от kick-режима (acceptance №20).
-            return None
+            if not pending.done():
+                # Простой: НИКАКОГО коммита/seek и НИКАКОЙ отмены pending fetch.
+                return None
+            # Гонка timeout/record: результат уже доступен и не должен потеряться.
+            try:
+                record = pending.result()
+            except Exception as exc:
+                raise KafkaAdapterError(
+                    f"plugin events poll failed: {type(exc).__name__}"
+                ) from exc
+        except asyncio.CancelledError:
+            # Внешняя отмена не отменяет shielded fetch; close() завершит его.
+            raise
         except Exception as exc:  # noqa: BLE001 — любая ошибка чтения = отказ
             raise KafkaAdapterError(f"plugin events poll failed: {type(exc).__name__}") from exc
+        finally:
+            if pending.done() and self._pending_getone is pending:
+                self._pending_getone = None
         if record is None:
             return None
         self._last_tp = self._topic_partition_of(record)
@@ -459,8 +494,38 @@ class AiokafkaConsumerAdapter:
                 ) from exc
         self.seeks.append(offset)
 
+    def delivery_ownership(self, record: ConsumedRecord) -> ConsumerAssignment:
+        """Use only public AIOKafkaConsumer.assignment() as a rebalance fence."""
+
+        if self._consumer is None:
+            return ConsumerAssignment(
+                topic=record.topic,
+                partition=record.partition,
+                owned=False,
+                offset=record.offset,
+            )
+        assignment = self._consumer.assignment()
+        owned = any(
+            getattr(item, "topic", None) == record.topic
+            and getattr(item, "partition", None) == record.partition
+            for item in assignment
+        )
+        return ConsumerAssignment(
+            topic=record.topic,
+            partition=record.partition,
+            owned=owned,
+            offset=record.offset,
+            generation=None,
+        )
+
     async def close(self) -> None:
         """Остановить консьюмер; НЕ коммитит необработанные offset'ы."""
+        pending = self._pending_getone
+        self._pending_getone = None
+        if pending is not None:
+            if not pending.done():
+                pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
         consumer = self._consumer
         if consumer is None:
             return
@@ -504,12 +569,16 @@ class KafkaTopicAdminAdapter:
         bootstrap_servers: str,
         client_id: str = "prodavan-plugin-events-admin",
         admin: Any = None,
+        security: Any = None,
     ) -> None:
         if not isinstance(bootstrap_servers, str) or not bootstrap_servers.strip():
             raise KafkaAdapterError("bootstrap_servers is required (no dev fallback)")
         self._bootstrap = bootstrap_servers.strip()
         self._client_id = client_id
         self._admin = admin
+        self._security_kwargs = (
+            dict(security.as_aiokafka_kwargs()) if security is not None else {}
+        )
         self._owns_admin = admin is None
         self.created: list[tuple[str, int, int]] = []
         self.exists_calls: list[str] = []
@@ -524,6 +593,7 @@ class KafkaTopicAdminAdapter:
         client = AIOKafkaAdminClient(
             bootstrap_servers=self._bootstrap,
             client_id=self._client_id,
+            **self._security_kwargs,
         )
         try:
             await client.start()

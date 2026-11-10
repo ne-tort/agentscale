@@ -12,7 +12,9 @@ import pytest
 
 from prodavan.application.plugins.objects import (
     MAX_TTL_SECONDS,
+    MAX_STS_TTL_SECONDS,
     MIN_TTL_SECONDS,
+    MIN_STS_TTL_SECONDS,
     AuditPort,
     BucketAdminPort,
     InvalidTtl,
@@ -20,6 +22,7 @@ from prodavan.application.plugins.objects import (
     PresignPort,
     ScopedCredentials,
     StsPort,
+    validate_sts_ttl,
     validate_ttl,
 )
 from tests.unit.plugins.objects.conftest import (  # type: ignore[import-not-found]
@@ -52,6 +55,27 @@ def test_validate_ttl_rejects_non_integer(ttl: object) -> None:
         validate_ttl(ttl)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("ttl", [900, 901, 1200, 3599, 3600])
+def test_validate_sts_ttl_accepts_standard_range(ttl: int) -> None:
+    assert validate_sts_ttl(ttl) == ttl
+
+
+@pytest.mark.parametrize("ttl", [-1, 0, 59, 60, 899, 3601, 7200])
+def test_validate_sts_ttl_rejects_out_of_range(ttl: int) -> None:
+    with pytest.raises(InvalidTtl):
+        validate_sts_ttl(ttl)
+
+
+def test_presign_and_sts_ttl_contracts_are_independent() -> None:
+    assert MIN_TTL_SECONDS == 60
+    assert MIN_STS_TTL_SECONDS == 900
+    assert MAX_TTL_SECONDS == MAX_STS_TTL_SECONDS == 3600
+    assert validate_ttl(60) == 60
+    assert validate_sts_ttl(900) == 900
+    with pytest.raises(InvalidTtl):
+        validate_sts_ttl(60)
+
+
 def test_all_ports_are_runtime_checkable_protocols() -> None:
     assert isinstance(FakeBuckets(), BucketAdminPort)
     assert isinstance(FakeSts(), StsPort)
@@ -70,6 +94,7 @@ def test_fakes_satisfy_runtime_protocol_with_real_signatures() -> None:
     assert "quota_bytes" in inspect.signature(FakeBuckets.ensure_bucket).parameters
     assert "session_policy" in inspect.signature(FakeSts.assume_role).parameters
     assert "ttl_seconds" in inspect.signature(FakePresigner.presign_get).parameters
+    assert "ttl_seconds" in inspect.signature(FakePresigner.presign_head).parameters
 
 
 def test_scoped_credentials_carry_explicit_scope_not_policy_variables() -> None:

@@ -42,7 +42,14 @@ def capabilities() -> CapabilitySet:
 
 
 @pytest.fixture
-def grant_args(published: str, capabilities: CapabilitySet) -> dict:
+def grant_args(published: str, capabilities: CapabilitySet, harness: Harness) -> dict:
+    harness.publication_approvals.seed(
+        company_id="co_a",
+        plugin_id=PLUGIN_X,
+        manifest_version="1.2.0",
+        artifact_digest=published,
+        capabilities=capabilities,
+    )
     return {
         "company_id": "co_a",
         "plugin_id": PLUGIN_X,

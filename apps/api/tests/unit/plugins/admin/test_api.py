@@ -4,7 +4,7 @@
 ``extra="forbid"`` (никаких произвольных ``dict``/``Any``), маппинг контрактов в
 ответы и PlatformAdmin-зависимость через порт (fail-closed при отсутствии адаптера).
 
-Тесты НЕ запускались (verification freeze).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 """
 
 from __future__ import annotations
@@ -17,14 +17,16 @@ from pydantic import BaseModel, ValidationError
 from prodavan.api.v1 import plugin_admin as api
 from prodavan.application.plugins.admin.contracts import (
     CapabilitySet,
+    EffectiveQuotasStatus,
     EgressMode,
     EgressPolicy,
     QuotaSet,
 )
 from prodavan.application.plugins.admin.errors import PluginAdminError
+from prodavan.application.plugins.admin.service import EffectiveGrantReadError
 from prodavan.domain.errors import AppError
 
-from .fakes import DIGEST_A, PLUGIN_X, Harness
+from .fakes import COMPANY_A, DIGEST_A, PLUGIN_X, Harness
 
 
 # --------------------------------------------------------------------------- роутер
@@ -33,6 +35,7 @@ from .fakes import DIGEST_A, PLUGIN_X, Harness
 def test_router_prefix_and_operations() -> None:
     assert api.router.prefix == "/admin/plugins"
     expected = {
+        "/admin/plugins/publication-approvals": "POST",
         "/admin/plugins/grant": "POST",
         "/admin/plugins/revoke": "POST",
         "/admin/plugins/uninstall": "POST",
@@ -52,6 +55,7 @@ def test_every_request_body_is_strict_typed_model() -> None:
 
     bodies = (
         api.GrantBody,
+        api.PublicationApprovalBody,
         api.RevokeBody,
         api.UninstallBody,
         api.WakeBody,
@@ -214,12 +218,14 @@ def test_service_error_propagates_unexpected_error() -> None:
 def test_response_models_have_no_free_form_dict_fields() -> None:
     responses = (
         api.GrantResponse,
+        api.PublicationApprovalResponse,
         api.RevokeResponse,
         api.UninstallResponse,
         api.WakeResponse,
         api.PluginListResponse,
         api.EnabledModulesResponse,
         api.InstalledPluginResponse,
+        api.EffectiveQuotasResponse,
         api.ClaimsResponse,
     )
     for model in responses:
@@ -235,3 +241,142 @@ def test_uninstall_response_exposes_snapshot_flag() -> None:
     assert api.EnabledModulesResponse.model_fields["data_migration_performed"].default is False
     assert api.GrantResponse.model_fields["egress_in_token"].default is False
     assert api.GrantResponse.model_fields["quotas_in_token"].default is False
+
+
+def test_effective_quota_response_fields_are_required_and_strict() -> None:
+    values = {
+        "ops_per_minute": 17,
+        "max_rows": 23,
+        "max_bytes": 1_001,
+        "max_keys": 37,
+        "max_object_bytes": 2_003,
+        "max_egress_bytes": 3_001,
+    }
+    assert api.EffectiveQuotasResponse(**values).model_dump() == values
+    for name in values:
+        incomplete = dict(values)
+        incomplete.pop(name)
+        with pytest.raises(ValidationError):
+            api.EffectiveQuotasResponse(**incomplete)
+    for invalid in (0, -1, True, "17"):
+        with pytest.raises(ValidationError):
+            api.EffectiveQuotasResponse(**dict(values, ops_per_minute=invalid))
+
+
+def test_effective_grant_read_error_has_typed_http_mapping() -> None:
+    error = EffectiveGrantReadError(
+        reason="grant_missing", company_id=COMPANY_A, plugin_id=PLUGIN_X
+    )
+
+    mapped = api._service_error(error)
+
+    assert mapped.code == "EFFECTIVE_GRANTS_UNAVAILABLE"
+    assert mapped.status == 503
+    assert mapped.extra == {
+        "reason": "grant_missing",
+        "company_id": COMPANY_A,
+        "plugin_id": PLUGIN_X,
+    }
+
+
+async def test_list_response_maps_exact_six_effective_quotas(
+    harness: Harness, grant_args: dict
+) -> None:
+    expected = {
+        "ops_per_minute": 17,
+        "max_rows": 23,
+        "max_bytes": 1_001,
+        "max_keys": 37,
+        "max_object_bytes": 2_003,
+        "max_egress_bytes": 3_001,
+    }
+    service = harness.service()
+    capabilities = CapabilitySet(
+        capabilities=("cache",), quotas=QuotaSet(**expected)
+    )
+    harness.publication_approvals.seed(
+        company_id=COMPANY_A,
+        plugin_id=PLUGIN_X,
+        manifest_version=grant_args["manifest_version"],
+        artifact_digest=grant_args["artifact_digest"],
+        capabilities=capabilities,
+    )
+    await service.grant(
+        **dict(
+            grant_args,
+            capabilities=capabilities,
+        )
+    )
+    request = _Request(
+        _App(
+            _State(
+                plugin_admin_ports=harness.ports(),
+                plugin_admin_service=service,
+            )
+        )
+    )
+
+    response = await api.list_plugins(  # type: ignore[arg-type]
+        request=request, _="platform-admin", company_id=COMPANY_A
+    )
+    payload = response.model_dump(mode="json")
+    item = payload["items"][0]
+
+    assert item["quotas"] == expected
+    assert item["quotas_status"] == EffectiveQuotasStatus.AVAILABLE.value
+    assert item["capabilities"] == ["cache"]
+    assert not set(item["capabilities"]) & set(expected)
+
+
+async def test_preapproval_endpoint_uses_admin_actor_and_has_no_secret_or_runtime_fields() -> None:
+    harness = Harness()
+    service = harness.service()
+    request = _Request(
+        _App(
+            _State(
+                plugin_admin_ports=harness.ports(),
+                plugin_admin_service=service,
+            )
+        )
+    )
+    body = api.PublicationApprovalBody(
+        company_id=COMPANY_A,
+        plugin_id=PLUGIN_X,
+        manifest_version="1.2.0",
+        artifact_digest=DIGEST_A,
+        capabilities=api.CapabilitiesBody(
+            capabilities=("cache",),
+            quotas=api.QuotaSetBody(ops_per_minute=17),
+        ),
+    )
+
+    first = await api.approve_plugin_publication(  # type: ignore[arg-type]
+        body=body, request=request, actor_id="approver-1"
+    )
+    replay = await api.approve_plugin_publication(  # type: ignore[arg-type]
+        body=body, request=request, actor_id="approver-1"
+    )
+
+    assert first.created is True
+    assert first.created_by == "approver-1"
+    assert first.quotas.ops_per_minute == 17
+    assert first.consumed_at is None
+    assert replay.replayed is True
+    assert replay.approval_id == first.approval_id
+    assert harness.artifact_registry.records == {}
+    assert harness.grant_store.grants == {}
+    assert harness.activation.deployments == {}
+    assert not {
+        "token", "claims", "dsn_ref", "deployment", "grant_id", "status"
+    } & set(first.model_dump())
+
+
+def test_preapproval_body_requires_semver() -> None:
+    with pytest.raises(ValidationError):
+        api.PublicationApprovalBody(
+            company_id=COMPANY_A,
+            plugin_id=PLUGIN_X,
+            manifest_version="release-1",
+            artifact_digest=DIGEST_A,
+            capabilities=api.CapabilitiesBody(capabilities=("cache",)),
+        )

@@ -1,0 +1,11 @@
+Deleting cluster "pf-bd5b14e08a76" ...
+Deleted nodes: ["pf-bd5b14e08a76-control-plane"]
+kind_delete_exit=0
+owned_cluster_listed=False
+owned_container_remaining=False
+owned_cluster_listed=False
+owned_container_remaining=False
+temp_directory_exists=False
+default_context_after_cleanup:
+error: current-context is not set
+default_context_exit=1

@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plugin-gateway
+spec:
+  template:
+    spec:
+      containers:
+        - name: gateway
+          env:
+            # Opaque SecretStore reference only; never reuse PLUGIN_CLAIMS_SECRET.
+            - name: PLUGIN_EVENT_SIGNING_SECRET_REF
+              value: k8s-secret://agentscale-plugin-events/signing-key
+          volumeMounts:
+            - name: plugin-event-signing
+              mountPath: /var/run/secrets/agentscale-plugin-events
+              readOnly: true
+      volumes:
+        - name: plugin-event-signing
+          secret:
+            secretName: agentscale-plugin-events
+            defaultMode: 0400
+            # Optional only while the plugin platform is disabled. A missing key
+            # remains a typed startup failure when the platform is enabled.
+            optional: true
+            items:
+              - key: signing-key
+                path: signing-key

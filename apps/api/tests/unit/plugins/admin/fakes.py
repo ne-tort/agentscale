@@ -10,10 +10,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from prodavan.application.plugins.admin.ports import webhook_secret_key
+from prodavan.application.plugins.installation_scope.contracts import InstallationScope
+from prodavan.application.plugins.tenantdb.service import StoredSecret
+from prodavan.domain.errors import AppError
 from prodavan.application.plugins.admin.contracts import (
     PLUGIN_CLAIMS_TTL_SECONDS,
     PLUGIN_OBJECT_PREFIX,
@@ -23,15 +27,22 @@ from prodavan.application.plugins.admin.contracts import (
     AdminAuditEvent,
     AdminDecision,
     AdminIdentity,
+    ArtifactPinUpdateResult,
     ArtifactPublicationStatus,
     ArtifactRecord,
     CapabilityGrantRecord,
+    CapabilitySet,
     GrantStatus,
     IssuedPluginClaims,
     MintRequest,
     ObjectStoreBinding,
+    PluginInstanceRecord,
+    PluginInstanceStatus,
+    PluginPublicationApproval,
+    PluginRuntimeBinding,
     PluginRuntimeStatus,
     PluginSchema,
+    PluginUpdateLockLease,
     RouteRegistration,
     TenantDatabase,
     WakeResult,
@@ -103,6 +114,30 @@ class FakeTenantDb(RecordingMixin):
         )
         self.schemas[key] = value
         return value
+
+    async def rotate_plugin_schema(
+        self, *, company_id: str, plugin_id: str, dsn_ref: str
+    ) -> PluginSchema:
+        self._record(
+            "tenant_db", "rotate_plugin_schema", company_id=company_id, plugin_id=plugin_id
+        )
+        schema = await self.ensure_plugin_schema(
+            company_id=company_id, plugin_id=plugin_id, dsn_ref=dsn_ref
+        )
+        return PluginSchema(
+            company_id=schema.company_id,
+            plugin_id=schema.plugin_id,
+            database_name=schema.database_name,
+            schema_name=schema.schema_name,
+            role_name=schema.role_name,
+            dsn_ref=f"{schema.dsn_ref}/rotated",
+            search_path=schema.search_path,
+            created=False,
+        )
+
+    async def revoke_plugin(self, *, company_id: str, plugin_id: str) -> bool:
+        self._record("tenant_db", "revoke_plugin", company_id=company_id, plugin_id=plugin_id)
+        return True
 
     async def drop_plugin_schema(self, *, company_id: str, plugin_id: str) -> tuple[bool, bool]:
         self._record("tenant_db", "drop_plugin_schema", company_id=company_id, plugin_id=plugin_id)
@@ -199,6 +234,222 @@ class FakeArtifactRegistry(RecordingMixin):
         return self.unlink_result
 
 
+# --------------------------------------------------------------------------- instance store (test-only)
+
+
+@dataclass
+class FakeInstanceStore(RecordingMixin):
+    records: dict[tuple[str, str], PluginInstanceRecord] = field(default_factory=dict)
+
+    async def create(self, *, instance: PluginInstanceRecord) -> PluginInstanceRecord:
+        self._record(
+            "instance_store", "create", company_id=instance.company_id, plugin_id=instance.plugin_id
+        )
+        key = (instance.company_id, instance.plugin_id)
+        existing = self.records.get(key)
+        if existing is not None:
+            return existing
+        self.records[key] = instance
+        return instance
+
+    async def get(self, *, company_id: str, plugin_id: str) -> PluginInstanceRecord | None:
+        self._record("instance_store", "get", company_id=company_id, plugin_id=plugin_id)
+        return self.records.get((company_id, plugin_id))
+
+    async def get_by_id(self, *, plugin_instance_id: str) -> PluginInstanceRecord | None:
+        self._record("instance_store", "get_by_id", plugin_instance_id=plugin_instance_id)
+        return next(
+            (item for item in self.records.values() if item.plugin_instance_id == plugin_instance_id),
+            None,
+        )
+
+    async def update_status(
+        self, *, plugin_instance_id: str, status: PluginInstanceStatus
+    ) -> PluginInstanceRecord:
+        self._record("instance_store", "update_status", plugin_instance_id=plugin_instance_id)
+        for key, item in list(self.records.items()):
+            if item.plugin_instance_id == plugin_instance_id:
+                updated = replace(item, status=status, updated_at=datetime.now(UTC))
+                self.records[key] = updated
+                return updated
+        raise KeyError(plugin_instance_id)
+
+    async def update_artifact_pin(
+        self,
+        *,
+        company_id: str,
+        plugin_id: str,
+        plugin_instance_id: str,
+        expected_manifest_version: str,
+        expected_artifact_digest: str,
+        manifest_version: str,
+        artifact_digest: str,
+        expected_status: PluginInstanceStatus,
+        status: PluginInstanceStatus,
+    ) -> PluginInstanceRecord:
+        self._record(
+            "instance_store",
+            "update_artifact_pin",
+            company_id=company_id,
+            plugin_id=plugin_id,
+        )
+        key = (company_id, plugin_id)
+        current = self.records.get(key)
+        if current is None or current.plugin_instance_id != plugin_instance_id:
+            raise KeyError(plugin_instance_id)
+        if (
+            current.manifest_version == manifest_version
+            and current.artifact_digest == artifact_digest
+            and current.status is status
+        ):
+            return current
+        if (
+            current.manifest_version != expected_manifest_version
+            or current.artifact_digest != expected_artifact_digest
+            or current.status is not expected_status
+        ):
+            raise RuntimeError("instance old pin fence mismatch")
+        updated = replace(
+            current,
+            manifest_version=manifest_version,
+            artifact_digest=artifact_digest,
+            status=status,
+            updated_at=datetime.now(UTC),
+        )
+        self.records[key] = updated
+        return updated
+
+    async def delete(self, *, company_id: str, plugin_id: str) -> bool:
+        self._record("instance_store", "delete", company_id=company_id, plugin_id=plugin_id)
+        self.records.pop((company_id, plugin_id), None)
+        return True
+
+    async def resolve(self, *, company_id: str, plugin_id: str) -> str | None:
+        found = await self.get(company_id=company_id, plugin_id=plugin_id)
+        return found.plugin_instance_id if found is not None else None
+
+
+# --------------------------------------------------------------------------- publication approvals
+
+
+@dataclass
+class FakePublicationApprovalStore(RecordingMixin):
+    records: dict[tuple[str, str, str, str], PluginPublicationApproval] = field(default_factory=dict)
+
+    @staticmethod
+    def _key(approval: PluginPublicationApproval) -> tuple[str, str, str, str]:
+        return (
+            approval.company_id,
+            approval.plugin_id,
+            approval.manifest_version,
+            approval.artifact_digest,
+        )
+
+    def seed(
+        self,
+        *,
+        company_id: str,
+        plugin_id: str,
+        manifest_version: str,
+        artifact_digest: str,
+        capabilities: CapabilitySet,
+        consumed_at: datetime | None = None,
+    ) -> PluginPublicationApproval:
+        approval = PluginPublicationApproval(
+            approval_id=f"ppr_test_{len(self.records) + 1}",
+            company_id=company_id,
+            plugin_id=plugin_id,
+            manifest_version=manifest_version,
+            artifact_digest=artifact_digest,
+            capabilities=capabilities.capabilities,
+            egress_policy=capabilities.egress_policy,
+            quotas=capabilities.quotas,
+            created_by="platform-admin",
+            created_at=default_now(),
+            consumed_at=consumed_at,
+        )
+        self.records[self._key(approval)] = approval
+        return approval
+
+    async def get(
+        self,
+        *,
+        company_id: str,
+        plugin_id: str,
+        manifest_version: str,
+        artifact_digest: str,
+    ) -> PluginPublicationApproval | None:
+        self._record(
+            "publication_approvals",
+            "get",
+            company_id=company_id,
+            plugin_id=plugin_id,
+            manifest_version=manifest_version,
+            artifact_digest=artifact_digest,
+        )
+        return self.records.get(
+            (company_id, plugin_id, manifest_version, artifact_digest)
+        )
+
+    async def create(
+        self, *, approval: PluginPublicationApproval
+    ) -> PluginPublicationApproval:
+        self._record("publication_approvals", "create", approval_id=approval.approval_id)
+        return self.records.setdefault(self._key(approval), approval)
+
+    async def mark_consumed(
+        self, *, approval_id: str, consumed_at: datetime
+    ) -> PluginPublicationApproval | None:
+        self._record("publication_approvals", "mark_consumed", approval_id=approval_id)
+        for key, approval in list(self.records.items()):
+            if approval.approval_id == approval_id:
+                if approval.consumed_at is None:
+                    approval = replace(approval, consumed_at=consumed_at)
+                    self.records[key] = approval
+                return approval
+        return None
+
+
+# --------------------------------------------------------------------------- webhook secret store
+
+
+@dataclass
+class FakeWebhookSecretStore:
+    records: dict[str, StoredSecret] = field(default_factory=dict)
+    put_keys: list[str] = field(default_factory=list)
+    rotate_keys: list[str] = field(default_factory=list)
+    deleted_refs: list[str] = field(default_factory=list)
+
+    async def get(self, *, key: str) -> StoredSecret | None:
+        return self.records.get(key)
+
+    async def put(self, *, key: str, value: str) -> str:
+        self.put_keys.append(key)
+        ref = f"file://ai_keys/{key}.secret"
+        self.records[key] = StoredSecret(secret_ref=ref, value=value)
+        return ref
+
+    async def rotate(self, *, key: str, value: str) -> str:
+        self.rotate_keys.append(key)
+        return await self.put(key=key, value=value)
+
+    async def delete(self, *, secret_ref: str) -> None:
+        self.deleted_refs.append(secret_ref)
+        for key, stored in list(self.records.items()):
+            if stored.secret_ref == secret_ref:
+                del self.records[key]
+
+    def value_for(self, grant: CapabilityGrantRecord) -> str:
+        key = webhook_secret_key(
+            company_id=grant.company_id,
+            plugin_id=grant.plugin_id,
+            plugin_instance_id=grant.plugin_instance_id,
+        )
+        stored = self.records[key]
+        assert grant.webhook_secret_ref == stored.secret_ref
+        return stored.value
+
+
 # --------------------------------------------------------------------------- grant store
 
 
@@ -208,6 +459,9 @@ class FakeGrantStore(RecordingMixin):
     enabled: dict[str, tuple[str, ...]] = field(default_factory=dict)
     delete_result: bool = True
     deactivate_result_status: GrantStatus = GrantStatus.REVOKED
+    instance_store: Any = field(default=None, repr=False, compare=False)
+    update_failures: list[Exception] = field(default_factory=list)
+    update_committed_failures: list[Exception] = field(default_factory=list)
 
     async def get(self, *, company_id: str, plugin_id: str) -> CapabilityGrantRecord | None:
         self._record("grant_store", "get", company_id=company_id, plugin_id=plugin_id)
@@ -239,10 +493,104 @@ class FakeGrantStore(RecordingMixin):
                     status=self.deactivate_result_status,
                     created_at=grant.created_at,
                     revoked_at=datetime.now(UTC),
+                    webhook_secret_ref=grant.webhook_secret_ref,
                 )
                 self.grants[key] = updated
                 return updated
         raise KeyError(grant_id)
+
+    async def update_artifact_pin(
+        self,
+        *,
+        grant_id: str,
+        company_id: str,
+        plugin_id: str,
+        plugin_instance_id: str,
+        expected_manifest_version: str,
+        expected_artifact_digest: str,
+        manifest_version: str,
+        artifact_digest: str,
+        expected_instance_status: PluginInstanceStatus,
+        instance_status: PluginInstanceStatus,
+    ) -> ArtifactPinUpdateResult:
+        self._record(
+            "grant_store",
+            "update_artifact_pin",
+            grant_id=grant_id,
+            company_id=company_id,
+            plugin_id=plugin_id,
+            expected_artifact_digest=expected_artifact_digest,
+            artifact_digest=artifact_digest,
+        )
+        if self.update_failures:
+            raise self.update_failures.pop(0)
+        key = (company_id, plugin_id)
+        grant = self.grants.get(key)
+        instance = self.instance_store.records.get(key)
+        if (
+            grant is None
+            or instance is None
+            or grant.grant_id != grant_id
+            or grant.plugin_instance_id != plugin_instance_id
+            or instance.plugin_instance_id != plugin_instance_id
+            or not grant.is_active
+        ):
+            raise RuntimeError("atomic artifact CAS binding mismatch")
+        if (
+            grant.manifest_version == manifest_version
+            and grant.artifact_digest == artifact_digest
+            and instance.manifest_version == manifest_version
+            and instance.artifact_digest == artifact_digest
+            and instance.status is instance_status
+        ):
+            return ArtifactPinUpdateResult(instance=instance, grant=grant)
+        if (
+            grant.manifest_version != expected_manifest_version
+            or grant.artifact_digest != expected_artifact_digest
+            or instance.manifest_version != expected_manifest_version
+            or instance.artifact_digest != expected_artifact_digest
+            or instance.status is not expected_instance_status
+        ):
+            raise RuntimeError("atomic artifact CAS old pin fence mismatch")
+        now = datetime.now(UTC)
+        new_grant = replace(
+            grant,
+            manifest_version=manifest_version,
+            artifact_digest=artifact_digest,
+        )
+        new_instance = replace(
+            instance,
+            manifest_version=manifest_version,
+            artifact_digest=artifact_digest,
+            status=instance_status,
+            updated_at=now,
+        )
+        # Commit both in-memory records only after every fence/post-state check.
+        self.grants[key] = new_grant
+        self.instance_store.records[key] = new_instance
+        result = ArtifactPinUpdateResult(instance=new_instance, grant=new_grant)
+        if self.update_committed_failures:
+            raise self.update_committed_failures.pop(0)
+        return result
+
+    async def regrant(
+        self, *, previous_grant_id: str, grant: CapabilityGrantRecord
+    ) -> CapabilityGrantRecord:
+        self._record("grant_store", "regrant", previous_grant_id=previous_grant_id)
+        key = (grant.company_id, grant.plugin_id)
+        previous = self.grants.get(key)
+        if grant.grant_id == previous_grant_id:
+            raise ValueError("regrant requires a fresh grant_id")
+        if (
+            previous is None
+            or previous.grant_id != previous_grant_id
+            or previous.is_active
+            or previous.revoked_at is None
+            or previous.plugin_instance_id != grant.plugin_instance_id
+        ):
+            raise KeyError(previous_grant_id)
+        self.grants[key] = grant
+        return grant
 
     async def delete(self, *, company_id: str, plugin_id: str) -> bool:
         self._record("grant_store", "delete", company_id=company_id, plugin_id=plugin_id)
@@ -303,13 +651,78 @@ class FakeMint(RecordingMixin):
         )
 
 
+# --------------------------------------------------------------------------- distributed update lock
+
+
+@dataclass
+class FakeUpdateLock(RecordingMixin):
+    """Test-only shared lock model; production uses PostgreSQL advisory locks."""
+
+    held: dict[tuple[str, str, str], PluginUpdateLockLease] = field(default_factory=dict)
+    released: list[PluginUpdateLockLease] = field(default_factory=list)
+    counter: int = 0
+
+    async def acquire(
+        self,
+        *,
+        company_id: str,
+        plugin_id: str,
+        plugin_instance_id: str,
+        expected_manifest_version: str,
+        expected_artifact_digest: str,
+    ) -> PluginUpdateLockLease | None:
+        key = (company_id, plugin_id, plugin_instance_id)
+        self._record(
+            "update_lock",
+            "acquire",
+            company_id=company_id,
+            plugin_id=plugin_id,
+            plugin_instance_id=plugin_instance_id,
+        )
+        if key in self.held:
+            return None
+        self.counter += 1
+        lease = PluginUpdateLockLease(
+            company_id=company_id,
+            plugin_id=plugin_id,
+            plugin_instance_id=plugin_instance_id,
+            expected_manifest_version=expected_manifest_version,
+            expected_artifact_digest=expected_artifact_digest,
+            owner_token=f"update-owner-{self.counter}",
+        )
+        self.held[key] = lease
+        return lease
+
+    async def release(self, lease: PluginUpdateLockLease) -> None:
+        key = (lease.company_id, lease.plugin_id, lease.plugin_instance_id)
+        self._record(
+            "update_lock",
+            "release",
+            company_id=lease.company_id,
+            plugin_id=lease.plugin_id,
+            plugin_instance_id=lease.plugin_instance_id,
+        )
+        if self.held.get(key) is not lease:
+            raise RuntimeError("update lock release owner/binding mismatch")
+        del self.held[key]
+        self.released.append(lease)
+
+
 # --------------------------------------------------------------------------- задача 09
 
 
 @dataclass
 class FakeActivation(RecordingMixin):
     deployments: dict[tuple[str, str], str] = field(default_factory=dict)
+    deployment_instance_ids: dict[tuple[str, str], str] = field(default_factory=dict)
     statuses: dict[tuple[str, str], PluginRuntimeStatus] = field(default_factory=dict)
+    artifact_pins: dict[tuple[str, str], str] = field(default_factory=dict)
+    update_owner_pins: dict[tuple[str, str], str | None] = field(default_factory=dict)
+    replicas: dict[tuple[str, str], int] = field(default_factory=dict)
+    projected_dsn_refs: list[str] = field(default_factory=list)
+    update_calls: int = 0
+    update_failures: dict[int, Exception] = field(default_factory=dict)
+    partial_update_failures: set[int] = field(default_factory=set)
     wake_ready: bool = True
     purged: list[tuple[str, str]] = field(default_factory=list)
     purge_result: bool = True
@@ -322,6 +735,7 @@ class FakeActivation(RecordingMixin):
         plugin_instance_id: str,
         artifact_digest: str,
         dsn_ref: str,
+        webhook_secret_ref: str,
     ) -> str:
         self._record(
             "activation",
@@ -329,10 +743,84 @@ class FakeActivation(RecordingMixin):
             company_id=company_id,
             plugin_id=plugin_id,
             artifact_digest=artifact_digest,
+            webhook_secret_ref=webhook_secret_ref,
         )
         name = f"{company_id}-{plugin_id}"
         self.deployments[(company_id, plugin_id)] = name
+        self.deployment_instance_ids[(company_id, plugin_id)] = plugin_instance_id
         self.statuses[(company_id, plugin_id)] = PluginRuntimeStatus.IDLE
+        self.artifact_pins[(company_id, plugin_id)] = artifact_digest
+        self.update_owner_pins.setdefault((company_id, plugin_id), None)
+        self.replicas.setdefault((company_id, plugin_id), 0)
+        return name
+
+    async def update_deployment(
+        self,
+        *,
+        company_id: str,
+        plugin_id: str,
+        plugin_instance_id: str,
+        artifact_digest: str,
+        expected_current_artifact_digest: str,
+        update_owner_token: str | None,
+        expected_current_update_owner_token: str | None,
+        dsn_ref: str,
+        webhook_secret_ref: str,
+    ) -> str:
+        self.update_calls += 1
+        self._record(
+            "activation",
+            "update_deployment",
+            company_id=company_id,
+            plugin_id=plugin_id,
+            plugin_instance_id=plugin_instance_id,
+            artifact_digest=artifact_digest,
+            expected_current_artifact_digest=expected_current_artifact_digest,
+            update_owner_token=update_owner_token,
+            expected_current_update_owner_token=expected_current_update_owner_token,
+            dsn_ref=dsn_ref,
+            webhook_secret_ref=webhook_secret_ref,
+        )
+        self.projected_dsn_refs.append(dsn_ref)
+        key = (company_id, plugin_id)
+        live_digest = self.artifact_pins.get(key)
+        live_owner = self.update_owner_pins.get(key)
+        if (
+            live_digest == artifact_digest
+            and live_owner == update_owner_token
+        ):
+            # Same-owner retry after an uncertain response is read-only.
+            pass
+        elif (
+            live_digest != expected_current_artifact_digest
+            or (
+                expected_current_update_owner_token is not None
+                and live_owner != expected_current_update_owner_token
+            )
+        ):
+            from prodavan.application.plugins.admin.errors import PluginAdminError
+
+            raise PluginAdminError(
+                code="PLUGIN_UPDATE_CONFLICT",
+                detail="live artifact digest or update owner changed",
+                status=409,
+                extra={"patch_attempted": False},
+            )
+        else:
+            if self.update_calls in self.partial_update_failures:
+                self.artifact_pins[key] = artifact_digest
+                self.update_owner_pins[key] = update_owner_token
+            failure = self.update_failures.get(self.update_calls)
+            if failure is not None:
+                raise failure
+            self.artifact_pins[key] = artifact_digest
+            self.update_owner_pins[key] = update_owner_token
+        name = f"{company_id}-{plugin_id}"
+        self.deployments[key] = name
+        self.deployment_instance_ids[key] = plugin_instance_id
+        self.statuses.setdefault(key, PluginRuntimeStatus.IDLE)
+        # Update never scales: preserve the exact current desired replica count.
+        self.replicas.setdefault(key, 0)
         return name
 
     async def suspend(self, *, company_id: str, plugin_id: str) -> bool:
@@ -351,11 +839,29 @@ class FakeActivation(RecordingMixin):
         self._record("activation", "runtime_status", company_id=company_id, plugin_id=plugin_id)
         return self.statuses.get((company_id, plugin_id), PluginRuntimeStatus.ABSENT)
 
+    async def runtime_binding(
+        self, *, company_id: str, plugin_id: str
+    ) -> PluginRuntimeBinding:
+        self._record("activation", "runtime_binding", company_id=company_id, plugin_id=plugin_id)
+        key = (company_id, plugin_id)
+        if key not in self.deployments or key not in self.artifact_pins:
+            raise RuntimeError("live Deployment binding is absent")
+        instance_id = self.deployment_instance_ids[key]
+        return PluginRuntimeBinding(
+            plugin_instance_id=instance_id,
+            artifact_digest=self.artifact_pins[key],
+            update_owner_token=self.update_owner_pins.get(key),
+        )
+
     async def purge_infra(self, *, company_id: str, plugin_id: str) -> bool:
         self._record("activation", "purge_infra", company_id=company_id, plugin_id=plugin_id)
         self.purged.append((company_id, plugin_id))
         self.deployments.pop((company_id, plugin_id), None)
+        self.deployment_instance_ids.pop((company_id, plugin_id), None)
         self.statuses.pop((company_id, plugin_id), None)
+        self.artifact_pins.pop((company_id, plugin_id), None)
+        self.update_owner_pins.pop((company_id, plugin_id), None)
+        self.replicas.pop((company_id, plugin_id), None)
         return self.purge_result
 
 
@@ -420,6 +926,34 @@ class FakePlatformAdmin(RecordingMixin):
         return AdminIdentity(actor_id=self.actor_id, is_platform_admin=self.is_admin)
 
 
+@dataclass
+class FakeInstallationScopeStore:
+    scopes: dict[tuple[str, str], InstallationScope] = field(default_factory=dict)
+    error: AppError | None = None
+
+    async def ensure_from_source(
+        self, *, company_id: str, plugin_id: str, plugin_instance_id: str
+    ) -> InstallationScope:
+        if self.error is not None:
+            raise self.error
+        key = (company_id, plugin_instance_id)
+        scope = self.scopes.get(key)
+        if scope is None:
+            scope = InstallationScope(
+                company_id=company_id,
+                plugin_instance_id=plugin_instance_id,
+                cabinet_id="cab_a",
+                project_id="pr_a",
+            )
+            self.scopes[key] = scope
+        return scope
+
+    async def get(
+        self, *, company_id: str, plugin_instance_id: str
+    ) -> InstallationScope | None:
+        return self.scopes.get((company_id, plugin_instance_id))
+
+
 # --------------------------------------------------------------------------- сборка
 
 
@@ -428,16 +962,24 @@ class Harness:
     tenant_db: FakeTenantDb = field(default_factory=FakeTenantDb)
     object_store: FakeObjectStore = field(default_factory=FakeObjectStore)
     artifact_registry: FakeArtifactRegistry = field(default_factory=FakeArtifactRegistry)
+    instance_store: FakeInstanceStore = field(default_factory=FakeInstanceStore)
     grant_store: FakeGrantStore = field(default_factory=FakeGrantStore)
+    webhook_secrets: FakeWebhookSecretStore = field(default_factory=FakeWebhookSecretStore)
+    publication_approvals: FakePublicationApprovalStore = field(default_factory=FakePublicationApprovalStore)
     revocation: FakeRevocation = field(default_factory=FakeRevocation)
     mint: FakeMint = field(default_factory=FakeMint)
     activation: FakeActivation = field(default_factory=FakeActivation)
     routes: FakeRoutes = field(default_factory=FakeRoutes)
     audit: FakeAudit = field(default_factory=FakeAudit)
     platform_admin: FakePlatformAdmin = field(default_factory=FakePlatformAdmin)
+    installation_scopes: FakeInstallationScopeStore = field(default_factory=FakeInstallationScopeStore)
+    update_lock: FakeUpdateLock = field(default_factory=FakeUpdateLock)
     #: Один сервис на Harness: генератор id не сбрасывается между вызовами, иначе
     #: два grant в разные компании получили бы одинаковый grant_id в тестах.
     _service_instance: Any = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        self.grant_store.instance_store = self.instance_store
 
     def ports(self) -> Any:
         from prodavan.application.plugins.admin.ports import PluginAdminPorts
@@ -446,13 +988,18 @@ class Harness:
             tenant_db=self.tenant_db,
             object_store=self.object_store,
             artifact_registry=self.artifact_registry,
+            instance_store=self.instance_store,
             grant_store=self.grant_store,
+            webhook_secrets=self.webhook_secrets,
+            publication_approvals=self.publication_approvals,
             revocation=self.revocation,
             mint=self.mint,
             activation=self.activation,
             routes=self.routes,
             audit=self.audit,
             platform_admin=self.platform_admin,
+            installation_scopes=self.installation_scopes,
+            update_lock=self.update_lock,
         )
 
     def service(self) -> Any:
@@ -471,7 +1018,9 @@ class Harness:
             "tenant_db",
             "object_store",
             "artifact_registry",
+            "instance_store",
             "grant_store",
+            "publication_approvals",
             "revocation",
             "mint",
             "activation",
@@ -517,9 +1066,13 @@ __all__ = [
     "FakeArtifactRegistry",
     "FakeAudit",
     "FakeGrantStore",
+    "FakeInstallationScopeStore",
+    "FakeWebhookSecretStore",
+    "FakeInstanceStore",
     "FakeMint",
     "FakeObjectStore",
     "FakePlatformAdmin",
+    "FakePublicationApprovalStore",
     "FakeRevocation",
     "FakeRoutes",
     "FakeTenantDb",

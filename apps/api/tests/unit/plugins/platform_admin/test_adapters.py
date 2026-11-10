@@ -1,4 +1,4 @@
-"""Тесты адаптеров PlatformAdmin (написаны, НЕ запускались: verification freeze).
+"""Тесты адаптеров PlatformAdmin (проходят в текущем прогоне).
 
 Покрытие по ТЗ:
   * нет токена → отказ (401);
@@ -22,9 +22,15 @@ from typing import Any
 
 import pytest
 
-from prodavan.application.plugins.admin.contracts import AdminIdentity
+from prodavan.application.plugins.admin.contracts import (
+    AdminIdentity,
+    ArtifactPublicationStatus,
+    CapabilitySet,
+    SecretPreDeliveryRequest,
+)
 from prodavan.application.plugins.admin.ports import PluginAdminPorts
 from prodavan.application.plugins.admin.service import PluginAdminService
+from prodavan.application.plugins.capabilities.adapters.secrets import SecretsDeliveryResponse
 from prodavan.application.plugins.platform_admin import (
     ADMIN_RUNTIME_UNAVAILABLE_CODE,
     STATE_KEYS,
@@ -39,6 +45,7 @@ from prodavan.application.plugins.platform_admin import (
 from prodavan.application.plugins.platform_admin import adapter as adapter_module
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import ROLE_PLATFORM_ADMIN
+from tests.unit.plugins.admin.fakes import COMPANY_A, DIGEST_A, PLUGIN_X, Harness
 
 # --------------------------------------------------------------------------- фейки
 
@@ -84,6 +91,26 @@ class FakeRequest:
 class FakeApp:
     def __init__(self) -> None:
         self.state = SimpleNamespace()
+
+
+class FakeSecretDeliveryControl:
+    """Deterministic no-declaration receipts для grant/revoke lifecycle."""
+
+    def __init__(self) -> None:
+        self.deliver_requests: list[SecretPreDeliveryRequest] = []
+        self.revoke_requests: list[SecretPreDeliveryRequest] = []
+
+    async def pre_deliver(
+        self, request: SecretPreDeliveryRequest
+    ) -> tuple[SecretsDeliveryResponse, ...]:
+        self.deliver_requests.append(request)
+        return ()
+
+    async def pre_revoke(
+        self, request: SecretPreDeliveryRequest
+    ) -> tuple[SecretsDeliveryResponse, ...]:
+        self.revoke_requests.append(request)
+        return ()
 
 
 def _bearer(token: str = "valid.jwt.token") -> str:
@@ -308,20 +335,39 @@ def test_adapter_source_does_not_duplicate_jwt_verification() -> None:
 
 
 def _ports_stub(adapter: BearerPlatformAdminAdapter) -> PluginAdminPorts:
-    """Собрать связку портов, не трогая чужие каталоги (все 10 полей обязательны)."""
-
-    stub = object()
+    """Полные typed ports; exact unconsumed approval не создаёт grant сам по себе."""
+    harness = Harness()
+    capabilities = CapabilitySet(capabilities=("cache", "objects"))
+    harness.artifact_registry.seed(
+        plugin_id=PLUGIN_X,
+        manifest_version="1.2.0",
+        artifact_digest=DIGEST_A,
+        status=ArtifactPublicationStatus.PUBLISHED,
+    )
+    harness.publication_approvals.seed(
+        company_id=COMPANY_A,
+        plugin_id=PLUGIN_X,
+        manifest_version="1.2.0",
+        artifact_digest=DIGEST_A,
+        capabilities=capabilities,
+        consumed_at=None,
+    )
     return PluginAdminPorts(
-        tenant_db=stub,  # type: ignore[arg-type]
-        object_store=stub,  # type: ignore[arg-type]
-        artifact_registry=stub,  # type: ignore[arg-type]
-        grant_store=stub,  # type: ignore[arg-type]
-        revocation=stub,  # type: ignore[arg-type]
-        mint=stub,  # type: ignore[arg-type]
-        activation=stub,  # type: ignore[arg-type]
-        routes=stub,  # type: ignore[arg-type]
-        audit=stub,  # type: ignore[arg-type]
+        tenant_db=harness.tenant_db,
+        object_store=harness.object_store,
+        artifact_registry=harness.artifact_registry,
+        instance_store=harness.instance_store,
+        grant_store=harness.grant_store,
+        revocation=harness.revocation,
+        mint=harness.mint,
+        activation=harness.activation,
+        routes=harness.routes,
+        audit=harness.audit,
         platform_admin=adapter,
+        publication_approvals=harness.publication_approvals,
+        webhook_secrets=harness.webhook_secrets,
+        secret_delivery=FakeSecretDeliveryControl(),
+        update_lock=harness.update_lock,
     )
 
 

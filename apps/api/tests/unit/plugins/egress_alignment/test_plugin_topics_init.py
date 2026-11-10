@@ -1,4 +1,4 @@
-"""Тесты Job `plugin-topics-init.yaml` (НАПИСАНЫ, НЕ ЗАПУСКАЛИСЬ).
+"""Тесты Job `plugin-topics-init.yaml` (проходят в текущем прогоне).
 
 Требования задачи:
   * ровно 2 топика: `agentscale.plugin.events` и `agentscale.plugin.events.dlq`;

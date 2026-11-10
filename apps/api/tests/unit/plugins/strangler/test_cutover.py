@@ -1,12 +1,13 @@
-"""Тесты ``cutover.py``: последовательность §8, advance без пропусков, final_state.
+"""Static tests compatibility metadata sequence и inert target inventory.
 
-Тесты НЕ запускались (verification freeze).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 """
 
 from __future__ import annotations
 
 import pytest
 
+import prodavan.application.plugins.strangler.cutover as cutover_module
 from prodavan.application.plugins.strangler import (
     CONTEXT_ORDER,
     FINAL_STATE_ARTIFACTS,
@@ -27,8 +28,23 @@ EXPECTED_ARTIFACTS = (
 )
 
 
-def test_step_sequence_follows_section_8() -> None:
-    """инфраструктура → пилот → frontend → контексты → cutover → удаление."""
+def _cutover_narrative() -> str:
+    return "\n".join(
+        (
+            cutover_module.__doc__ or "",
+            CutoverStepKind.__doc__ or "",
+            FinalState.__doc__ or "",
+            CutoverPlan.__doc__ or "",
+            CutoverPlan.complete_current_step.__doc__ or "",
+            CutoverPlan.advance.__doc__ or "",
+            CutoverPlan.final_state.__doc__ or "",
+            CUTOVER_STEPS[-1].description,
+        )
+    )
+
+
+def test_step_sequence_matches_compatibility_contract() -> None:
+    """Historical metadata order сохранён; это не executable runbook."""
     ids = tuple(step.step_id for step in CUTOVER_STEPS)
     assert ids[0] == "infrastructure"
     assert ids[1] == "pilot"
@@ -89,7 +105,7 @@ def test_advance_moves_exactly_one_step_after_completion() -> None:
 
 
 def test_full_sequence_must_complete_each_step() -> None:
-    """Пройти весь план можно только отмечая КАЖДЫЙ шаг по очереди."""
+    """Metadata cursor требует completion каждого шага, без side effects."""
     plan = CutoverPlan()
     seen: list[str] = []
     while plan.current_step is not None:
@@ -152,7 +168,7 @@ def test_final_state_contains_all_five_artifacts() -> None:
 
 
 def test_final_state_is_the_target_not_progress() -> None:
-    """final_state не зависит от текущего шага — это конечная цель «всё под нож»."""
+    """final_state — inert target inventory, не прогресс или удаление."""
     plan = CutoverPlan()
     assert plan.final_state().removed_artifacts == EXPECTED_ARTIFACTS
     plan.complete_current_step()
@@ -161,7 +177,7 @@ def test_final_state_is_the_target_not_progress() -> None:
 
 
 def test_final_state_has_no_parity_metrics_or_observation_weeks() -> None:
-    """НЕТ метрик парности и «недель наблюдения» даже полями-пустышками (§13.1)."""
+    """Compatibility fields сохранены; никакого фактического cutover нет."""
     import prodavan.application.plugins.strangler.cutover as module
 
     public = set(vars(FinalState)) | set(getattr(FinalState, "__dataclass_fields__", {}))
@@ -176,6 +192,7 @@ def test_final_state_has_no_parity_metrics_or_observation_weeks() -> None:
         "data_migration_performed",
     ):
         assert forbidden not in public, f"запрещённое понятие присутствует: {forbidden}"
+    # Compatibility boolean сохранён; это не evidence фактического удаления.
     assert CutoverPlan().final_state().declarative_app_removed is True
 
 
@@ -186,7 +203,7 @@ def test_no_observation_weeks_in_cutover_source() -> None:
     import prodavan.application.plugins.strangler.cutover as module
 
     source = inspect.getsource(module)
-    # В docstring запрет упомянут как отрицание; кода с такими сущностями нет.
+    # Guard запрещает возврат operational parity/observation APIs; metadata API сохранён.
     for forbidden in (
         "def parity_metrics",
         "def observation_weeks",
@@ -194,3 +211,39 @@ def test_no_observation_weeks_in_cutover_source() -> None:
         "self.observation_weeks",
     ):
         assert forbidden not in source
+
+
+def test_removal_and_final_state_narratives_are_inert_inventory() -> None:
+    narrative = _cutover_narrative()
+    for token in (
+        "2026110802",
+        "dormant/not active",
+        "runtime/startup/deploy",
+        "inert historical/target inventory",
+        "code-first S4",
+        "S5 ADR/review/acceptance",
+        "тогдашней current head",
+        "schema-only downgrade",
+        "env guard",
+    ):
+        assert token in narrative
+    for forbidden in (
+        "дропание",
+        "дроп module_*",
+        "без переноса содержимого",
+        "Данные dev эфемерны",
+        "сразу удалить",
+        "всё под нож",
+        "drop-first",
+    ):
+        assert forbidden not in narrative
+
+
+def test_metadata_transitions_explicitly_do_not_execute_cutover() -> None:
+    for method in (CutoverPlan.complete_current_step, CutoverPlan.advance):
+        doc = method.__doc__ or ""
+        assert "metadata compatibility" in doc
+        assert "не выполняет DB, DML, drop, remove" in doc
+    state = CutoverPlan().final_state()
+    assert state.declarative_app_removed is True
+    assert state.removed_artifacts == FINAL_STATE_ARTIFACTS

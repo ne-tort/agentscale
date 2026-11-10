@@ -67,6 +67,7 @@ Affected (all `require_platform_admin`):
 | POST | `/api/v1/admin/plugins/uninstall` | `body.company_id` |
 | POST | `/api/v1/admin/plugins/wake` | `body.company_id` |
 | PUT | `/api/v1/admin/plugins/enabled-modules` | `body.company_id` |
+| POST | `/api/v1/admin/plugins/publication-approvals` | `body.company_id` |
 
 **Suggested direction:** none required for security. If the surface is ever
 opened to a "company-scoped operator" role, these handlers are the ones that

@@ -38,7 +38,7 @@ DLQ                          ``dlq:recorded``                            сам 
 
 Fail-closed:
 * неизвестная/неактивная подписка → ``None``/``False`` (не «группа по умолчанию»);
-* ``seen`` при ошибке БД → ``True`` («уже обработано» = не пустить повторно);
+* ``seen`` при ошибке БД → ИСКЛЮЧЕНИЕ (RETRY, без commit; не ложный duplicate);
 * ``remember`` / ``DlqPort.publish`` при ошибке → ИСКЛЮЧЕНИЕ (offset не
   коммитится, диспечер делает ``seek`` и доставляет событие заново).
 """
@@ -309,8 +309,9 @@ class DbIdempotencyStore(DbEventStoreBase):
     async def seen(self, key: IdempotencyKey) -> bool:
         """Уже обработано ли событие этой подпиской.
 
-        Ошибка БД → ``True`` (fail-closed): лучше НЕ обработать повторно, чем
-        выполнить обработчик дважды.
+        Ошибка БД пробрасывается: dispatcher обязан сделать RETRY/exception без
+        offset commit. Возврат True здесь превращал недоступную БД в duplicate
+        и позволял потерять событие после ложного ACK.
         """
         if not isinstance(key, IdempotencyKey):
             raise PluginRepositoryError("seen ожидает IdempotencyKey")
@@ -328,8 +329,14 @@ class DbIdempotencyStore(DbEventStoreBase):
                     )
                 ).scalars().first()
             return found is not None
-        except (SQLAlchemyError, PluginRepositoryError):
-            return True
+        except PluginRepositoryError:
+            raise
+        except SQLAlchemyError as exc:
+            raise PluginRepositoryUnavailable(f"idempotency seen failed: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001 — инфраструктурный сбой ≠ duplicate
+            raise PluginRepositoryUnavailable(
+                f"idempotency seen failed: {type(exc).__name__}"
+            ) from exc
 
     async def remember(self, key: IdempotencyKey) -> None:
         """Атомарно отметить событие обработанным (после ACK или записи в DLQ).
@@ -405,8 +412,14 @@ class DbPublishedEventStore(DbEventStoreBase):
                     )
                 ).scalars().first()
             return found is not None
-        except (SQLAlchemyError, PluginRepositoryError):
-            return True
+        except PluginRepositoryError:
+            raise
+        except SQLAlchemyError as exc:
+            raise PluginRepositoryUnavailable(f"published event seen failed: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001
+            raise PluginRepositoryUnavailable(
+                f"published event seen failed: {type(exc).__name__}"
+            ) from exc
 
     async def remember(self, event_id: str) -> None:
         """Запомнить ``event_id`` ПОСЛЕ подтверждённой отправки (flush)."""

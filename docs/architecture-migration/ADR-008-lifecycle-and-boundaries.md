@@ -1,6 +1,6 @@
 # ADR-008: Разделение lifecycle агентов и плагинов, замена as-built привязок
 
-**Статус:** Принято (2026-11-08)  
+**Статус:** Принято (2026-11-08); уточнено 2026-11-09. **Target design, не as-built:** plugin platform emergency disabled и не подтверждён vertical slice.
 **Связанные:** ADR-002 (capability gateway), ADR-003, ADR-006, ADR-007.
 
 ## Контекст
@@ -12,7 +12,7 @@ v2/v3 дизайна исходили из «as-built уже работает �
 | | Агентский Pod | Плагин |
 |---|---|---|
 | Scope | project, эфемерная сессия | company, долгоживущий instance |
-| Состояние | stateful, workspace PVC, файлы | stateless, состояние в своей БД |
+| Состояние | файловый workspace; live volume текущего project Pod — `emptyDir`, durability через archive/object storage | stateless workload, состояние в своей БД |
 | Триггер | пользовательский turn, long-running | HTTP request-driven (iframe, webhook) |
 | Identity | `sub=pod:{pod_id}` + acting_employee | `plugin_id` + version + artifact digest + grant |
 
@@ -26,10 +26,10 @@ v2/v3 дизайна исходили из «as-built уже работает �
 | Компонент | Решение |
 |---|---|
 | `CapabilityGatewayService`, `AuditEvent`, `CapabilityGrant`, `dynamic_app_registry` | переиспользовать |
-| `:8001` pod-gateway, `PodBridgeClaims`, `PodSurfaceAllowlistMiddleware` | оставить агентам **без изменений**; для плагинов — отдельный `PluginClaims` (`iss=agentscale-plugins`, `aud=capability-gateway`, `grant_id`, `artifact_digest`, короткий TTL) и route-group `/capabilities/v1/*` в Plugin Gateway |
-| Один MinIO-бакет + tenant-теги | заменить на bucket-per-tenant / STS session policy + scoped presigned; `TenantObjectsService` остаётся фасадом аудита/квот |
+| `:8001` pod-gateway, `PodBridgeClaims`, `PodSurfaceAllowlistMiddleware` | оставить агентам **без изменений**; для плагинов — отдельный `PluginClaims` (`iss=agentscale-plugins`, `aud=capability-gateway`, `grant_id`, `artifact_digest`, короткий TTL) и route-group `/capabilities/v1/*` в Plugin Gateway. Identity выдаётся и проверяется на request/короткий lease, не хранится как статический `PLUGIN_CLAIMS` в pod env |
+| Один MinIO-бакет + tenant-теги | заменить на tenant/prefix-scoped objects; **scoped presigned по умолчанию**, STS session policy только после отдельной проверки; `TenantObjectsService` остаётся фасадом аудита/квот |
 | Celery-outbox как шина событий | outbox — только для исходящих webhook'ов; события плагинов → Redpanda `agentscale.plugin.events` с ручным commit, `earliest`, DLQ |
-| `tar.gz + Ed25519` | OCI в GHCR + cosign keyless + SBOM/provenance + pin по digest |
+| `tar.gz + Ed25519` | OCI в GHCR + cosign keyless + SBOM/provenance + pin по digest; ADR-009 **предлагает** атомарную backend+bundle digest pair и пока не принят |
 | `SandboxClaim`/`SandboxWarmPool` для плагинов | **отказаться**: Deployment `replicas: 0` + Plugin Gateway activator (патч scale, удержание запроса до Ready, idle TTL, `ignoreDifferences /spec/replicas`). Агенты остаются на SandboxClaim |
 | «Единая NP» | две NP из одного генератора, общая схема egress-аудита |
 | Egress-правила из JWT | из `CapabilityGrant` в БД; токен несёт `grant_id` |
@@ -59,9 +59,14 @@ subdomain + cert-manager DNS-01 — целью при появлении пуб�
   конкурентных wake, watchdog на застрявший 0→1, дедлайн Ready).
 - Холодный старт доминируется pull-ом образа; никакой activator его не ускоряет —
   митигация: предпрогрев кэша на единственной ноде и лимит одновременных wake-up.
-- Требуется доработка `ProjectIdlePauseService` (учёт активных `job_id`), иначе
-  backend уснёт посреди фоновой задачи.
+- **Требование доработать `ProjectIdlePauseService` отменено.** Этот сервис
+  принадлежит агентским проектам. Plugin activator обязан учитывать собственные
+  активные `job_id`/leases (target `ActivationState.active_job_ids`) перед
+  усыплением plugin workload; agent idle-pause не связывается с plugin jobs.
+  A7 в старой интеграционной карте — отменён, а не completed acceptance.
 
-## Источник истины
+## Связанные документы
 
-`docs/ARCHITECTURE/plugin-architecture-complete.md` (v4), §1, §4, §5, §6, §7.4.
+- `docs/ARCHITECTURE/plugin-architecture-complete.md` (v4), §1, §4, §5, §6, §7.4 — **target snapshot только вместе с errata**.
+- `docs/migration/plugin-acceptance-map.md` — текущая карта live acceptance (сейчас `[x]` отсутствуют).
+- `docs/PLUGIN-AUTHORING.md` — что описано как Supported/Target/Not implemented.

@@ -25,6 +25,7 @@ from prodavan.application.plugins.gateway.auth import (
 )
 from prodavan.application.plugins.gateway.errors import (
     BackendNotReadyError,
+    BackendResponseTooLargeError,
     BackendTimeoutError,
     GatewayError,
     GatewayErrorCode,
@@ -54,6 +55,7 @@ __all__ = [
     "IDEMPOTENT_METHODS",
     "TRUSTED_HEADERS",
     "BackendNotReadyError",
+    "BackendResponseTooLargeError",
     "BackendTimeoutError",
     "GatewayAuth",
     "GatewayError",

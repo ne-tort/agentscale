@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from typing import Any, Mapping
 
 from prodavan.domain.dynamic_apps import AppDefinition, AppGrant, AppLifecycleStatus, AppVersion
+
+
+class RollbackConflictError(RuntimeError):
+    """Typed rollback replay/current/semantic conflict shared by store implementations."""
 
 
 class RegistryOutcome(StrEnum):
@@ -97,9 +103,41 @@ class RollbackCommand:
     reason: str
     expected_current_version_id: str | None = None
     expected_artifact_digest: str | None = None
+    expected_current_lifecycle_version: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.expected_current_lifecycle_version is not None and (
+            not isinstance(self.expected_current_lifecycle_version, int)
+            or isinstance(self.expected_current_lifecycle_version, bool)
+            or self.expected_current_lifecycle_version < 0
+        ):
+            raise ValueError("expected_current_lifecycle_version must be a non-negative int")
+
+
+def rollback_command_fingerprint(command: RollbackCommand) -> str:
+    """Return a deterministic, redacted fingerprint of every command field."""
+    if not isinstance(command, RollbackCommand):
+        raise TypeError("rollback_command_fingerprint expects RollbackCommand")
+    payload = {
+        "definition_id": command.definition_id,
+        "target_version_id": command.target_version_id,
+        "actor": command.actor,
+        "reason": command.reason,
+        "expected_current_version_id": command.expected_current_version_id,
+        "expected_artifact_digest": command.expected_artifact_digest,
+        "expected_current_lifecycle_version": command.expected_current_lifecycle_version,
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 __all__ = [
     "DraftCommand", "LifecycleCommand", "PublishCommand", "QuarantineEvidence",
     "RegistryOutcome", "RegistryReason", "RegistryResult", "RollbackCommand",
+    "RollbackConflictError", "rollback_command_fingerprint",
 ]

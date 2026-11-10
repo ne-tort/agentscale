@@ -39,10 +39,14 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prodavan.application.plugins.admin.contracts import (
+    QUOTA_KEYS,
+    ArtifactPinUpdateResult,
     CapabilityGrantRecord,
     EgressMode,
     EgressPolicy as AdminEgressPolicy,
     GrantStatus,
+    PluginInstanceRecord,
+    PluginInstanceStatus,
     QuotaSet,
 )
 
@@ -52,6 +56,7 @@ from ._schema import (
     GRANT_COLUMNS,
     GRANT_NOT_NULL_EXTRA,
     GRANT_ROW,
+    INSTANCE_ROW,
     ColumnMap,
     PluginRepositoryError,
     PluginRepositorySchemaError,
@@ -62,6 +67,13 @@ from ._schema import (
     string_tuple,
     text,
 )
+
+
+class PluginRegrantConflict(PluginRepositoryError):
+    """Candidate reuses the revoked PK instead of allocating a fresh grant id."""
+
+    code = "REGRANT_ID_CONFLICT"
+
 
 DEFAULT_CREATED_BY = "platform-admin"
 """Значение обязательной колонки ``created_by`` при создании гранта репозиторием.
@@ -151,7 +163,6 @@ class SqlCapabilityGrantRepository:
         get = lambda name: getattr(row, c(name), None)  # noqa: E731
 
         egress_raw = json_mapping(get("egress_policy"), field="egress_policy")
-        quota_raw = json_mapping(get("quota"), field="quota")
         try:
             egress = AdminEgressPolicy(
                 mode=EgressMode(egress_raw.get("mode", "none")),
@@ -162,15 +173,25 @@ class SqlCapabilityGrantRepository:
         except (ValueError, TypeError) as exc:
             raise PluginRepositorySchemaError(f"egress_policy гранта невалиден: {exc}") from exc
         try:
+            quota_raw = json_mapping(get("quota"), field="quota")
+            missing = [name for name in QUOTA_KEYS if name not in quota_raw]
+            if missing:
+                raise ValueError(f"отсутствуют effective quotas: {', '.join(missing)}")
+            values: dict[str, Any] = {}
+            for name in QUOTA_KEYS:
+                value = quota_raw[name]
+                if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                    raise ValueError(f"{name} должна быть целым числом >= 1 без coercion")
+                values[name] = value
             quotas = QuotaSet(
-                ops_per_minute=int(quota_raw.get("ops_per_minute", 60)),
-                max_rows=int(quota_raw.get("max_rows", 10_000)),
-                max_bytes=int(quota_raw.get("max_bytes", 10_000_000)),
-                max_keys=int(quota_raw.get("max_keys", 1_000)),
-                max_object_bytes=int(quota_raw.get("max_object_bytes", 50_000_000)),
-                max_egress_bytes=int(quota_raw.get("max_egress_bytes", 10_000_000)),
+                ops_per_minute=values["ops_per_minute"],
+                max_rows=values["max_rows"],
+                max_bytes=values["max_bytes"],
+                max_keys=values["max_keys"],
+                max_object_bytes=values["max_object_bytes"],
+                max_egress_bytes=values["max_egress_bytes"],
             )
-        except (ValueError, TypeError) as exc:
+        except (ValueError, TypeError, PluginRepositoryError) as exc:
             raise PluginRepositorySchemaError(f"quota гранта невалидна: {exc}") from exc
         try:
             status = GrantStatus(str(get("status") or ""))
@@ -195,9 +216,40 @@ class SqlCapabilityGrantRepository:
                 status=status,
                 created_at=issued,
                 revoked_at=revoked if isinstance(revoked, datetime) else None,
+                webhook_secret_ref=(
+                    text(get("webhook_secret_ref"), field="webhook_secret_ref")
+                    if get("webhook_secret_ref") is not None
+                    else None
+                ),
             )
         except (ValueError, PluginRepositoryError) as exc:
             raise PluginRepositorySchemaError(f"строка гранта не прошла валидацию: {exc}") from exc
+
+    def _to_instance_record(self, row: Any) -> PluginInstanceRecord:
+        """Map the instance row participating in the atomic artifact CAS."""
+
+        get = lambda name: getattr(row, self._col(name), None)  # noqa: E731
+        try:
+            created = aware_utc(get("created_at"))
+            updated = aware_utc(get("updated_at"))
+            if not isinstance(created, datetime) or not isinstance(updated, datetime):
+                raise PluginRepositorySchemaError("instance timestamps отсутствуют")
+            return PluginInstanceRecord(
+                plugin_instance_id=text(get("id"), field="plugin_instance_id"),
+                company_id=text(get("company_id"), field="company_id"),
+                plugin_id=text(get("plugin_id"), field="plugin_id"),
+                manifest_version=text(get("manifest_version"), field="manifest_version"),
+                artifact_digest=text(get("artifact_digest"), field="artifact_digest"),
+                status=PluginInstanceStatus(str(get("status") or "")),
+                tenant_db_name=text(get("tenant_db_name"), field="tenant_db_name"),
+                bucket_name=text(get("bucket_name"), field="bucket_name"),
+                created_at=created,
+                updated_at=updated,
+            )
+        except (ValueError, PluginRepositoryError) as exc:
+            raise PluginRepositorySchemaError(
+                f"некорректная PluginInstanceRow в artifact CAS: {exc}"
+            ) from exc
 
     def to_domain_grant(self, record: CapabilityGrantRecord) -> Any:
         """``CapabilityGrantRecord`` → доменный ``domain.plugins.CapabilityGrant``.
@@ -265,6 +317,12 @@ class SqlCapabilityGrantRepository:
         }
         if self._columns.has(row, "expires_at"):
             values[c("expires_at")] = None
+        if record.webhook_secret_ref is not None:
+            if not self._columns.has(row, "webhook_secret_ref"):
+                raise PluginRepositorySchemaError(
+                    "CapabilityGrantRow webhook_secret_ref is required for durable webhook grants"
+                )
+            values[c("webhook_secret_ref")] = record.webhook_secret_ref
         existing = set(row.__table__.columns.keys())
         return {key: value for key, value in values.items() if key in existing}
 
@@ -455,6 +513,10 @@ class SqlCapabilityGrantRepository:
             if found is None:
                 return None
             record = self.to_record(found)
+            if (record.company_id, record.plugin_id) != (company_id, plugin_id):
+                raise PluginRepositorySchemaError(
+                    "get grant: company/plugin binding не совпадает с запросом"
+                )
             self._snapshot[record.grant_id] = record
             return record
         except (SQLAlchemyError, PluginRepositoryError) as exc:
@@ -586,6 +648,311 @@ class SqlCapabilityGrantRepository:
         except (SQLAlchemyError, PluginRepositoryError) as exc:
             raise PluginRepositoryUnavailable(f"deactivate grant failed: {exc}") from exc
 
+    async def update_artifact_pin(
+        self,
+        *,
+        grant_id: str,
+        company_id: str,
+        plugin_id: str,
+        plugin_instance_id: str,
+        expected_manifest_version: str,
+        expected_artifact_digest: str,
+        manifest_version: str,
+        artifact_digest: str,
+        expected_instance_status: PluginInstanceStatus,
+        instance_status: PluginInstanceStatus,
+    ) -> ArtifactPinUpdateResult:
+        """Atomically replace both durable pins after a confirmed runtime patch.
+
+        Both rows are locked and conditionally updated in one transaction. A mixed
+        old/new post-state is never accepted. The grant id and policy/revocation
+        fields are deliberately absent from SET, so update cannot become regrant.
+        """
+
+        for value, field in (
+            (grant_id, "grant_id"),
+            (company_id, "company_id"),
+            (plugin_id, "plugin_id"),
+            (plugin_instance_id, "plugin_instance_id"),
+            (expected_manifest_version, "expected_manifest_version"),
+            (expected_artifact_digest, "expected_artifact_digest"),
+            (manifest_version, "manifest_version"),
+            (artifact_digest, "artifact_digest"),
+        ):
+            text(value, field=field)
+        if not isinstance(expected_instance_status, PluginInstanceStatus) or not isinstance(
+            instance_status, PluginInstanceStatus
+        ):
+            raise PluginRepositoryError("artifact CAS ожидает PluginInstanceStatus")
+        try:
+            row = self._row()
+            table = row.__table__
+            instance_row = load_row(INSTANCE_ROW)
+            self._columns.require(
+                instance_row,
+                "id",
+                "company_id",
+                "plugin_id",
+                "manifest_version",
+                "artifact_digest",
+                "status",
+                "tenant_db_name",
+                "bucket_name",
+                "created_at",
+                "updated_at",
+            )
+            instance_table = instance_row.__table__
+            changed_at = self._now()
+            async with self._session_ctx() as session:
+                try:
+                    grant_found = (
+                        await session.execute(
+                            select(row)
+                            .where(table.columns[self._col("grant_id")] == grant_id)
+                            .with_for_update()
+                        )
+                    ).scalars().first()
+                    instance_found = (
+                        await session.execute(
+                            select(instance_row)
+                            .where(
+                                instance_table.columns[self._col("id")]
+                                == plugin_instance_id
+                            )
+                            .with_for_update()
+                        )
+                    ).scalars().first()
+                    if grant_found is None or instance_found is None:
+                        raise PluginRepositoryUnavailable(
+                            "atomic artifact CAS: grant/instance not found"
+                        )
+                    current_grant = self.to_record(grant_found)
+                    current_instance = self._to_instance_record(instance_found)
+                    if (
+                        current_grant.company_id != company_id
+                        or current_grant.plugin_id != plugin_id
+                        or current_grant.plugin_instance_id != plugin_instance_id
+                        or current_instance.company_id != company_id
+                        or current_instance.plugin_id != plugin_id
+                        or not current_grant.is_active
+                        or current_grant.revoked_at is not None
+                    ):
+                        raise PluginRepositoryUnavailable(
+                            "atomic artifact CAS: company/plugin/instance/active binding mismatch"
+                        )
+                    if (
+                        current_grant.manifest_version == manifest_version
+                        and current_grant.artifact_digest == artifact_digest
+                        and current_instance.manifest_version == manifest_version
+                        and current_instance.artifact_digest == artifact_digest
+                        and current_instance.status is instance_status
+                    ):
+                        result_value = ArtifactPinUpdateResult(
+                            instance=current_instance, grant=current_grant
+                        )
+                        self._snapshot[grant_id] = current_grant
+                        return result_value
+                    if (
+                        current_grant.manifest_version != expected_manifest_version
+                        or current_grant.artifact_digest != expected_artifact_digest
+                        or current_instance.manifest_version != expected_manifest_version
+                        or current_instance.artifact_digest != expected_artifact_digest
+                        or current_instance.status is not expected_instance_status
+                    ):
+                        raise PluginRepositoryUnavailable(
+                            "atomic artifact CAS: old pin/status fence mismatch"
+                        )
+                    grant_result = await session.execute(
+                        update(row)
+                        .where(
+                            table.columns[self._col("grant_id")] == grant_id,
+                            table.columns[self._col("company_id")] == company_id,
+                            table.columns[self._col("plugin_id")] == plugin_id,
+                            table.columns[self._col("plugin_instance_id")]
+                            == plugin_instance_id,
+                            table.columns[self._col("manifest_version")]
+                            == expected_manifest_version,
+                            table.columns[self._col("artifact_digest")]
+                            == expected_artifact_digest,
+                            table.columns[self._col("status")] == "active",
+                            table.columns[self._col("revoked_at")].is_(None),
+                        )
+                        .values(
+                            **{
+                                self._col("manifest_version"): manifest_version,
+                                self._col("artifact_digest"): artifact_digest,
+                            }
+                        )
+                        .returning(row)
+                    )
+                    returned_grant = grant_result.scalars().first()
+                    if grant_result.rowcount != 1 or returned_grant is None:
+                        raise PluginRepositoryUnavailable(
+                            "atomic artifact CAS: grant UPDATE RETURNING failed"
+                        )
+                    instance_result = await session.execute(
+                        update(instance_row)
+                        .where(
+                            instance_table.columns[self._col("id")] == plugin_instance_id,
+                            instance_table.columns[self._col("company_id")] == company_id,
+                            instance_table.columns[self._col("plugin_id")] == plugin_id,
+                            instance_table.columns[self._col("manifest_version")]
+                            == expected_manifest_version,
+                            instance_table.columns[self._col("artifact_digest")]
+                            == expected_artifact_digest,
+                            instance_table.columns[self._col("status")]
+                            == expected_instance_status.value,
+                        )
+                        .values(
+                            **{
+                                self._col("manifest_version"): manifest_version,
+                                self._col("artifact_digest"): artifact_digest,
+                                self._col("status"): instance_status.value,
+                                self._col("updated_at"): changed_at,
+                            }
+                        )
+                        .returning(instance_row)
+                    )
+                    returned_instance = instance_result.scalars().first()
+                    if instance_result.rowcount != 1 or returned_instance is None:
+                        raise PluginRepositoryUnavailable(
+                            "atomic artifact CAS: instance UPDATE RETURNING failed"
+                        )
+                    updated_grant = self.to_record(returned_grant)
+                    updated_instance = self._to_instance_record(returned_instance)
+                    if (
+                        updated_grant.grant_id != grant_id
+                        or updated_grant.company_id != company_id
+                        or updated_grant.plugin_id != plugin_id
+                        or updated_grant.plugin_instance_id != plugin_instance_id
+                        or updated_grant.manifest_version != manifest_version
+                        or updated_grant.artifact_digest != artifact_digest
+                        or not updated_grant.is_active
+                        or updated_grant.capabilities != current_grant.capabilities
+                        or updated_grant.egress_policy != current_grant.egress_policy
+                        or updated_grant.quotas != current_grant.quotas
+                        or updated_grant.created_at != current_grant.created_at
+                        or updated_grant.revoked_at is not None
+                        or updated_grant.webhook_secret_ref
+                        != current_grant.webhook_secret_ref
+                        or updated_instance.plugin_instance_id != plugin_instance_id
+                        or updated_instance.company_id != company_id
+                        or updated_instance.plugin_id != plugin_id
+                        or updated_instance.manifest_version != manifest_version
+                        or updated_instance.artifact_digest != artifact_digest
+                        or updated_instance.status is not instance_status
+                        or updated_instance.tenant_db_name != current_instance.tenant_db_name
+                        or updated_instance.bucket_name != current_instance.bucket_name
+                        or updated_instance.created_at != current_instance.created_at
+                    ):
+                        raise PluginRepositoryUnavailable(
+                            "atomic artifact CAS: verified post-state mismatch"
+                        )
+                    await _commit_if_owned(session, self._session is None)
+                    result_value = ArtifactPinUpdateResult(
+                        instance=updated_instance, grant=updated_grant
+                    )
+                except Exception:
+                    # In particular, do not leave the first UPDATE pending in a
+                    # borrowed session when the second fence/RETURNING fails.
+                    await session.rollback()
+                    raise
+            self._snapshot[grant_id] = updated_grant
+            self._pending.pop(grant_id, None)
+            return result_value
+        except PluginRepositoryUnavailable:
+            raise
+        except (SQLAlchemyError, PluginRepositoryError) as exc:
+            raise PluginRepositoryUnavailable(f"atomic artifact CAS failed: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001 - positive mutation requires explicit failure
+            raise PluginRepositoryUnavailable(
+                f"atomic artifact CAS failed: {type(exc).__name__}"
+            ) from exc
+
+    async def regrant(
+        self, *, previous_grant_id: str, grant: CapabilityGrantRecord
+    ) -> CapabilityGrantRecord:
+        """Атомарно заменить REVOKED row новым grant id после repair saga.
+
+        A same-id candidate is rejected before opening a session or emitting SQL:
+        otherwise the PK UPDATE below would resurrect that very revoked row.
+        UPDATE RETURNING is authoritative; the candidate is never trusted merely
+        because the database reported one affected row.
+        """
+        previous_id = text(previous_grant_id, field="previous_grant_id")
+        if not isinstance(grant, CapabilityGrantRecord):
+            raise PluginRepositoryError("regrant ожидает ACTIVE CapabilityGrantRecord")
+        candidate_id = text(grant.grant_id, field="grant_id")
+        if candidate_id == previous_id:
+            raise PluginRegrantConflict(
+                "regrant: candidate.grant_id обязан отличаться от previous_grant_id"
+            )
+        if not grant.is_active or grant.revoked_at is not None:
+            raise PluginRepositoryError("regrant ожидает ACTIVE CapabilityGrantRecord")
+        try:
+            row = self._row()
+            table = row.__table__
+            async with self._session_ctx() as session:
+                try:
+                    found = (
+                        await session.execute(
+                            select(row)
+                            .where(table.columns[self._col("grant_id")] == previous_id)
+                            .with_for_update()
+                        )
+                    ).scalars().first()
+                    if found is None:
+                        raise PluginRepositoryUnavailable("regrant: предыдущий grant не найден")
+                    previous = self.to_record(found)
+                    if previous.status is not GrantStatus.REVOKED:
+                        raise PluginRepositoryUnavailable("regrant: предыдущий grant не REVOKED")
+                    expected = (
+                        previous.company_id,
+                        previous.plugin_id,
+                        previous.plugin_instance_id,
+                    )
+                    actual = (grant.company_id, grant.plugin_id, grant.plugin_instance_id)
+                    if actual != expected:
+                        raise PluginRepositoryUnavailable(
+                            "regrant: изменена область company/plugin/instance"
+                        )
+                    result = await session.execute(
+                        update(row)
+                        .where(
+                            table.columns[self._col("grant_id")] == previous_id,
+                            table.columns[self._col("status")] == "revoked",
+                        )
+                        .values(**self._row_values(grant, row))
+                        .returning(row)
+                    )
+                    # Authoritative UPDATE ... RETURNING rows, never rowcount:
+                    # SQLite ChunkedIteratorResult has no rowcount attribute.
+                    returned_rows = result.scalars().all()
+                    if len(returned_rows) != 1:
+                        # Zero or multiple returned rows are a typed CAS failure;
+                        # the REVOKED/instance/tenant binding above is unchanged.
+                        raise PluginRepositoryUnavailable(
+                            "regrant: SQL не подтвердил замену revoked записи"
+                        )
+                    stored = self.to_record(returned_rows[0])
+                    if stored != grant or stored.grant_id == previous_id:
+                        raise PluginRepositoryUnavailable(
+                            "regrant: UPDATE RETURNING binding mismatch"
+                        )
+                    await _commit_if_owned(session, self._session is None)
+                except Exception:
+                    # A borrowed session must not retain a pending PK UPDATE after
+                    # a failed fence or returned-binding verification.
+                    await session.rollback()
+                    raise
+            self._snapshot.pop(previous_id, None)
+            self._snapshot[stored.grant_id] = stored
+            return stored
+        except PluginRepositoryUnavailable:
+            raise
+        except (SQLAlchemyError, PluginRepositoryError) as exc:
+            raise PluginRepositoryUnavailable(f"regrant failed: {exc}") from exc
+
     async def revoke_async(self, grant_id: str, *, reason: str = "") -> bool:
         """Durable-отзыв для ``admin.ports.RevocationPort`` (идентифицирован по grant_id)."""
         key = text(grant_id, field="grant_id")
@@ -656,6 +1023,10 @@ class SqlCapabilityGrantRepository:
                 )
                 rows = result.scalars().all()
             records = tuple(self.to_record(item) for item in rows)
+            if any(record.company_id != company_id for record in records):
+                raise PluginRepositorySchemaError(
+                    "list_by_company: обнаружен grant другой компании"
+                )
             for record in records:
                 self._snapshot[record.grant_id] = record
             return records
@@ -696,4 +1067,8 @@ async def _commit_if_owned(session: AsyncSession, owned: bool) -> None:
         await session.commit()
 
 
-__all__ = ["DEFAULT_CREATED_BY", "SqlCapabilityGrantRepository"]
+__all__ = [
+    "DEFAULT_CREATED_BY",
+    "PluginRegrantConflict",
+    "SqlCapabilityGrantRepository",
+]

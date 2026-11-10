@@ -1,4 +1,4 @@
-"""Сквозные тесты стыка: ``PluginAdminService`` + реальные адаптеры (НЕ запускать).
+"""Сквозные тесты стыка: ``PluginAdminService`` + реальные адаптеры.
 
 Проверяем, что собранная связка действительно «заводит» сервис задачи 12:
 * PUBLISHED по проверенному digest → grant проходит;
@@ -7,7 +7,7 @@
   компанию;
 * аудит не содержит raw данных ни на одном шаге.
 
-Эти тесты написаны, НО НЕ ЗАПУСКАЛИСЬ (verification freeze плана миграции).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 """
 
 from __future__ import annotations
@@ -32,6 +32,24 @@ PLUGIN = "mod_equipment"
 VERSION = "1.2.0"
 
 
+async def _grant_with_approval(service, capabilities: CapabilitySet):
+    await service.approve_publication(
+        actor_id="platform-admin",
+        company_id=COMPANY,
+        plugin_id=PLUGIN,
+        manifest_version=VERSION,
+        artifact_digest=DIGEST,
+        capabilities=capabilities,
+    )
+    return await service.grant(
+        company_id=COMPANY,
+        plugin_id=PLUGIN,
+        manifest_version=VERSION,
+        artifact_digest=DIGEST,
+        capabilities=capabilities,
+    )
+
+
 # --------------------------------------------------------------------------- grant
 
 
@@ -40,12 +58,9 @@ async def test_service_grant_via_adapters_requires_published_digest() -> None:
     service = build_plugin_admin_service(**deps)
 
     # Артефакт в реестре PUBLISHED (см. make_artifact_record в _deps).
-    receipt = await service.grant(
-        company_id=COMPANY,
-        plugin_id=PLUGIN,
-        manifest_version=VERSION,
-        artifact_digest=DIGEST,
-        capabilities=CapabilitySet(capabilities=("db.direct", "cache", "objects")),
+    receipt = await _grant_with_approval(
+        service,
+        CapabilitySet(capabilities=("db.direct", "cache", "objects")),
     )
 
     assert receipt.grant.status is GrantStatus.ACTIVE
@@ -105,12 +120,8 @@ async def test_service_grant_rejects_tag_as_digest() -> None:
 async def test_service_revoke_confirms_write_through_async_wrapper() -> None:
     deps = _deps()
     service = build_plugin_admin_service(**deps)
-    await service.grant(
-        company_id=COMPANY,
-        plugin_id=PLUGIN,
-        manifest_version=VERSION,
-        artifact_digest=DIGEST,
-        capabilities=CapabilitySet(capabilities=("cache",)),
+    await _grant_with_approval(
+        service, CapabilitySet(capabilities=("cache",))
     )
 
     receipt = await service.revoke(company_id=COMPANY, plugin_id=PLUGIN)
@@ -128,12 +139,8 @@ async def test_service_wake_refuses_foreign_company() -> None:
 
     deps = _deps()
     service = build_plugin_admin_service(**deps)
-    await service.grant(
-        company_id=COMPANY,
-        plugin_id=PLUGIN,
-        manifest_version=VERSION,
-        artifact_digest=DIGEST,
-        capabilities=CapabilitySet(capabilities=("cache",)),
+    await _grant_with_approval(
+        service, CapabilitySet(capabilities=("cache",))
     )
 
     with pytest.raises(PluginAdminError, match="не найден"):
@@ -146,12 +153,8 @@ async def test_service_wake_refuses_foreign_company() -> None:
 async def test_service_uninstall_keeps_other_company_intact() -> None:
     deps = _deps()
     service = build_plugin_admin_service(**deps)
-    receipt = await service.grant(
-        company_id=COMPANY,
-        plugin_id=PLUGIN,
-        manifest_version=VERSION,
-        artifact_digest=DIGEST,
-        capabilities=CapabilitySet(capabilities=("cache",)),
+    receipt = await _grant_with_approval(
+        service, CapabilitySet(capabilities=("cache",))
     )
     assert receipt.grant.company_id == COMPANY
 

@@ -59,7 +59,10 @@ pnpm --filter @agentscale/web dev
 
 ## Документация
 
-- **Продукт:** [docs/PRODUCT.md](docs/PRODUCT.md)
-- **As-built (код):** [docs/target/12-layer-docs/](docs/target/12-layer-docs/)
+- **Current product / S1:** [docs/PRODUCT.md](docs/PRODUCT.md)
+- **Current state и STOP-SHIP:** [docs/migration/plugin-migration-status.md](docs/migration/plugin-migration-status.md)
+- **Target / accepted ADR:** [docs/architecture-migration/README.md](docs/architecture-migration/README.md)
+- **Plugin authoring (matrix, не quickstart):** [docs/PLUGIN-AUTHORING.md](docs/PLUGIN-AUTHORING.md)
+- **As-built:** текущий код и манифесты; [12-layer-docs](docs/target/12-layer-docs/) — только исторический snapshot до перерасчёта
 - **Ops / GitOps:** [docs/07-infrastructure/](docs/07-infrastructure/)
-- **Legacy (в т.ч. AI-канон `target/`):** [docs/LEGACY.md](docs/LEGACY.md)
+- **Категории и история:** [docs/LEGACY.md](docs/LEGACY.md)

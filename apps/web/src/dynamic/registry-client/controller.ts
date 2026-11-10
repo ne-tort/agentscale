@@ -126,6 +126,9 @@ export class DynamicRegistryController {
         routeId: request.routeId,
         context,
         effectiveCapabilities,
+        ...(request.requiresAuthoritativeScope !== undefined
+          ? { requiresAuthoritativeScope: request.requiresAuthoritativeScope }
+          : {}),
         ...(request.signal ? { signal: request.signal } : {}),
       }));
     } finally {
@@ -170,6 +173,9 @@ export class DynamicRegistryController {
       routeId: lookup.pointer.routeId,
       context,
       effectiveCapabilities: request.effectiveCapabilities,
+      ...(request.requiresAuthoritativeScope !== undefined
+        ? { requiresAuthoritativeScope: request.requiresAuthoritativeScope }
+        : {}),
       ...(request.signal ? { signal: request.signal } : {}),
     });
     if (resolved.state === "resolved" && resolved.route.path !== request.pathname) {

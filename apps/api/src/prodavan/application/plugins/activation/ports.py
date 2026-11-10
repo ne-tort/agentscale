@@ -144,15 +144,15 @@ class MintPort(Protocol):
 
 @runtime_checkable
 class AuditPort(Protocol):
-    """Append-only аудит событий ``plugin_wake_up`` / ``plugin_suspend`` и др.
+    """Единый async sink contract, совпадающий с AppendOnlyAuditSink.append_event.
 
-    Синхронный контракт повторяет ``capability_gateway_service.AuditPort``,
-    чтобы переиспользовать существующий sink (§4.5). Исключение из ``record``
-    трактуется activator'ом как **deny/system failure** для позитивной
-    мутации: 0→1 без аудита не считается успешным пробуждением.
+    Все вызовы обязаны быть awaited. Отдельных sync background loops нет;
+    исключение для позитивной мутации = deny/system failure.
     """
 
-    def record(self, event: ActivationAuditEvent) -> None: ...
+    async def append_event(
+        self, event_type: str, *, details: Mapping[str, Any]
+    ) -> None: ...
 
 
 @runtime_checkable

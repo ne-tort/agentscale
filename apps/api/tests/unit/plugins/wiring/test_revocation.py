@@ -9,6 +9,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+pytestmark = pytest.mark.asyncio
+
 from prodavan.application.plugins.identity.revocation import GrantRevocation, RevocationPort
 from prodavan.application.plugins.identity.types import (
     PluginClaims,
@@ -31,11 +33,11 @@ def _now() -> datetime:
     return datetime(2026, 11, 8, 6, 0, 0, tzinfo=UTC)
 
 
-def test_active_grant_from_db_is_active(grant_store: FakeGrantStore) -> None:
+async def test_active_grant_from_db_is_active(grant_store: FakeGrantStore) -> None:
     rev = DurableGrantRevocation(grant_store, clock=_now)
     assert isinstance(grant_store, GrantStorePort)
-    assert rev.is_active("grant_01", now=_now()) is True
-    assert rev.is_revoked("grant_01") is False
+    assert await rev.is_active("grant_01", now=_now()) is True
+    assert await rev.is_revoked("grant_01") is False
     # Удовлетворяет портам F1/F2 структурно (``is_active``/``revoke``/
     # ``is_revoked``/``check`` объявлены явно); Protocol без @runtime_checkable
     # проверяем по наличию методов, а не isinstance.
@@ -44,85 +46,85 @@ def test_active_grant_from_db_is_active(grant_store: FakeGrantStore) -> None:
         assert callable(getattr(rev, method, None))
 
 
-def test_missing_port_is_refused_at_construction() -> None:
+async def test_missing_port_is_refused_at_construction() -> None:
     """Нет интеграции с БД = явная ошибка, а не in-memory allow-all."""
     with pytest.raises(PluginPlatformConfigError, match="GrantStorePort"):
         DurableGrantRevocation(None)
 
 
-def test_db_failure_does_not_silently_pass(grant_store: FakeGrantStore) -> None:
+async def test_db_failure_does_not_silently_pass(grant_store: FakeGrantStore) -> None:
     """Ключевой тест: недоступность БД НЕ переживается молча."""
     rev = DurableGrantRevocation(grant_store, clock=_now)
     grant_store.fail_get = True
-    assert rev.is_active("grant_01", now=_now()) is False
-    assert rev.is_revoked("grant_01") is True
+    assert await rev.is_active("grant_01", now=_now()) is False
+    assert await rev.is_revoked("grant_01") is True
     # Обратная совместимость с GrantRevocation задачи 02: check -> REVOKED.
     wrapped = GrantRevocation(rev)
     with pytest.raises(PluginTokenError) as ei:
-        wrapped.check(PluginClaims(grant_id="grant_01"))
+        await wrapped.check(PluginClaims(grant_id="grant_01"))
     assert ei.value.code == PluginTokenErrorCode.REVOKED
 
 
-def test_expired_cache_does_not_survive_db_outage(grant_store: FakeGrantStore) -> None:
+async def test_expired_cache_does_not_survive_db_outage(grant_store: FakeGrantStore) -> None:
     """Просроченный кэш + упавшая БД = отказ, а не «переживём на старом ответе»."""
     current = _now()
     rev = DurableGrantRevocation(grant_store, cache_ttl_seconds=1.0, clock=lambda: current)
-    assert rev.is_active("grant_01", now=current) is True  # кэш заполнен
+    assert await rev.is_active("grant_01", now=current) is True  # кэш заполнен
     current = current + timedelta(seconds=2)
     grant_store.fail_get = True
-    assert rev.is_active("grant_01", now=current) is False
+    assert await rev.is_active("grant_01", now=current) is False
 
 
-def test_revoke_deactivates_status_in_db(grant_store: FakeGrantStore) -> None:
+async def test_revoke_deactivates_status_in_db(grant_store: FakeGrantStore) -> None:
     rev = DurableGrantRevocation(grant_store, clock=_now)
-    rev.revoke("grant_01")
+    await rev.revoke("grant_01")
     assert grant_store.deactivate_calls == ["grant_01"]
     assert grant_store._rows["grant_01"].status == GRANT_STATUS_REVOKED
-    assert rev.is_active("grant_01", now=_now()) is False
+    assert await rev.is_active("grant_01", now=_now()) is False
 
 
-def test_revoke_failure_raises_instead_of_silent_success(grant_store: FakeGrantStore) -> None:
+async def test_revoke_failure_raises_instead_of_silent_success(grant_store: FakeGrantStore) -> None:
     grant_store.fail_deactivate = True
     rev = DurableGrantRevocation(grant_store, clock=_now)
     with pytest.raises(GrantRevocationUnavailable, match="NOT confirmed"):
-        rev.revoke("grant_01")
+        await rev.revoke("grant_01")
 
 
-def test_revoke_unconfirmed_by_store_raises(grant_store: FakeGrantStore) -> None:
+async def test_revoke_unconfirmed_by_store_raises(grant_store: FakeGrantStore) -> None:
     grant_store.deactivate_result = False
     rev = DurableGrantRevocation(grant_store, clock=_now)
     with pytest.raises(GrantRevocationUnavailable, match="did not confirm"):
-        rev.revoke("grant_01")
+        await rev.revoke("grant_01")
 
 
-def test_revoke_empty_grant_id_is_rejected(grant_store: FakeGrantStore) -> None:
+async def test_revoke_empty_grant_id_is_rejected(grant_store: FakeGrantStore) -> None:
     rev = DurableGrantRevocation(grant_store, clock=_now)
     with pytest.raises(ValueError, match="must not be empty"):
-        rev.revoke("   ")
+        await rev.revoke("   ")
 
 
-def test_unknown_or_missing_grant_is_not_active(grant_store: FakeGrantStore) -> None:
+async def test_unknown_or_missing_grant_is_not_active(grant_store: FakeGrantStore) -> None:
     rev = DurableGrantRevocation(grant_store, clock=_now)
-    assert rev.is_active("grant_unknown", now=_now()) is False
-    assert rev.is_active("", now=_now()) is False
-    assert rev.is_active(None, now=_now()) is False  # type: ignore[arg-type]
+    assert await rev.is_active("grant_unknown", now=_now()) is False
+    assert await rev.is_active("", now=_now()) is False
+    assert await rev.is_active(None, now=_now()) is False  # type: ignore[arg-type]
 
 
-def test_unknown_status_is_fail_closed(grant_store: FakeGrantStore) -> None:
+async def test_unknown_status_is_fail_closed(grant_store: FakeGrantStore) -> None:
     grant_store._rows["grant_01"] = FakeGrantRow(status="suspended")
     rev = DurableGrantRevocation(grant_store, clock=_now)
-    assert rev.is_active("grant_01", now=_now()) is False
+    assert await rev.is_active("grant_01", now=_now()) is False
 
 
-def test_revoked_at_marker_denies_even_if_status_active(grant_store: FakeGrantStore) -> None:
+async def test_revoked_at_marker_denies_even_if_status_active(grant_store: FakeGrantStore) -> None:
     grant_store._rows["grant_01"] = FakeGrantRow(
         status=GRANT_STATUS_ACTIVE, revoked_at=_now()
     )
     rev = DurableGrantRevocation(grant_store, clock=_now)
-    assert rev.is_active("grant_01", now=_now()) is False
+    assert await rev.is_active("grant_01", now=_now()) is False
 
 
-def test_not_yet_issued_and_expired_grants_deny(grant_store: FakeGrantStore) -> None:
+async def test_not_yet_issued_and_expired_grants_deny(grant_store: FakeGrantStore) -> None:
     now = _now()
     grant_store._rows["future"] = FakeGrantRow(
         grant_id="future", issued_at=now + timedelta(hours=1)
@@ -131,33 +133,33 @@ def test_not_yet_issued_and_expired_grants_deny(grant_store: FakeGrantStore) -> 
         grant_id="past", expires_at=now - timedelta(seconds=1)
     )
     rev = DurableGrantRevocation(grant_store, clock=lambda: now)
-    assert rev.is_active("future", now=now) is False
-    assert rev.is_active("past", now=now) is False
+    assert await rev.is_active("future", now=now) is False
+    assert await rev.is_active("past", now=now) is False
 
 
-def test_naive_now_is_fail_closed(grant_store: FakeGrantStore) -> None:
+async def test_naive_now_is_fail_closed(grant_store: FakeGrantStore) -> None:
     rev = DurableGrantRevocation(grant_store, clock=_now)
-    assert rev.is_active("grant_01", now=datetime(2026, 11, 8, 6, 0, 0)) is False  # type: ignore[arg-type]
+    assert await rev.is_active("grant_01", now=datetime(2026, 11, 8, 6, 0, 0)) is False  # type: ignore[arg-type]
 
 
-def test_naive_timestamp_from_store_is_fail_closed(grant_store: FakeGrantStore) -> None:
+async def test_naive_timestamp_from_store_is_fail_closed(grant_store: FakeGrantStore) -> None:
     grant_store._rows["grant_01"] = FakeGrantRow(expires_at=datetime(2027, 1, 1))
     rev = DurableGrantRevocation(grant_store, clock=_now)
-    assert rev.is_active("grant_01", now=_now()) is False
+    assert await rev.is_active("grant_01", now=_now()) is False
 
 
-def test_check_method_matches_transport_deps_contract(grant_store: FakeGrantStore) -> None:
+async def test_check_method_matches_transport_deps_contract(grant_store: FakeGrantStore) -> None:
     """``app.state.plugin_revocation`` можно использовать без обёртки задачи 02."""
     rev = DurableGrantRevocation(grant_store, clock=_now)
     claims = PluginClaims(grant_id="grant_01")
-    assert rev.check(claims) is claims
-    rev.revoke("grant_01")
+    assert await rev.check(claims) is claims
+    await rev.revoke("grant_01")
     with pytest.raises(PluginTokenError) as ei:
-        rev.check(claims)
+        await rev.check(claims)
     assert ei.value.code == PluginTokenErrorCode.REVOKED
 
 
-def test_no_bump_pod_bridge_generation_used(grant_store: FakeGrantStore) -> None:
+async def test_no_bump_pod_bridge_generation_used(grant_store: FakeGrantStore) -> None:
     """Отзыв плагина не дёргает агентский механизм (критерий №12, ADR-008).
 
     Инвариант = НЕТ вызова/атрибута/импорта ``bump_pod_bridge_generation``
@@ -199,6 +201,6 @@ def test_no_bump_pod_bridge_generation_used(grant_store: FakeGrantStore) -> None
     assert "grant_store" in source or "deactivate" in source
 
 
-def test_grant_snapshot_active_property() -> None:
+async def test_grant_snapshot_active_property() -> None:
     assert GrantSnapshot(status="active").active is True
     assert GrantSnapshot(status="REVOKED").active is False

@@ -1,0 +1,86 @@
+# Dedicated identity for DeploymentAdmin + SecretProjection + activation scale/state.
+# NEVER bind this Role to plugin-gateway, agentscale-api, typed-RPC, or plugin
+# backend ServiceAccounts: lifecycle needs Secret reconciliation, those pods do not.
+# API receives NO lifecycle verbs: the separate token-request Role only permits
+# TokenRequest for this SA. A dedicated runtime broker is mandatory before use.
+# Backend Pods continue to use plugin-runtime with automountServiceAccountToken=false.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: plugin-deployment-admin
+  namespace: agentscale-dev
+  labels:
+    app.kubernetes.io/name: plugin-deployment-admin
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-lifecycle
+# TokenRequest remains available; never automount this powerful identity into a Pod.
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: plugin-deployment-admin
+  namespace: agentscale-dev
+  labels:
+    app.kubernetes.io/name: plugin-deployment-admin
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-lifecycle
+rules:
+  # Canonical plugin resource names are generated per instance, so a static
+  # resourceNames allowlist would break lifecycle operations. This Role (not a
+  # ClusterRole) is the hard boundary: every rule is limited to agentscale-dev.
+  # A dedicated plugin-runtime namespace remains the follow-up isolation step;
+  # do not compensate by granting cluster-wide or admin.* permissions here.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "create", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "create", "patch", "delete"]
+  # Canonical backend Service proxy: POST /v1/egress and pod actions use create;
+  # get covers only read-style proxy requests, with no pod/exec/port-forward verbs.
+  - apiGroups: [""]
+    resources: ["services/proxy"]
+    verbs: ["get", "create"]
+  # Kubernetes ignores resourceNames for create. Keep create in this explicit
+  # dynamic-name rule rather than pretending a resourceNames restriction works.
+  # DeploymentAdmin/Projection still enforce canonical name + ownership labels.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "patch", "delete"]
+  # Activation state: named reads/patches only. Kubernetes ignores resourceNames
+  # for create, so collection create is necessarily a separate minimal rule.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["plugin-activation-state"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+  # Used only for label-selected scale-to-zero confirmation; no pods get/watch.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: plugin-deployment-admin
+  namespace: agentscale-dev
+  labels:
+    app.kubernetes.io/name: plugin-deployment-admin
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-lifecycle
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: plugin-deployment-admin
+subjects:
+  # One scoped identity shared by DeploymentAdmin, SecretProjection and activator.
+  # Keep namespace aligned with PLUGIN_RUNTIME_NAMESPACE and the RoleBinding.
+  - kind: ServiceAccount
+    name: plugin-deployment-admin
+    namespace: agentscale-dev

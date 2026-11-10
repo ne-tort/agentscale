@@ -1,9 +1,16 @@
 # План миграции: plugin-модули (v4 → код)
 
-**Статус:** в работе. **Ветка:** `main` (dev), без feature-веток.  
-**Источник истины по архитектуре:** [`docs/ARCHITECTURE/plugin-architecture-complete.md`](../ARCHITECTURE/plugin-architecture-complete.md) (v4).  
-**ADR:** 006 (целевая модель), 007 (`db.direct`), 008 (разделение trust/lifecycle).  
-**Формат работы:** микрокоммиты `git add -A && git commit && git push origin HEAD:main` одной командой, без гигиены, без переписывания истории. Тесты пишутся как часть реализации, но **не запускаются** до явного решения о верификации.
+> **HISTORICAL REPORT / NOT CURRENT ACCEPTANCE.** Содержимое относится к ранней
+> волне и не переподтверждено на audited HEAD `6ee720dd`. Любые «реализовано»,
+> `[x]`, `acceptance ✓`, «эталон» и прошлые test counts — только historical
+> claims. Актуальный статус: [STOP-SHIP](plugin-migration-status.md) и
+> [live-only acceptance map](plugin-acceptance-map.md). Написанный код ≠ live.
+
+**Статус:** исторический план ранней волны, не текущий runbook. Старые
+инструкции прямой работы на `main` и последовательности cutover не применяются.
+Архитектура: [v4 с errata](../ARCHITECTURE/plugin-architecture-complete.md);
+безопасный порядок: [plugin-cutover-safety.md](plugin-cutover-safety.md).
+Действуют корневой AGENTS.md и verification freeze.
 
 ---
 

@@ -11,17 +11,18 @@ ADR-008, критерии №13/№14):
 ``StateStorePort``         :class:`ConfigMapStateStore`
 =========================  ==========================================
 
-Почему НЕ ``SandboxClaim``: у плагинов обычный Deployment ``replicas: 0``,
-``readinessProbe /health`` и ``ignoreDifferences /spec/replicas`` в Argo;
-``ensure_running`` агентов не ждёт Ready (§7.4). Gateway/activator патчит
-ТОЛЬКО подресурс ``deployments/scale`` — ровно то, что выдано Role
-``plugin-gateway-activator`` в
-``infra/k3s/base/plugins/plugin-gateway.yaml:44-58``:
+Почему НЕ ``SandboxClaim``: у плагинов обычный Deployment ``replicas: 0``
+и ``readinessProbe /health``. Runtime-created Deployment/Service НЕ отслеживаются
+Argo Application, поэтому широкий ``ignoreDifferences /spec/replicas`` не нужен;
+``ensure_running`` агентов не ждёт Ready (§7.4). Gateway/activator использует
+TokenRequest identity ``plugin-deployment-admin`` и патчит ТОЛЬКО подресурс
+``deployments/scale`` — см. Role в
+``infra/k3s/overlays/dev/plugins/plugin-lifecycle-rbac.yaml``:
 
-* ``deployments/scale``: get / patch / update (изменение числа реплик);
-* ``deployments``: get / list / watch (read-only, ожидание Ready);
-* ``configmaps``: get / create / update / patch c ``resourceNames:
-  [plugin-activation-state]`` (CAS состояния).
+* ``deployments/scale``: get / patch (изменение числа реплик);
+* ``deployments``: get (ожидание Ready; остальные verbs нужны DeploymentAdmin);
+* ``configmaps``: get / patch только для ``plugin-activation-state``;
+  отдельный create без ``resourceNames`` (ограничение Kubernetes RBAC).
 
 Адаптер НЕ умеет и НЕ пытается: менять образ/env/DSN плагина, читать pods или
 secrets, создавать Deployment, писать любые другие ConfigMap. Любая попытка
@@ -31,19 +32,20 @@ secrets, создавать Deployment, писать любые другие Con
 ------------------
 Deployment и Service создаются контроллером при grant и называются
 ``plugin-<id>-<instance>`` (шаблон
-``infra/k3s/overlays/dev/plugins/plugin-deployment-template.yaml:47``). Порт
+``infra/k3s/overlays/dev/plugins/plugin-deployment-template.yaml``). Порт
 получает только ``plugin_instance_id``, поэтому имя вычисляется функцией,
 которую можно подменить:
 
 * ``deployment_names`` — явный mapping ``instance_id -> k8s-имя`` (приоритет);
 * ``deployment_name_resolver`` — вызываемая ``(instance_id) -> str``;
-* по умолчанию :func:`default_deployment_name` (префикс ``plugin-`` +
-  нормализованный id).
+* без resolver/mapping адаптер fail-closed: из одного instance_id нельзя
+  безопасно восстановить canonical ``plugin_id + instance``.
 
-:func:`plugin_deployment_name` даёт каноническую форму ``plugin-<id>-<instance>``
-для контроллера/админки. Нормализация детерминирована (``_`` -> ``-``, lowercase),
-поэтому контроллер И адаптер должны использовать ОДНУ И ТУ ЖЕ функцию — иначе
-wake получит 404 (риск зафиксирован в отчёте родителю).
+:func:`plugin_resource_name` — ЕДИНЫЙ builder для Deployment и Service:
+``plugin-<id>-<instance>``, DNS1035 <= 63. При обрезании сохраняется SHA-256
+suffix, поэтому длинные идентификаторы с общим префиксом не схлопываются.
+:func:`plugin_deployment_name` и :func:`plugin_service_name` только делегируют
+этому builder и не вводят разных short-name алгоритмов.
 
 Fail-closed
 -----------
@@ -65,7 +67,9 @@ SDK, ``InClusterAuth`` (SA token + CA из in-cluster kubeconfig), injectable
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import re
@@ -105,7 +109,9 @@ SCALE_KIND = "Scale"
 CONFIGMAP_KIND = "ConfigMap"
 STATE_SCHEMA_VERSION = 1
 
-_DNS_LABEL = re.compile(r"^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$")
+_DNS1035 = re.compile(r"^[a-z](?:[-a-z0-9]*[a-z0-9])?$")
+_MAX_RESOURCE_NAME = 63
+_HASH_SUFFIX_LENGTH = 16
 _CONFIGMAP_KEY_RE = re.compile(r"^[-._a-zA-Z0-9]{1,253}$")
 
 
@@ -161,12 +167,10 @@ class StateStoreUnavailable(ActivationError):
 
 
 def normalize_k8s_name(value: str) -> str:
-    """Привести идентификатор плагина к RFC 1123 label (детерминированно).
+    """Нормализовать ОДИН компонент имени БЕЗ потерь от plain truncation.
 
-    ``plugin_instance_id`` в домене может содержать ``_`` (``inst_equipment_001``),
-    а k8s-имена — нет. Заменяем ``_``/``.``/пробелы на ``-``, отбрасываем
-    остальные недопустимые символы, обрезаем до 63 символов. НИКАКОГО
-    «угадывания»: та же функция обязана использоваться при grant.
+    Обрезание полного resource name выполняет только
+    :func:`plugin_resource_name`, добавляя collision-resistant digest.
     """
     if not isinstance(value, str) or not value.strip():
         raise RuntimeConfigError("идентификатор плагина не может быть пустым")
@@ -175,12 +179,75 @@ def normalize_k8s_name(value: str) -> str:
     cleaned = re.sub(r"-+", "-", cleaned).strip("-")
     if not cleaned:
         raise RuntimeConfigError(f"идентификатор {value!r} не даёт валидного k8s-имени")
-    return cleaned[:63].rstrip("-")
+    return cleaned
 
 
-def default_deployment_name(plugin_instance_id: str, *, prefix: str = "plugin-") -> str:
-    """Имя Deployment по умолчанию: ``plugin-<instance>``."""
-    return f"{prefix}{normalize_k8s_name(plugin_instance_id)}"
+def _canonical_prefix(prefix: str) -> str:
+    if not isinstance(prefix, str):
+        raise RuntimeConfigError("prefix имени плагина должен быть строкой")
+    value = prefix.strip()
+    stem = value[:-1] if value.endswith("-") else value
+    if not re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*", stem):
+        raise RuntimeConfigError(f"некорректный DNS1035 prefix: {prefix!r}")
+    return f"{stem}-"
+
+
+def validate_plugin_resource_name(name: str) -> str:
+    """Проверить общий контракт Deployment/Service: DNS1035, максимум 63."""
+    if (
+        not isinstance(name, str)
+        or len(name) > _MAX_RESOURCE_NAME
+        or not _DNS1035.fullmatch(name)
+    ):
+        raise RuntimeConfigError(f"некорректное canonical resource name: {name!r}")
+    return name
+
+
+def plugin_resource_name(
+    plugin_id: str,
+    plugin_instance_id: str,
+    *,
+    prefix: str = "plugin-",
+) -> str:
+    """Canonical имя, ОДИНАКОВОЕ для Deployment и Service одного instance.
+
+    Полное нормализованное имя сохраняется, если оно помещается в 63 символа.
+    Иначе добавляются 16 hex-символов SHA-256 от ИСХОДНЫХ id и префикса. Два
+    длинных id с одинаковым видимым началом поэтому получают разные имена.
+    """
+    canonical_prefix = _canonical_prefix(prefix)
+    raw_plugin_id = plugin_id.strip() if isinstance(plugin_id, str) else plugin_id
+    raw_instance_id = (
+        plugin_instance_id.strip() if isinstance(plugin_instance_id, str) else plugin_instance_id
+    )
+    candidate = (
+        f"{canonical_prefix}{normalize_k8s_name(raw_plugin_id)}-"
+        f"{normalize_k8s_name(raw_instance_id)}"
+    )
+    if len(candidate) > _MAX_RESOURCE_NAME:
+        digest_input = (
+            f"{canonical_prefix}\0{raw_plugin_id}\0{raw_instance_id}".encode("utf-8")
+        )
+        digest = hashlib.sha256(digest_input).hexdigest()[:_HASH_SUFFIX_LENGTH]
+        stem_length = _MAX_RESOURCE_NAME - _HASH_SUFFIX_LENGTH - 1
+        stem = candidate[:stem_length].rstrip("-")
+        candidate = f"{stem}-{digest}"
+    return validate_plugin_resource_name(candidate)
+
+
+def default_deployment_name(
+    plugin_instance_id: str,
+    *,
+    prefix: str = "plugin-",
+    plugin_id: str | None = None,
+) -> str:
+    """Compatibility wrapper; без plugin_id canonical имя намеренно невозможно."""
+    if plugin_id is None:
+        raise RuntimeConfigError(
+            "canonical Deployment name требует plugin_id + plugin_instance_id; "
+            "подключите admin resource_name_resolver"
+        )
+    return plugin_resource_name(plugin_id, plugin_instance_id, prefix=prefix)
 
 
 def plugin_deployment_name(
@@ -189,15 +256,16 @@ def plugin_deployment_name(
     *,
     prefix: str = "plugin-",
 ) -> str:
-    """Каноническое имя из шаблона §5.1: ``plugin-<id>-<instance>``.
+    return plugin_resource_name(plugin_id, plugin_instance_id, prefix=prefix)
 
-    Используется контроллером при grant и адаптером при wake. Оба обязаны
-    вызывать ОДНУ функцию, иначе activator получит 404 (fail-closed отказ).
-    """
-    name = f"{prefix}{normalize_k8s_name(plugin_id)}-{normalize_k8s_name(plugin_instance_id)}"
-    if not _DNS_LABEL.fullmatch(name) or len(name) > 253:
-        raise RuntimeConfigError(f"некорректное имя Deployment плагина: {name!r}")
-    return name
+
+def plugin_service_name(
+    plugin_id: str,
+    plugin_instance_id: str,
+    *,
+    prefix: str = "plugin-",
+) -> str:
+    return plugin_resource_name(plugin_id, plugin_instance_id, prefix=prefix)
 
 
 def state_key(plugin_instance_id: str) -> str:
@@ -255,11 +323,12 @@ class K8sApiClient:
     тоже инъектится. ``httpx`` импортируется ЛОКАЛЬНО при первом запросе, чтобы
     импорт модуля не создавал HTTP-клиент и не читал kubeconfig.
 
-    In-cluster kubeconfig: ``InClusterAuth`` берёт
+    Without token_provider, in-cluster kubeconfig: ``InClusterAuth`` берёт
     ``KUBERNETES_SERVICE_HOST/PORT`` и токен/CA из
     ``/var/run/secrets/kubernetes.io/serviceaccount``. Если пода не в кластере
     (``available() == False``) — сразу ``K8sApiUnavailable``, без «тихого
-    успеха» и без попытки сходить в дев-фолбэк.
+    успеха» и без попытки сходить в дев-фолбэк. With token_provider, auth
+    supplies only host/CA and every request awaits a fresh cached short-lived token.
     """
 
     def __init__(
@@ -268,19 +337,53 @@ class K8sApiClient:
         auth: InClusterAuth | None = None,
         client: Any = None,
         timeout_seconds: float = 10.0,
+        token_provider: Any = None,
     ) -> None:
+        if token_provider is not None and not callable(
+            getattr(token_provider, "get_token", None)
+        ):
+            raise RuntimeConfigError("token_provider must implement async get_token()")
         self._auth = auth or InClusterAuth()
+        self._token_provider = token_provider
         self._client = client
         self._timeout = float(timeout_seconds)
         if self._timeout <= 0 or self._timeout != self._timeout:
             raise RuntimeConfigError("timeout k8s API должен быть положительным")
+        self._closed = False
+        self._close_lock = asyncio.Lock()
+
+    @property
+    def scoped_identity(self) -> bool:
+        """Whether requests use TokenRequest identity instead of the mounted token."""
+        return self._token_provider is not None
 
     def _get_client(self) -> Any:
+        if self._closed:
+            raise K8sApiUnavailable("k8s API client is closed")
         if self._client is None:
             import httpx  # локальный импорт: import модуля не делает IO
 
             self._client = httpx.AsyncClient(**self._auth.client_kwargs())
         return self._client
+
+    async def aclose(self) -> None:
+        """Close this REST transport once; the token provider is closed by its owner."""
+        async with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            client = self._client
+            if client is None:
+                return
+            close = getattr(client, "aclose", None)
+            if not callable(close):
+                return
+            try:
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                raise K8sApiUnavailable("k8s API client shutdown failed") from None
 
     async def request(
         self,
@@ -292,15 +395,47 @@ class K8sApiClient:
     ) -> K8sRawResponse:
         if not isinstance(path, str) or not path.startswith("/"):
             raise K8sApiError("k8s API path должен начинаться с '/'")
-        if not self._auth.available():
-            raise K8sApiUnavailable(
-                "in-cluster kubeconfig недоступен (KUBERNETES_SERVICE_HOST/SA token)"
-            )
+        if self._closed:
+            raise K8sApiUnavailable("k8s API client is closed")
         try:
+            # In provider mode auth supplies only cluster host and CA. Its
+            # mounted token is deliberately neither checked nor read.
             api_base = self._auth.api_base()
-            headers = dict(self._auth.headers())
-        except Exception as exc:  # noqa: BLE001 — чтение токена/CA = отказ
-            raise K8sApiUnavailable(f"не удалось прочитать in-cluster auth: {type(exc).__name__}") from exc
+        except Exception as exc:
+            raise K8sApiUnavailable(
+                f"не удалось прочитать in-cluster cluster config: {type(exc).__name__}"
+            ) from exc
+        if self._token_provider is None:
+            if not self._auth.available():
+                raise K8sApiUnavailable(
+                    "in-cluster kubeconfig недоступен (KUBERNETES_SERVICE_HOST/SA token)"
+                )
+            try:
+                headers = dict(self._auth.headers())
+            except Exception as exc:  # noqa: BLE001 — чтение токена/CA = отказ
+                raise K8sApiUnavailable(
+                    f"не удалось прочитать in-cluster auth: {type(exc).__name__}"
+                ) from exc
+        else:
+            try:
+                token = await self._token_provider.get_token()
+            except Exception:
+                raise K8sApiUnavailable(
+                    "short-lived lifecycle Kubernetes identity is unavailable"
+                ) from None
+            if (
+                not isinstance(token, str)
+                or not 0 < len(token) <= 16384
+                or not all(33 <= ord(character) <= 126 for character in token)
+            ):
+                raise K8sApiUnavailable(
+                    "short-lived lifecycle Kubernetes identity is invalid"
+                )
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            }
         if content_type:
             headers["Content-Type"] = content_type
 
@@ -314,7 +449,7 @@ class K8sApiClient:
                 timeout=self._timeout,
             )
         except Exception as exc:  # noqa: BLE001 — сеть/таймаут/DNS = недоступность
-            raise K8sApiUnavailable(f"k8s API недоступен: {type(exc).__name__}") from exc
+            raise K8sApiUnavailable(f"k8s API недоступен: {type(exc).__name__}") from None
 
         status = int(getattr(response, "status_code", 0) or 0)
         if status == 404:
@@ -334,6 +469,52 @@ class K8sApiClient:
         if not isinstance(payload, dict):
             raise K8sApiError("k8s API вернул не объект")
         return K8sRawResponse(status_code=status, body=payload)
+
+
+def _resolve_scoped_k8s_api(
+    *,
+    api: K8sApiPort | None,
+    token_provider: Any = None,
+    auth: InClusterAuth | None = None,
+    client: Any = None,
+    api_timeout_seconds: float = 10.0,
+) -> K8sApiPort:
+    """Resolve only a TokenRequest-backed or explicitly scoped custom API.
+
+    A bare ``client``/``auth`` is transport configuration, not identity evidence.
+    In particular, never construct the historical mounted-token default when the
+    lifecycle client is absent. Custom API ports must opt in with the same
+    ``scoped_identity = True`` marker used by the other canonical runtimes.
+    """
+    if token_provider is not None and not callable(
+        getattr(token_provider, "get_token", None)
+    ):
+        raise RuntimeConfigError("token_provider must implement async get_token()")
+    if api is None:
+        if token_provider is None:
+            raise RuntimeConfigError(
+                "lifecycle K8s API is required; default_mounted_service_account_forbidden"
+            )
+        return K8sApiClient(
+            auth=auth,
+            client=client,
+            timeout_seconds=api_timeout_seconds,
+            token_provider=token_provider,
+        )
+    if not callable(getattr(api, "request", None)):
+        raise RuntimeConfigError("lifecycle K8s API must implement async request()")
+
+    provider_marker = getattr(api, "_token_provider", ...)
+    if provider_marker is not ...:
+        if not callable(getattr(provider_marker, "get_token", None)):
+            raise RuntimeConfigError("default_mounted_service_account_forbidden")
+        if token_provider is not None and provider_marker is not token_provider:
+            raise RuntimeConfigError(
+                "lifecycle K8s API and token_provider identity mismatch"
+            )
+    elif getattr(api, "scoped_identity", False) is not True:
+        raise RuntimeConfigError("default_mounted_service_account_forbidden")
+    return api
 
 
 # ---------------------------------------------------------------------------
@@ -436,9 +617,11 @@ class K8sScalePort:
     продолжит polling), а НЕ «можно проксировать».
 
     ``max_replicas`` по умолчанию 1: модельный контракт §7.4 — Deployment
-    плагина живёт в 0/1, Argo закрывает ``/spec/replicas`` через
-    ``ignoreDifferences``. Расширяется только явной настройкой.
+    плагина живёт в 0/1 и создаётся вне Argo Application. Расширяется только
+    явной настройкой.
     """
+
+    scoped_identity = True
 
     def __init__(
         self,
@@ -447,7 +630,7 @@ class K8sScalePort:
         api: K8sApiPort | None = None,
         probe: HttpProbePort | None = None,
         readiness_mode: ReadinessMode = ReadinessMode.BOTH,
-        deployment_name_resolver: Callable[[str], str] | None = None,
+        deployment_name_resolver: Callable[[str], Any] | None = None,
         deployment_names: Mapping[str, str] | None = None,
         max_replicas: int = 1,
         api_timeout_seconds: float = 10.0,
@@ -456,6 +639,7 @@ class K8sScalePort:
         client: Any = None,
         probe_client: Any = None,
         auth: InClusterAuth | None = None,
+        token_provider: Any = None,
     ) -> None:
         if not isinstance(config, RuntimeConfig):
             raise RuntimeConfigError("K8sScalePort requires RuntimeConfig")
@@ -466,8 +650,12 @@ class K8sScalePort:
         if not cluster_domain or any(ch.isspace() for ch in cluster_domain):
             raise RuntimeConfigError("cluster_domain некорректен")
         self._config = config
-        self._api: K8sApiPort = api or K8sApiClient(
-            auth=auth, client=client, timeout_seconds=api_timeout_seconds
+        self._api: K8sApiPort = _resolve_scoped_k8s_api(
+            api=api,
+            token_provider=token_provider,
+            auth=auth,
+            client=client,
+            api_timeout_seconds=api_timeout_seconds,
         )
         self._probe: HttpProbePort = probe or ServiceHealthProbe(
             client=probe_client, timeout_seconds=probe_timeout_seconds
@@ -477,6 +665,11 @@ class K8sScalePort:
         self._resolver = deployment_name_resolver
         self._max_replicas = max_replicas
         self._cluster_domain = cluster_domain.strip(".")
+
+    @property
+    def api(self) -> K8sApiPort:
+        """Shared REST client for the admin lifecycle adapter."""
+        return self._api
 
     # -- имена и пути -------------------------------------------------------
 
@@ -488,27 +681,54 @@ class K8sScalePort:
         if explicit is not None:
             name = str(explicit)
         elif self._resolver is not None:
-            name = str(self._resolver(plugin_instance_id))
+            resolved = self._resolver(plugin_instance_id)
+            if inspect.isawaitable(resolved):
+                close = getattr(resolved, "close", None)
+                if callable(close):
+                    close()
+                raise RuntimeConfigError(
+                    "async durable name resolver доступен только в async scale/readiness методах"
+                )
+            name = str(resolved)
         else:
-            name = default_deployment_name(plugin_instance_id, prefix=self._config.deployment_prefix)
-        if not _DNS_LABEL.fullmatch(name) or len(name) > 253:
-            raise RuntimeConfigError(f"некорректное имя Deployment: {name!r}")
-        return name
+            raise RuntimeConfigError(
+                "canonical Deployment name требует plugin_id + instance; "
+                "передайте deployment_name_resolver/deployment_names из admin read model"
+            )
+        return validate_plugin_resource_name(name)
+
+    async def _deployment_name_async(self, plugin_instance_id: str) -> str:
+        """Resolve through the durable instance projection after API restarts."""
+        if not isinstance(plugin_instance_id, str) or not plugin_instance_id.strip():
+            raise RuntimeConfigError("plugin_instance_id не может быть пустым")
+        explicit = self._deployment_names.get(plugin_instance_id)
+        if explicit is not None:
+            resolved: Any = explicit
+        elif self._resolver is not None:
+            resolved = self._resolver(plugin_instance_id)
+            if inspect.isawaitable(resolved):
+                resolved = await resolved
+        else:
+            raise RuntimeConfigError(
+                "canonical Deployment name требует plugin_id + instance; "
+                "передайте durable deployment_name_resolver"
+            )
+        return validate_plugin_resource_name(str(resolved))
 
     def service_name(self, plugin_instance_id: str) -> str:
-        """DNS-имя Service (по умолчанию совпадает с Deployment)."""
-        deployment = self.deployment_name(plugin_instance_id)
-        suffix = self._config.service_suffix
-        if not suffix:
-            return deployment
-        name = f"{deployment}{suffix if suffix.startswith('-') else '-' + suffix}"
-        if not _DNS_LABEL.fullmatch(name) or len(name) > 253:
-            raise RuntimeConfigError(f"некорректное имя Service: {name!r}")
-        return name
+        """Service ВСЕГДА имеет то же canonical имя, что и Deployment."""
+        return self.deployment_name(plugin_instance_id)
 
     def health_url(self, plugin_instance_id: str) -> str:
         """In-cluster URL пробы: ``http://<svc>.<ns>.svc:<port>/health``."""
         service = self.service_name(plugin_instance_id)
+        return (
+            f"http://{service}.{self._config.namespace}.{self._cluster_domain}"
+            f":{self._config.service_port}{self._config.health_path}"
+        )
+
+    async def _health_url_async(self, plugin_instance_id: str) -> str:
+        service = await self._deployment_name_async(plugin_instance_id)
         return (
             f"http://{service}.{self._config.namespace}.{self._cluster_domain}"
             f":{self._config.service_port}{self._config.health_path}"
@@ -533,8 +753,9 @@ class K8sScalePort:
         «число из GitOps-манифеста»: иначе повторный wake застанет рассинхрон
         (contract ``ScalePort``, §7.4). 404/API -> ``ScaleUnavailable``.
         """
-        name = self.deployment_name(plugin_instance_id)
+        name = "<unresolved>"
         try:
+            name = await self._deployment_name_async(plugin_instance_id)
             response = await self._api.request("GET", self._scale_path(name))
         except K8sApiNotFound as exc:
             raise ScaleUnavailable(
@@ -557,6 +778,10 @@ class K8sScalePort:
                 detail="k8s вернул не объект Scale (нарушение контракта API)",
             )
         replicas = (response.body.get("spec") or {}).get("replicas")
+        # autoscaling/v1 omits Scale.spec.replicas for the zero value: an
+        # omitted field means zero replicas, not a malformed object.
+        if replicas is None:
+            replicas = 0
         if not isinstance(replicas, int) or isinstance(replicas, bool) or replicas < 0:
             raise ScaleUnavailable(
                 plugin_instance_id=plugin_instance_id,
@@ -581,7 +806,13 @@ class K8sScalePort:
                 plugin_instance_id=plugin_instance_id,
                 detail=f"replicas={replicas} превышает max_replicas={self._max_replicas} (§7.4: 0/1)",
             )
-        name = self.deployment_name(plugin_instance_id)
+        try:
+            name = await self._deployment_name_async(plugin_instance_id)
+        except Exception as exc:  # noqa: BLE001 - durable projection failure
+            raise ScaleUnavailable(
+                plugin_instance_id=plugin_instance_id,
+                detail=f"canonical Deployment name недоступен: {type(exc).__name__}",
+            ) from exc
         body = {
             "apiVersion": "autoscaling/v1",
             "kind": SCALE_KIND,
@@ -618,8 +849,17 @@ class K8sScalePort:
 
         # Подтверждение: API вернул применённое значение. «Отправили и забыли»
         # здесь недопустимо — activator считает wake успешным только по факту.
+        if response.body.get("kind") != SCALE_KIND:
+            raise ScaleUnavailable(
+                plugin_instance_id=plugin_instance_id,
+                detail="k8s вернул не объект Scale (нарушение контракта API)",
+            )
         applied = (response.body.get("spec") or {}).get("replicas")
-        if applied is not None and (not isinstance(applied, int) or applied != replicas):
+        # autoscaling/v1 omits Scale.spec.replicas for the zero value: omitted
+        # means zero ONLY when zero was requested; a missing field for any
+        # non-zero target stays a hard confirmation failure (no silent wake).
+        effective = 0 if applied is None and replicas == 0 else applied
+        if not isinstance(effective, int) or isinstance(effective, bool) or effective != replicas:
             raise ScaleUnavailable(
                 plugin_instance_id=plugin_instance_id,
                 detail=f"deployments/scale не подтвердил replicas={replicas} (получено {applied!r})",
@@ -649,7 +889,14 @@ class K8sScalePort:
         if mode is ReadinessMode.EITHER and status_ready:
             return True
 
-        probe = await self._probe.probe(self.health_url(plugin_instance_id))
+        try:
+            health_url = await self._health_url_async(plugin_instance_id)
+        except Exception as exc:  # noqa: BLE001 - durable projection failure
+            raise NotReady(
+                plugin_instance_id=plugin_instance_id,
+                detail=f"canonical Service name недоступен: {type(exc).__name__}",
+            ) from exc
+        probe = await self._probe.probe(health_url)
         if probe.error is not None:
             # ЯВНАЯ ошибка: readiness probe не отвечает, а «тихий успех»
             # привёл бы к connection-refused на первом же запросе (§7.4).
@@ -669,8 +916,9 @@ class K8sScalePort:
 
     async def _status_ready(self, plugin_instance_id: str) -> bool:
         """Прочитать ``Deployment.status.readyReplicas`` (read-only RBAC)."""
-        name = self.deployment_name(plugin_instance_id)
+        name = "<unresolved>"
         try:
+            name = await self._deployment_name_async(plugin_instance_id)
             response = await self._api.request("GET", self._deployment_path(name))
         except K8sApiNotFound as exc:
             raise NotReady(
@@ -901,6 +1149,8 @@ class ConfigMapStateStore:
     при этом идёт через POST create, и 409 от параллельного создания = ``False``.
     """
 
+    scoped_identity = True
+
     def __init__(
         self,
         *,
@@ -909,13 +1159,19 @@ class ConfigMapStateStore:
         save_attempts: int = 3,
         client: Any = None,
         auth: InClusterAuth | None = None,
+        token_provider: Any = None,
     ) -> None:
         if not isinstance(config, RuntimeConfig):
             raise RuntimeConfigError("ConfigMapStateStore requires RuntimeConfig")
         if not isinstance(save_attempts, int) or save_attempts < 1:
             raise RuntimeConfigError("save_attempts должен быть >= 1")
         self._config = config
-        self._api: K8sApiPort = api or K8sApiClient(auth=auth, client=client)
+        self._api: K8sApiPort = _resolve_scoped_k8s_api(
+            api=api,
+            token_provider=token_provider,
+            auth=auth,
+            client=client,
+        )
         self._save_attempts = save_attempts
 
     @property
@@ -1126,5 +1382,8 @@ __all__ = [
     "encode_state",
     "normalize_k8s_name",
     "plugin_deployment_name",
+    "plugin_resource_name",
+    "plugin_service_name",
     "state_key",
+    "validate_plugin_resource_name",
 ]

@@ -42,8 +42,11 @@ from .build import (
 )
 from .config import (
     DEFAULT_STATE_CONFIGMAP,
+    ENV_GATEWAY_URL,
+    ENV_IMAGE_PULL_SECRET,
     ENV_KMS_KEY_REF,
     ENV_NAMESPACE,
+    InternalGatewayUrl,
     RuntimeConfig,
 )
 from .cosign_adapter import (
@@ -59,6 +62,27 @@ from .cosign_adapter import (
     kms_verify_command,
     prepare_ref,
     verify_cosign_stdout,
+)
+from .deployment_admin import (
+    ArtifactProvenanceError,
+    DeploymentAdminError,
+    DeploymentConfigurationError,
+    DeploymentConflictError,
+    DeploymentNotFoundError,
+    DeploymentOwnershipError,
+    DeploymentSecretError,
+    DeploymentStateError,
+    DeploymentUnavailableError,
+    K8sDeploymentAdmin,
+)
+from .secret_projection import SecretProjectionPort, SecretReference
+from .token_provider import (
+    ServiceAccountTokenError,
+    ServiceAccountTokenProvider,
+    ServiceAccountTokenProviderPort,
+    TokenProviderClosedError,
+    TokenProviderConfigurationError,
+    TokenRequestError,
 )
 from .errors import PluginRuntimeError, RuntimeConfigError
 from .k8s_scale import (
@@ -79,6 +103,8 @@ from .k8s_scale import (
     encode_state,
     normalize_k8s_name,
     plugin_deployment_name,
+    plugin_resource_name,
+    plugin_service_name,
     state_key,
 )
 from .proxy import (
@@ -99,10 +125,32 @@ __all__ = [
     "RUNTIME_OVERRIDES",
     "RuntimePorts",
     "build_runtime_ports",
+    # admin deployment lifecycle
+    "ArtifactProvenanceError",
+    "DeploymentAdminError",
+    "DeploymentConfigurationError",
+    "DeploymentConflictError",
+    "DeploymentNotFoundError",
+    "DeploymentOwnershipError",
+    "DeploymentSecretError",
+    "DeploymentStateError",
+    "DeploymentUnavailableError",
+    "K8sDeploymentAdmin",
+    "SecretProjectionPort",
+    "SecretReference",
+    "ServiceAccountTokenError",
+    "ServiceAccountTokenProvider",
+    "ServiceAccountTokenProviderPort",
+    "TokenProviderClosedError",
+    "TokenProviderConfigurationError",
+    "TokenRequestError",
     # конфигурация / ошибки
     "DEFAULT_STATE_CONFIGMAP",
+    "ENV_GATEWAY_URL",
+    "ENV_IMAGE_PULL_SECRET",
     "ENV_KMS_KEY_REF",
     "ENV_NAMESPACE",
+    "InternalGatewayUrl",
     "RuntimeConfig",
     "PluginRuntimeError",
     "RuntimeConfigError",
@@ -137,6 +185,8 @@ __all__ = [
     "encode_state",
     "normalize_k8s_name",
     "plugin_deployment_name",
+    "plugin_resource_name",
+    "plugin_service_name",
     "state_key",
     # proxy
     "HEADER_AUTHORIZATION",

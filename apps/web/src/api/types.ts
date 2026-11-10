@@ -209,6 +209,152 @@ export interface ApiClient {
   /** Compatibility alias used by the existing project overview feature. */ lifecycle(projectId: Id, action: "launch" | "pause" | "resume" | "complete" | "reload"): Promise<void>;
   /** Plugin-платформа (дизайн v4): установленные плагины компании + фича-флаг. */
   listAdminPlugins(companyId: Id): Promise<AdminPluginsResponse>;
+  /**
+   * Plugin-модуль: создание источника из template-репозитория и привязка scope.
+   * UI отправляет только manifest и точный cabinet/project — credentials
+   * выпускает сервер, Git-токен в браузер не попадает.
+   */
+  createPluginSource(companyId: Id, pluginId: Id, manifest: JsonObject): Promise<ModuleSourceResponse>;
+  getPluginSource(companyId: Id, pluginId: Id): Promise<ModuleSourceResponse>;
+  bindPluginSourceScope(companyId: Id, pluginId: Id, cabinetId: string, projectId: string): Promise<ModuleSourceResponse>;
+  /** Pre-approval публикации: привязывает разрешение к конкретному digest. */
+  approvePluginPublication(body: PluginPublicationApprovalRequest): Promise<PluginPublicationApprovalResponse>;
+  /** Жизненный цикл: digest и task name выбирает сервер из durable grant. */
+  grantPlugin(body: PluginGrantRequest): Promise<PluginGrantResponse>;
+  revokePlugin(companyId: Id, pluginId: Id): Promise<PluginLifecycleResponse>;
+  uninstallPlugin(companyId: Id, pluginId: Id): Promise<PluginLifecycleResponse>;
+  wakePlugin(companyId: Id, pluginId: Id): Promise<PluginLifecycleResponse>;
+  /** Employee/public runtime bootstrap (task01). */
+  getPluginBootstrap(companyId: Id, pluginId: Id, routePath?: string): Promise<PluginBootstrapResponse>;
+  getPublicPluginBootstrap(companyId: Id, pluginId: Id, routePath?: string): Promise<PluginBootstrapResponse>;
+}
+
+/**
+ * `ModuleSourceResponse` (`plugin_sources.py`). Публичные метаданные
+ * источника: credential-ref намеренно отсутствует.
+ */
+export interface ModuleSourceResponse {
+  id: string;
+  company_id: string;
+  plugin_id: string;
+  plugin_instance_id: string;
+  cabinet_id: string | null;
+  project_id: string | null;
+  provider: "github_app";
+  repo_id: number;
+  full_name: string;
+  private: boolean;
+  default_branch: string;
+  expected_ref: string;
+  trusted_workflow_ref: string;
+  expected_signer_identity: string;
+  status: "provisioning" | "ready" | "disabled";
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * `GrantResponse` (`plugin_admin.py`).
+ *
+ * `claims` намеренно не типизирован: в нём короткоживущий capability-токен,
+ * и UI не должен его читать. Поле присутствует в ответе, но не используется.
+ */
+export interface PluginGrantResponse {
+  company_id: string;
+  plugin_id: string;
+  plugin_instance_id: string;
+  manifest_version: string;
+  artifact_digest: string;
+  grant_id: string;
+  grant_status: string;
+  capabilities: string[];
+  database_name: string;
+  schema_name: string;
+  bucket: string;
+  prefix: string;
+  webhook_path: string;
+  pluginpage_path: string;
+  replayed: boolean;
+}
+
+/** Общий ответ `revoke`/`uninstall`/`wake`: те же границы (company, plugin). */
+export interface PluginLifecycleResponse {
+  company_id: string;
+  plugin_id: string;
+  grant_id: string;
+}
+
+/** Тело `grant`: клиент выбирает только capabilities/egress/квоты. */
+export interface PluginGrantRequest {
+  readonly company_id: string;
+  readonly plugin_id: string;
+  readonly manifest_version: string;
+  readonly artifact_digest: string;
+  readonly capabilities: {
+    readonly capabilities: readonly string[];
+  };
+}
+
+/**
+ * `PublicationApprovalResponse` (`plugin_admin.py`).
+ *
+ * `created`/`replayed` различают новую запись и повтор того же approve: UI не
+ * должен показывать второй approve как новое разрешение.
+ */
+export interface PluginPublicationApprovalResponse {
+  approval_id: string;
+  company_id: string;
+  plugin_id: string;
+  manifest_version: string;
+  artifact_digest: string;
+  capabilities: string[];
+  created_by: string;
+  created_at: string;
+  consumed_at: string | null;
+  created: boolean;
+  replayed: boolean;
+}
+
+/** Тело approve: client выбирает только capabilities, не политику. */
+export interface PluginPublicationApprovalRequest {
+  readonly company_id: string;
+  readonly plugin_id: string;
+  readonly manifest_version: string;
+  readonly artifact_digest: string;
+  readonly capabilities: { readonly capabilities: readonly string[] };
+}
+
+export interface RpcOperationResponse {
+  capability_id: string;
+  capability_version: string;
+  operation: string;
+  http_method: "GET" | "POST";
+  backend_path: string;
+  public: boolean;
+}
+
+export interface PluginScopeResponse {
+  company_id: string;
+  cabinet_id?: string;
+  project_id?: string;
+  session_id?: string;
+}
+
+export interface PluginBootstrapResponse {
+  plugin_id: string;
+  manifest_version: string;
+  artifact_digest: string;
+  static_origin: string;
+  /** Exact server-derived shell origin for iframe.name and static frame-ancestors. */
+  plugin_shell_origin: string;
+  frontend_entry: string;
+  frontend_base_path: string;
+  route_path: string;
+  capabilities: string[];
+  rpc_operations: RpcOperationResponse[];
+  public_pages: string[];
+  scope: PluginScopeResponse;
+  grant_expires_at?: string;
 }
 
 /** Ответ `GET /api/v1/admin/plugins/?company_id=...` (plugin_admin.py). */

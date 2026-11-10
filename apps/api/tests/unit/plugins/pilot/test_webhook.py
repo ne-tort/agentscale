@@ -153,8 +153,8 @@ def test_signature_uses_compare_digest_and_hmac_sha256() -> None:
 
 def test_webhook_secret_from_env_not_plaintext() -> None:
     raw = read_text(APP_PATH)
-    assert "PLUGIN_WEBHOOK_SECRET" in raw
-    assert 'os.environ.get("PLUGIN_WEBHOOK_SECRET", "")' in raw
+    assert "WEBHOOK_SECRET" in raw
+    assert 'os.environ.get("WEBHOOK_SECRET", "")' in raw
     # Секрет не захардкожен в коде: пустой env => отказ (fail-closed).
     assert 'if not WEBHOOK_SECRET' in raw
 

@@ -7,7 +7,7 @@ Acceptance-критерии задачи:
   * ошибка ``poll()``/``sync()`` не глотается (fail-closed);
   * аудит watcher'а не содержит секретов/DSN.
 
-Тесты НАПИСАНЫ, НО НЕ ЗАПУСКАЛИСЬ (verification freeze, план миграции §0.2).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 """
 
 from __future__ import annotations

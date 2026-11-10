@@ -1,6 +1,6 @@
 """Барьер №1: NP с выдуманными лейблами НЕ применяется, as-built — применяется.
 
-Тесты НАПИСАНЫ, НО НЕ ЗАПУСКАЛИСЬ (verification freeze, план миграции §0.2).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 
 Ключевой сценарий (постановка задачи): задача 08 могла сгенерировать NP по
 дизайну дословно (`app: minio` / `app: kafka`). Такая NP «успешно» применяется,
@@ -132,25 +132,35 @@ def test_generated_np_with_as_built_labels_is_ok() -> None:
     assert applied == [np]
 
 
-def test_generated_np_matches_live_manifest_of_task_14() -> None:
-    """`manifest="auto"`: живой манифест задачи 14 тоже сверяется с эталоном."""
+def test_generated_full_np_is_rejected_by_emergency_live_manifest() -> None:
+    """Emergency live manifest разрешает только gateway/DNS, не полный target policy."""
     np = generated_np("plugin")
-    assert assert_generated_policy_matches_as_built(np, "plugin", manifest="auto") is None
-    # Явная передача пути и текста тоже работают.
-    assert assert_generated_policy_matches_as_built(np, "plugin", manifest=MANIFEST_PLUGIN) is None
     text = MANIFEST_PLUGIN.read_text(encoding="utf-8")
-    assert assert_generated_policy_matches_as_built(np, "plugin", manifest=text) is None
+    for manifest in ("auto", MANIFEST_PLUGIN, text):
+        with pytest.raises(PolicyAlignmentError) as caught:
+            assert_generated_policy_matches_as_built(np, "plugin", manifest=manifest)
+        assert caught.value.reason == "manifest_drift"
 
 
-def test_live_manifest_contains_all_as_built_labels() -> None:
-    """Комментарии (`# app: minio`) НЕ должны ложно срабатывать как дрейф."""
+def test_emergency_live_manifest_allows_only_gateway_and_dns() -> None:
+    """Emergency fail-closed не возвращает capability destinations или их порты."""
     text = load_as_built_manifest_text("plugin")
-    assert "app.kubernetes.io/name: agentscale-minio" in text
-    assert "app.kubernetes.io/name: agentscale-kafka" in text
-    # В комментариях файла есть `app: agentscale-postgres` — чистим #-строки.
-    assert_generated_policy_matches_as_built(
-        generated_np("plugin"), "plugin", manifest=text
-    )
+    for required in (
+        "app: plugin-gateway", "port: 8080", "k8s-app: kube-dns", "port: 53",
+    ):
+        assert required in text
+    for forbidden in (
+        "app: tenant-postgres",
+        "app: pgbouncer",
+        "app: egress-proxy",
+        "app.kubernetes.io/name: agentscale-minio",
+        "app.kubernetes.io/name: agentscale-kafka",
+        "port: 5432",
+        "port: 6432",
+        "port: 9000",
+        "port: 9092",
+    ):
+        assert forbidden not in text
 
 
 def test_manifest_drift_is_detected() -> None:

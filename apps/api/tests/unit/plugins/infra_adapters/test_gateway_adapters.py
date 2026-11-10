@@ -18,8 +18,12 @@ from typing import Any
 
 import pytest
 
-from prodavan.application.plugins.gateway.errors import GatewayErrorCode
+from prodavan.application.plugins.gateway.errors import (
+    BackendResponseTooLargeError,
+    GatewayErrorCode,
+)
 from prodavan.application.plugins.gateway.headers import (
+    HEADER_ARTIFACT_DIGEST,
     HEADER_CAPABILITY_TOKEN,
     build_forward_headers,
 )
@@ -51,6 +55,7 @@ from prodavan.infrastructure.plugins.adapters.gateway_adapters import (
 )
 
 from .conftest import (
+    TEST_DIGEST,
     WEBHOOK_SECRET,
     WEBHOOK_SECRET_OLD,
     FakeActivator,
@@ -271,6 +276,48 @@ async def test_rate_limit_separate_anon_bucket_and_fail_closed_redis() -> None:
         await down.claim_delivery(key="d", ttl_seconds=10, token="t")
 
 
+@pytest.mark.asyncio
+async def test_delivery_lease_in_progress_commit_and_duplicate() -> None:
+    redis = FakeRedis()
+    rl = RedisRateLimitAdapter(client=redis)
+    first = await rl.claim_delivery_lease(
+        key="delivery:lease", ttl_seconds=3600, lease_seconds=30, token="token-a"
+    )
+    assert first.status is DeliveryStatus.FIRST
+    active = await rl.claim_delivery_lease(
+        key="delivery:lease", ttl_seconds=3600, lease_seconds=30, token="token-a"
+    )
+    assert active.status is DeliveryStatus.IN_PROGRESS
+    assert active.retry_after_seconds and active.retry_after_seconds > 0
+    assert await rl.commit_delivery(
+        key="delivery:lease", ttl_seconds=3600, token="token-a"
+    ) is True
+    done = await rl.claim_delivery_lease(
+        key="delivery:lease", ttl_seconds=3600, lease_seconds=30, token="token-a"
+    )
+    assert done.status is DeliveryStatus.DUPLICATE
+    assert done.previous_token == "token-a"
+
+
+@pytest.mark.asyncio
+async def test_delivery_release_allows_retry_and_expired_lease_can_be_reclaimed() -> None:
+    redis = FakeRedis()
+    rl = RedisRateLimitAdapter(client=redis)
+    await rl.claim_delivery_lease(
+        key="delivery:retry", ttl_seconds=3600, lease_seconds=30, token="token-a"
+    )
+    await rl.release_delivery(key="delivery:retry", token="token-a")
+    retry = await rl.claim_delivery_lease(
+        key="delivery:retry", ttl_seconds=3600, lease_seconds=30, token="token-a"
+    )
+    assert retry.status is DeliveryStatus.FIRST
+    redis.store["delivery:retry"] = f"processing:{redis.now_ms - 1}:token-a"
+    reclaimed = await rl.claim_delivery_lease(
+        key="delivery:retry", ttl_seconds=3600, lease_seconds=30, token="token-a"
+    )
+    assert reclaimed.status is DeliveryStatus.FIRST
+
+
 # ---------------------------------------------------------------------------
 # Authorization: Bearer <WakeResult.token> — ЯВНО, оба заголовка
 # ---------------------------------------------------------------------------
@@ -279,6 +326,7 @@ async def test_rate_limit_separate_anon_bucket_and_fail_closed_redis() -> None:
 def test_with_trusted_bearer_adds_authorization_and_keeps_capability_header() -> None:
     incoming = {
         "X-Plugin-Capability-Token": "fresh-wake-token",
+        "X-Plugin-Artifact-Digest": "sha256:" + "f" * 64,
         "Authorization": "Bearer client-forged",
         "Cookie": "session=client",
         "Host": "evil.example",
@@ -286,13 +334,28 @@ def test_with_trusted_bearer_adds_authorization_and_keeps_capability_header() ->
         "Accept": "application/json",
     }
     out = build_forward_headers(incoming, _claims(), _grant("fresh-wake-token"))
+    # Runtime projection adds this server-side after client sanitization.
+    out["X-Plugin-Grant-ID"] = "grant-1"
+    out["x-plugin-grant-id"] = "grant-client-spoof"
     safe = with_trusted_bearer(out, capability_token="fresh-wake-token")
     assert safe[HEADER_CAPABILITY_TOKEN] == "fresh-wake-token"
+    assert safe[HEADER_ARTIFACT_DIGEST] == TEST_DIGEST
+    assert safe["X-Plugin-Grant-ID"] == "grant-1"
+    assert "grant-client-spoof" not in safe.values()
+    assert "sha256:" + "f" * 64 not in safe.values()
     assert safe[HEADER_AUTHORIZATION] == "Bearer fresh-wake-token"
     assert "Cookie" not in safe
     assert "Host" not in safe
     assert "Content-Length" not in safe
     assert safe["Accept"] == "application/json"
+
+
+def test_with_trusted_bearer_rejects_malformed_grant_identity() -> None:
+    with pytest.raises(GatewayAdapterError, match="grant id"):
+        with_trusted_bearer(
+            {"X-Plugin-Grant-ID": "bad\r\ngrant"},
+            capability_token="fresh-wake-token",
+        )
 
 
 def test_with_trusted_bearer_no_token_for_anon_and_static() -> None:
@@ -314,9 +377,16 @@ async def test_activation_adapter_maps_wake_result_token_to_lease() -> None:
         instance_resolver=MappingInstanceResolver({("mod_equipment", "co-123"): "inst_abc"}),
         readiness=ReadyProbe(ready=True),
     )
-    lease = await adapter.wake(plugin_id="mod_equipment", company_id="co-123")
+    lease = await adapter.wake(
+        plugin_id="mod_equipment", company_id="co-123", plugin_instance_id="inst_abc"
+    )
     assert activator.wake_calls == [("inst_abc", None)]
     assert lease.capability_token == "FRESH-JWT-FROM-WAKE"
+    assert lease.artifact_digest == TEST_DIGEST
+    assert lease.grant_id == "grant-1"
+    assert lease.company_id == "co-123"
+    assert lease.plugin_id == "mod_equipment"
+    assert lease.plugin_instance_id == "inst_abc"
     assert lease.ready is True
     assert await adapter.wait_ready(lease, timeout_seconds=5.0) is True
     assert adapter.wait_calls[0][0] == "mod_equipment"
@@ -327,23 +397,111 @@ async def test_activation_wait_ready_repolls_readiness_port() -> None:
     """``wait_ready`` — ПОВТОРНЫЙ опрос ReadinessPort, а не «всегда True»."""
     probe = ReadyProbe(ready=False)
     adapter = ActivationAdapter(
-        activator=FakeActivator(),
+        activator=FakeActivator(plugin_id="p", company_id="c"),
         instance_resolver=MappingInstanceResolver({("p", "c"): "inst_1"}),
         readiness=probe,
     )
-    lease = await adapter.wake(plugin_id="p", company_id="c")
+    lease = await adapter.wake(
+        plugin_id="p", company_id="c", plugin_instance_id="inst_1"
+    )
     assert await adapter.wait_ready(lease, timeout_seconds=5.0) is False
+    assert probe.calls == ["inst_1"]
+    from dataclasses import replace
+
+    expired = replace(lease, expires_at=0.0)
+    assert await adapter.wait_ready(expired, timeout_seconds=5.0) is False
     assert probe.calls == ["inst_1"]
 
 
 @pytest.mark.asyncio
 async def test_activation_unknown_instance_is_fail_closed() -> None:
+    activator = FakeActivator()
     adapter = ActivationAdapter(
-        activator=FakeActivator(),
+        activator=activator,
         instance_resolver=MappingInstanceResolver({}),
     )
     with pytest.raises(GatewayAdapterError):
         await adapter.wake(plugin_id="unknown", company_id="c")
+    assert activator.wake_calls == []
+
+
+
+@pytest.mark.asyncio
+async def test_activation_rejects_grant_resolver_instance_mismatch() -> None:
+    adapter = ActivationAdapter(
+        activator=FakeActivator(),
+        instance_resolver=MappingInstanceResolver({("p", "c"): "inst-b"}),
+    )
+    with pytest.raises(GatewayAdapterError):
+        await adapter.wake(plugin_id="p", company_id="c", plugin_instance_id="inst-a")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("grant_id", None),
+        ("grant_id", ""),
+        ("company_id", None),
+        ("company_id", "co-other"),
+        ("plugin_id", None),
+        ("plugin_id", "other-plugin"),
+        ("plugin_instance_id", None),
+        ("plugin_instance_id", "inst-other"),
+        ("artifact_digest", None),
+        ("artifact_digest", "not-a-digest"),
+        ("sub", None),
+        ("sub", "plugin:other:co-other:inst-other"),
+    ),
+)
+async def test_activation_rejects_missing_or_mismatched_wake_claims(
+    field: str, value: str | None
+) -> None:
+    claims = {
+        "grant_id": "grant-1",
+        "company_id": "c",
+        "plugin_id": "p",
+        "plugin_instance_id": "inst-a",
+        "artifact_digest": TEST_DIGEST,
+        "sub": "plugin:p:c:inst-a",
+    }
+    if value is None:
+        claims.pop(field)
+    else:
+        claims[field] = value
+    adapter = ActivationAdapter(
+        activator=FakeActivator(
+            claims=claims, plugin_id="p", company_id="c"
+        ),
+        instance_resolver=MappingInstanceResolver({("p", "c"): "inst-a"}),
+    )
+    with pytest.raises(GatewayAdapterError):
+        await adapter.wake(
+            plugin_id="p", company_id="c", plugin_instance_id="inst-a"
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "result_kwargs",
+    (
+        {"omit_result_instance": True},
+        {"result_instance_id": "inst-other"},
+    ),
+)
+async def test_activation_rejects_missing_or_mismatched_result_instance(
+    result_kwargs: dict[str, Any],
+) -> None:
+    adapter = ActivationAdapter(
+        activator=FakeActivator(
+            plugin_id="p", company_id="c", **result_kwargs
+        ),
+        instance_resolver=MappingInstanceResolver({("p", "c"): "inst-a"}),
+    )
+    with pytest.raises(GatewayAdapterError, match="plugin_instance_id"):
+        await adapter.wake(
+            plugin_id="p", company_id="c", plugin_instance_id="inst-a"
+        )
 
 
 @pytest.mark.asyncio
@@ -354,13 +512,16 @@ async def test_authorization_is_set_from_fresh_wake_result_token() -> None:
         activator=activator,
         instance_resolver=MappingInstanceResolver({("mod_equipment", "co-123"): "inst_abc"}),
     )
-    lease = await activation.wake(plugin_id="mod_equipment", company_id="co-123")
+    lease = await activation.wake(
+        plugin_id="mod_equipment", company_id="co-123", plugin_instance_id="inst_abc"
+    )
 
     claims = _claims()
     # Имитируем proxy.py: grant получает НОВЫЙ токен из lease.
     effective_grant = GatewayGrant(
-        grant_id="grant-1", active=True,
+        grant_id="grant-1", plugin_instance_id="inst_abc", active=True,
         capability_token=lease.capability_token, operations=frozenset(),
+        artifact_digest=TEST_DIGEST,
     )
     trusted = build_forward_headers(
         {"Authorization": "Bearer client-forged", "Cookie": "session=stale"},
@@ -376,6 +537,9 @@ async def test_authorization_is_set_from_fresh_wake_result_token() -> None:
     assert sent[HEADER_AUTHORIZATION] == "Bearer NEW-FRESH-TOKEN"
     assert "Cookie" not in sent
     assert sent["X-Plugin-ID"] == "mod_equipment"
+    assert sent[HEADER_ARTIFACT_DIGEST] == TEST_DIGEST
+    assert TEST_DIGEST not in http.requests[0]["url"]
+    assert "NEW-FRESH-TOKEN" not in http.requests[0]["url"]
 
 
 @pytest.mark.asyncio
@@ -397,6 +561,8 @@ async def test_injector_wraps_any_backend_http_port() -> None:
     headers = inner.requests[0].headers
     assert headers[HEADER_AUTHORIZATION] == "Bearer fresh-wake-token"
     assert headers[HEADER_CAPABILITY_TOKEN] == "fresh-wake-token"
+    assert headers[HEADER_ARTIFACT_DIGEST] == TEST_DIGEST
+    assert headers["X-Plugin-Grant-ID"] == "grant-1"
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +603,50 @@ async def test_plain_response_is_read_fully_and_closed() -> None:
     assert result.body == b'{"ok":true}'
     assert result.stream is None
     assert response.closed is True
+    assert http.send_kwargs[-1]["stream"] is True
+
+
+@pytest.mark.asyncio
+async def test_plain_response_content_length_cap_closes_before_body_read() -> None:
+    response = FakeHttpxResponse(
+        headers={"Content-Type": "application/json", "Content-Length": "9"},
+        chunks=[b"123456789"],
+    )
+    http = FakeHttpxClient(response)
+    backend = BackendHttpAdapter(base_url="http://plugin:8080", client=http)
+    with pytest.raises(BackendResponseTooLargeError):
+        await backend.send(make_backend_request(stream=False, max_response_bytes=8))
+    assert response.closed is True
+    assert response.read_calls == 0
+    assert response.iteration_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_plain_response_chunked_cap_does_not_buffer_remainder() -> None:
+    response = FakeHttpxResponse(
+        headers={"Content-Type": "application/json"},
+        chunks=[b"1234", b"56", b"7", b"unreachable"],
+    )
+    http = FakeHttpxClient(response)
+    backend = BackendHttpAdapter(base_url="http://plugin:8080", client=http)
+    with pytest.raises(BackendResponseTooLargeError):
+        await backend.send(make_backend_request(stream=False, max_response_bytes=6))
+    assert response.closed is True
+    assert response.read_calls == 0
+    assert response.iteration_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_backend_url_preserves_raw_query_and_trailing_path() -> None:
+    http = FakeHttpxClient(FakeHttpxResponse(chunks=None, body=b"ok"))
+    backend = BackendHttpAdapter(base_url="http://plugin:8080", client=http)
+    await backend.send(make_backend_request(
+        path="/events/handler/",
+        query_string=b"b=2&a=1&a=0&company_id=evil",
+    ))
+    assert http.requests[0]["url"] == (
+        "http://plugin:8080/events/handler/?b=2&a=1&a=0&company_id=evil"
+    )
 
 
 @pytest.mark.asyncio
@@ -583,7 +793,8 @@ async def test_grant_active_public_pages_and_egress_from_store() -> None:
         [
             GrantRecord(
                 grant_id="grant-1", plugin_id="p", company_id="c",
-                operations=frozenset({"read"}),
+                plugin_instance_id="inst-p-c", operations=frozenset({"read"}),
+                artifact_digest=TEST_DIGEST,
                 public_pages=frozenset({"/public", "/docs/"}),
                 egress_mode="webhooks-only",
                 egress_allowed_hosts=("hooks.example.com",),
@@ -595,6 +806,8 @@ async def test_grant_active_public_pages_and_egress_from_store() -> None:
     assert grant is not None and grant.active and grant.grant_id == "grant-1"
     # Свежий capability-токен приходит из WakeLease, НЕ из БД.
     assert grant.capability_token == ""
+    assert grant.plugin_instance_id == "inst-p-c"
+    assert grant.artifact_digest == TEST_DIGEST
     assert await adapter.public_pages(plugin_id="p", company_id="c") == frozenset({"/public", "/docs/"})
     policy = await adapter.egress_policy(plugin_id="p", company_id="c")
     assert policy["mode"] == "webhooks-only"
@@ -606,17 +819,45 @@ async def test_grant_active_public_pages_and_egress_from_store() -> None:
     assert (await adapter.egress_policy(plugin_id="p", company_id="c"))["mode"] == "none"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "digest",
+    ("", "not-a-digest", "sha256:" + "A" * 64, "sha256:" + "g" * 64),
+)
+async def test_grant_adapter_rejects_missing_or_malformed_artifact_digest(
+    digest: str,
+) -> None:
+    store = InMemoryGrantStore([
+        GrantRecord(
+            grant_id="grant-1",
+            plugin_id="p",
+            company_id="c",
+            plugin_instance_id="inst-a",
+            artifact_digest=digest,
+        )
+    ])
+    adapter = GrantAdapter(store)
+    assert await adapter.active_grant(plugin_id="p", company_id="c") is None
+
+
 # ---------------------------------------------------------------------------
 # Вспомогательные двойники
 # ---------------------------------------------------------------------------
 
 
 def _claims() -> GatewayClaims:
-    return GatewayClaims(plugin_id="mod_equipment", company_id="co-123", subject_id="employee:emp-1")
+    return GatewayClaims(
+        plugin_id="mod_equipment", company_id="co-123",
+        subject_id="employee:emp-1", plugin_instance_id="inst_abc",
+        artifact_digest=TEST_DIGEST,
+    )
 
 
 def _grant(token: str) -> GatewayGrant:
-    return GatewayGrant(grant_id="grant-1", active=True, capability_token=token)
+    return GatewayGrant(
+        grant_id="grant-1", plugin_instance_id="inst_abc",
+        active=True, capability_token=token, artifact_digest=TEST_DIGEST,
+    )
 
 
 class _AuditSink:
@@ -637,7 +878,10 @@ class _NoSession:
 
 class _ActiveGrant:
     async def active_grant(self, *, plugin_id: str, company_id: str) -> GatewayGrant:
-        return GatewayGrant(grant_id="grant-1", active=True)
+        return GatewayGrant(
+            grant_id="grant-1", plugin_instance_id="inst_abc", active=True,
+            artifact_digest=TEST_DIGEST,
+        )
 
     async def public_pages(self, *, plugin_id: str, company_id: str) -> frozenset[str]:
         return frozenset()

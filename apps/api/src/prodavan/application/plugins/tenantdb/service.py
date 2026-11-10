@@ -34,10 +34,10 @@
 from __future__ import annotations
 
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal, Mapping, Protocol, runtime_checkable
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlsplit
 
 from prodavan.application.plugins.tenantdb import sql
 from prodavan.application.plugins.tenantdb.errors import TenantDbError
@@ -129,8 +129,12 @@ class SecretPort(Protocol):
     """Хранилище короткоживущих ``TENANT_DB_DSN`` (§5.5).
 
     DSN с паролем сохраняется как ``secret_ref``; наружу отдаётся только
-    ссылка. Ротация при reinstall/revoke — через ``rotate``.
+    ссылка. Ensure не ротирует; явный rotate только для repair/re-grant.
     """
+
+    async def get(self, *, key: str) -> StoredSecret | None:
+        """Прочитать по stable key; plaintext только в памяти, никогда в БД/логи."""
+        ...
 
     async def put(self, *, key: str, value: str) -> str:
         """Сохранить значение, вернуть ``secret_ref`` (не plaintext)."""
@@ -157,6 +161,14 @@ class AuditPort(Protocol):
 # endregion
 
 
+@dataclass(frozen=True, slots=True)
+class StoredSecret:
+    """Secret value для in-memory проверки DSN; repr не раскрывает plaintext."""
+
+    secret_ref: str
+    value: str = field(repr=False)
+
+
 # region Ответ grant_plugin
 @dataclass(frozen=True, slots=True)
 class TenantDsn:
@@ -179,7 +191,9 @@ class TenantDsn:
     bucket: str
     search_path: str
     rotated: bool = False
-    """``True`` если это повторный grant с ротацией пароля/DSN."""
+    """True только после явного rotate, никогда после обычного ensure/replay."""
+    created: bool = False
+    """True если роль и первичный secret созданы этим вызовом."""
 
     def as_ref(self) -> dict[str, str]:
         """Безопасный словарь для ``env: {TENANT_DB_DSN: {secret_ref: ...}}``."""
@@ -368,6 +382,50 @@ class TenantDatabaseService:
     def _secret_key(self, *, company_id: str, plugin_id: str) -> str:
         """Ключ в SecretPort. Строится из ПРОВЕРЕННЫХ id (вызывается после ``_names``)."""
         return f"{_SECRET_KEY_PREFIX}/{quote(company_id, safe='')}/{quote(plugin_id, safe='')}/TENANT_DB_DSN"
+    async def _read_secret(self, *, key: str, operation: str) -> StoredSecret | None:
+        """Read-only доступ к backend; ошибки не превращаются в отсутствие secret."""
+        secrets_port = self._require_secrets(operation)
+        try:
+            stored = await secrets_port.get(key=key)
+        except Exception:  # noqa: BLE001 - backend error может содержать DSN
+            raise TenantDbError.admin_unavailable(operation, reason="secret read failed") from None
+        if stored is None:
+            return None
+        if (
+            not isinstance(stored, StoredSecret)
+            or not stored.secret_ref.strip()
+            or not isinstance(stored.value, str)
+        ):
+            raise TenantDbError.admin_unavailable(operation, reason="secret read returned invalid value")
+        return stored
+
+    def _dsn_matches(self, value: str, *, database: str, role: str) -> bool:
+        """Проверить область DSN без логирования и без записи plaintext куда-либо."""
+        try:
+            parsed = urlsplit(value)
+            return all(
+                (
+                    parsed.scheme == _DSN_SCHEME,
+                    parsed.username == role,
+                    bool(parsed.password),
+                    parsed.hostname == self._dsn_host,
+                    parsed.port == self._dsn_port,
+                    parsed.path == f"/{database}",
+                    parse_qs(parsed.query).get("sslmode") == [self._dsn_sslmode],
+                )
+            )
+        except (TypeError, ValueError):
+            return False
+
+    async def _cleanup_secret(self, *, key: str, operation: str) -> None:
+        """Идемпотентно удалить secret по stable key через текущий backend."""
+        stored = await self._read_secret(key=key, operation=operation)
+        if stored is None:
+            return
+        try:
+            await self._require_secrets(operation).delete(secret_ref=stored.secret_ref)
+        except Exception:  # noqa: BLE001
+            raise TenantDbError.admin_unavailable(operation, reason="secret cleanup failed") from None
     # endregion
 
     # region Публичный API
@@ -404,6 +462,10 @@ class TenantDatabaseService:
             operation=operation,
             safe_name=db,
         )
+        if not await self._exists(
+            sql.database_exists(db), target=target, operation=operation, safe_name=db
+        ):
+            raise TenantDbError.admin_unavailable(operation, reason="database missing after create")
         # Bootstrap PUBLIC-привилегий здесь НЕ делаем: см. sql.revoke_public_connect.
         # Это ответственность манифестов tenant-кластера (задача 14).
         await self._audit_event(
@@ -415,22 +477,26 @@ class TenantDatabaseService:
         )
         return db
 
-    async def grant_plugin(self, company_id: str, plugin_id: str) -> TenantDsn:
-        """Создать роль и схему плагина, вернуть DSN как ``secret_ref`` (§2.2, §5.5).
+    async def ensure_plugin(self, company_id: str, plugin_id: str) -> TenantDsn:
+        """Ensure без password rotation: существующий DSN читается и проверяется.
 
-        Порядок (важен: ``CREATE SCHEMA ... AUTHORIZATION`` требует, чтобы
-        роль уже существовала):
-          1. ``ensure_company_database`` (идемпотентно);
-          2. ``CREATE ROLE`` если роли нет;
-          3. ``GRANT CONNECT``;
-          4. ``CREATE SCHEMA AUTHORIZATION role`` если схемы нет (в БД компании);
-          5. ``ALTER ROLE SET search_path / statement_timeout / lock_timeout``;
-          6. сохранить DSN в SecretPort, вернуть только ``secret_ref``.
-
-        Повторный вызов идемпотентен по DDL, но **ротирует** DSN (§5.5:
-        ротация при reinstall/revoke), чтобы старый plaintext не жил вечно.
+        Отсутствующий/чужой secret даёт ROTATION_REQUIRED. Скрытой смены пароля нет.
         """
-        operation = "grant_plugin"
+        return await self._ensure_or_rotate(company_id, plugin_id, rotate=False)
+
+    async def grant_plugin(self, company_id: str, plugin_id: str) -> TenantDsn:
+        """Совместимый alias ensure; повторный grant НЕ ротирует пароль."""
+        return await self.ensure_plugin(company_id, plugin_id)
+
+    async def rotate_plugin(self, company_id: str, plugin_id: str) -> TenantDsn:
+        """Явный repair/re-grant: ALTER ROLE PASSWORD + LOGIN + новый secret."""
+        return await self._ensure_or_rotate(company_id, plugin_id, rotate=True)
+
+    async def _ensure_or_rotate(
+        self, company_id: str, plugin_id: str, *, rotate: bool
+    ) -> TenantDsn:
+        """Общий DDL ensure; password/secret мутируются только при create/rotate."""
+        operation = "rotate_plugin" if rotate else "ensure_plugin"
         db, role, schema, path = self._names(company_id, plugin_id, operation=operation)
         bucket = bucket_name(company_id)
         cluster = AdminTarget(scope="cluster")
@@ -441,38 +507,60 @@ class TenantDatabaseService:
         role_present = await self._exists(
             sql.role_exists(role), target=cluster, operation=operation, safe_name=role
         )
-        rotated = role_present
-        password = _new_password()
+        created = not role_present
+        rotated = rotate and role_present
+        password = _new_password() if created or rotate else ""
+        existing_secret: StoredSecret | None = None
+        key = self._secret_key(company_id=company_id, plugin_id=plugin_id)
 
-        if not role_present:
-            # Первый grant: создаём роль. CREATE ROLE уходит ровно один раз.
+        if created:
             await self._exec(
                 sql.create_role(role, password=password),
                 target=cluster,
                 operation=operation,
                 safe_name=role,
             )
-        else:
-            # Повторный grant: роль уже есть → CREATE ROLE НЕ шлём, но
-            # ротируем пароль (§5.5), чтобы новый DSN отличался от старого.
+            if not await self._exists(
+                sql.role_exists(role), target=cluster, operation=operation, safe_name=role
+            ):
+                raise TenantDbError.admin_unavailable(operation, reason="role missing after create")
+        elif rotate:
+            # Единственный путь ALTER ROLE PASSWORD: явный repair/re-grant.
             await self._exec(
                 sql.alter_role_password(role, password=password),
                 target=cluster,
                 operation=operation,
                 safe_name=role,
             )
-            # Роль после revoke может остаться в NOLOGIN — возвращаем LOGIN.
             await self._exec(
                 sql.alter_role_login(role),
                 target=cluster,
                 operation=operation,
                 safe_name=role,
             )
+            if not await self._exists(
+                sql.role_login_enabled(role), target=cluster, operation=operation, safe_name=role
+            ):
+                raise TenantDbError.admin_unavailable(operation, reason="role LOGIN not active after rotate")
+        else:
+            # Replay/repair с живым secret: проверяем область DSN и сохраняем ref.
+            existing_secret = await self._read_secret(key=key, operation=operation)
+            if existing_secret is None or not self._dsn_matches(
+                existing_secret.value, database=db, role=role
+            ):
+                raise TenantDbError.rotation_required(operation, safe_name=role)
 
         # Явный CONNECT (не единственная граница — см. докстринг модуля).
         await self._exec(
             sql.grant_connect(db, role), target=cluster, operation=operation, safe_name=db
         )
+        if not await self._exists(
+            sql.database_connect_granted(db, role),
+            target=cluster,
+            operation=operation,
+            safe_name=db,
+        ):
+            raise TenantDbError.admin_unavailable(operation, reason="CONNECT grant missing after GRANT")
 
         schema_present = await self._exists(
             sql.schema_exists(schema), target=database, operation=operation, safe_name=schema
@@ -484,6 +572,10 @@ class TenantDatabaseService:
                 operation=operation,
                 safe_name=schema,
             )
+            if not await self._exists(
+                sql.schema_exists(schema), target=database, operation=operation, safe_name=schema
+            ):
+                raise TenantDbError.admin_unavailable(operation, reason="schema missing after create")
 
         # search_path БЕЗ версии плагина; таймауты — предохранители.
         for stmt in (
@@ -493,26 +585,28 @@ class TenantDatabaseService:
         ):
             await self._exec(stmt, target=cluster, operation=operation, safe_name=role)
 
-        # DSN с паролем → SecretPort. Наружу только secret_ref.
-        secrets_port = self._require_secrets(operation)
-        key = self._secret_key(company_id=company_id, plugin_id=plugin_id)
-        dsn_value = self._build_dsn(database=db, role=role, password=password)
-        try:
-            if rotated:
-                secret_ref = await secrets_port.rotate(key=key, value=dsn_value)
-            else:
-                secret_ref = await secrets_port.put(key=key, value=dsn_value)
-        except Exception:  # noqa: BLE001 - не прокидываем DSN/пароль в ошибку
-            raise TenantDbError.admin_unavailable(operation, reason="secret store failed") from None
-        finally:
-            # Не держим plaintext в локальных переменных дольше необходимого.
-            del dsn_value, password
+        if created or rotate:
+            # Plaintext существует только в этом блоке и уходит сразу в backend.
+            secrets_port = self._require_secrets(operation)
+            dsn_value = self._build_dsn(database=db, role=role, password=password)
+            try:
+                if rotate and role_present:
+                    secret_ref = await secrets_port.rotate(key=key, value=dsn_value)
+                else:
+                    secret_ref = await secrets_port.put(key=key, value=dsn_value)
+            except Exception:  # noqa: BLE001 - не прокидываем DSN/пароль в ошибку
+                raise TenantDbError.admin_unavailable(operation, reason="secret store failed") from None
+            finally:
+                del dsn_value, password
+        else:
+            assert existing_secret is not None
+            secret_ref = existing_secret.secret_ref
 
         if not isinstance(secret_ref, str) or not secret_ref:
             raise TenantDbError.admin_unavailable(operation, reason="secret store returned empty ref")
 
         await self._audit_event(
-            event="tenantdb.plugin.grant",
+            event="tenantdb.plugin.rotate" if rotate else "tenantdb.plugin.grant",
             company_id=company_id,
             plugin_id=plugin_id,
             payload={
@@ -535,6 +629,7 @@ class TenantDatabaseService:
             bucket=bucket,
             search_path=path,
             rotated=rotated,
+            created=created,
         )
 
     async def revoke_plugin(self, company_id: str, plugin_id: str) -> None:
@@ -551,26 +646,40 @@ class TenantDatabaseService:
         db, role, schema, _path = self._names(company_id, plugin_id, operation=operation)
         cluster = AdminTarget(scope="cluster")
 
-        if not await self._exists(
+        role_present = await self._exists(
             sql.role_exists(role), target=cluster, operation=operation, safe_name=role
-        ):
-            raise TenantDbError.not_found(operation, object_kind="role", safe_name=role)
-
-        await self._exec(
-            sql.alter_role_no_login(role), target=cluster, operation=operation, safe_name=role
         )
-        await self._exec(
-            sql.revoke_connect(db, role), target=cluster, operation=operation, safe_name=db
-        )
+        if role_present:
+            await self._exec(
+                sql.alter_role_no_login(role), target=cluster, operation=operation, safe_name=role
+            )
+            if await self._exists(
+                sql.role_login_enabled(role), target=cluster, operation=operation, safe_name=role
+            ):
+                raise TenantDbError.admin_unavailable(operation, reason="role LOGIN remains after revoke")
+            await self._exec(
+                sql.revoke_connect(db, role), target=cluster, operation=operation, safe_name=db
+            )
+            if await self._exists(
+                sql.database_connect_granted(db, role),
+                target=cluster,
+                operation=operation,
+                safe_name=db,
+            ):
+                raise TenantDbError.admin_unavailable(operation, reason="CONNECT grant remains after REVOKE")
+            # NOLOGIN не завершает уже открытые сессии: рвём их явно по role.
+            await self._exec(
+                sql.terminate_role_sessions(role),
+                target=cluster,
+                operation=operation,
+                safe_name=role,
+            )
 
-        secrets_port = self._require_secrets(operation)
-        key = self._secret_key(company_id=company_id, plugin_id=plugin_id)
-        try:
-            # SecretPort.delete по key не описан в Protocol (только по ref),
-            # поэтому ротируем в пустое значение — старый DSN инвалидируется.
-            await secrets_port.rotate(key=key, value="")
-        except Exception:  # noqa: BLE001
-            raise TenantDbError.admin_unavailable(operation, reason="secret rotation failed") from None
+        # Отсутствующая роль/secret — идемпотентный успех; повтор продолжает cleanup.
+        await self._cleanup_secret(
+            key=self._secret_key(company_id=company_id, plugin_id=plugin_id),
+            operation=operation,
+        )
 
         await self._audit_event(
             event="tenantdb.plugin.revoke",
@@ -600,43 +709,58 @@ class TenantDatabaseService:
         cluster = AdminTarget(scope="cluster")
         database = AdminTarget(scope="database", database=db)
 
-        if not await self._exists(
+        role_present = await self._exists(
             sql.role_exists(role), target=cluster, operation=operation, safe_name=role
-        ):
-            raise TenantDbError.not_found(operation, object_kind="role", safe_name=role)
+        )
+        database_present = await self._exists(
+            sql.database_exists(db), target=cluster, operation=operation, safe_name=db
+        )
 
-        # Отзыв доступа до удаления (мгновенный, на случай активных сессий).
-        await self._exec(
-            sql.alter_role_no_login(role), target=cluster, operation=operation, safe_name=role
-        )
-        # Снимаем явные привилегии и дропаем схему ТОЛЬКО если она есть:
-        # REVOKE ALL ON SCHEMA на отсутствующей схеме вернёт 3F000 в реальном
-        # PostgreSQL (роль могла остаться после частичного uninstall).
-        schema_present = await self._exists(
-            sql.schema_exists(schema), target=database, operation=operation, safe_name=schema
-        )
-        if schema_present:
+        if role_present:
             await self._exec(
-                sql.revoke_all_on_schema(schema, role),
-                target=database,
-                operation=operation,
-                safe_name=schema,
+                sql.alter_role_no_login(role), target=cluster, operation=operation, safe_name=role
             )
+            await self._exec(
+                sql.terminate_role_sessions(role),
+                target=cluster,
+                operation=operation,
+                safe_name=role,
+            )
+
+        schema_present = False
+        if database_present:
+            schema_present = await self._exists(
+                sql.schema_exists(schema), target=database, operation=operation, safe_name=schema
+            )
+        if schema_present:
+            if role_present:
+                await self._exec(
+                    sql.revoke_all_on_schema(schema, role),
+                    target=database,
+                    operation=operation,
+                    safe_name=schema,
+                )
             await self._exec(
                 sql.drop_schema(schema), target=database, operation=operation, safe_name=schema
             )
-        await self._exec(
-            sql.drop_role(role), target=cluster, operation=operation, safe_name=role
-        )
-
-        secrets_port = self._require_secrets(operation)
-        try:
-            await secrets_port.rotate(
-                key=self._secret_key(company_id=company_id, plugin_id=plugin_id),
-                value="",
+        if role_present:
+            await self._exec(
+                sql.drop_role(role), target=cluster, operation=operation, safe_name=role
             )
-        except Exception:  # noqa: BLE001
-            raise TenantDbError.admin_unavailable(operation, reason="secret cleanup failed") from None
+
+        # Подтверждаем факт, а не только отсутствие исключения от драйвера.
+        if await self._exists(
+            sql.role_exists(role), target=cluster, operation=operation, safe_name=role
+        ):
+            raise TenantDbError.admin_unavailable(operation, reason="role still exists after drop")
+        if database_present and await self._exists(
+            sql.schema_exists(schema), target=database, operation=operation, safe_name=schema
+        ):
+            raise TenantDbError.admin_unavailable(operation, reason="schema still exists after drop")
+        await self._cleanup_secret(
+            key=self._secret_key(company_id=company_id, plugin_id=plugin_id),
+            operation=operation,
+        )
 
         await self._audit_event(
             event="tenantdb.plugin.uninstall",
@@ -675,6 +799,10 @@ class TenantDatabaseService:
         await self._exec(
             sql.drop_database(db), target=cluster, operation=operation, safe_name=db
         )
+        if await self._exists(
+            sql.database_exists(db), target=cluster, operation=operation, safe_name=db
+        ):
+            raise TenantDbError.admin_unavailable(operation, reason="database still exists after drop")
 
         await self._audit_event(
             event="tenantdb.company_database.drop",

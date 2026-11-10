@@ -227,6 +227,13 @@ class McpRegisterBody(PluginBody):
         return value
 
 
+class McpInvokeBody(PluginBody):
+    server_id: SafeStr
+    tool_name: SafeStr
+    arguments_json: str = Field(min_length=1, max_length=65_536)
+    arguments_digest: DigestStr
+
+
 class SecretsReadBody(PluginBody):
     secret_ref: SafeStr
 
@@ -261,11 +268,18 @@ class DecisionResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    """Protected hello introspection: exactly eight non-secret claim fields."""
+
     model_config = ConfigDict(extra="forbid")
 
-    status: Literal["ok"] = "ok"
-    surface: Literal["plugin-capabilities"] = "plugin-capabilities"
-    company_id: str
+    plugin_id: str = Field(min_length=1)
+    company_id: str = Field(min_length=1)
+    cabinet_id: SafeStr | None = None
+    project_id: SafeStr | None = None
+    grant_id: str = Field(min_length=1)
+    artifact_digest: DigestStr
+    scopes: list[str]
+    exp: int
 
 
 __all__ = [
@@ -283,6 +297,7 @@ __all__ = [
     "JobsCancelBody",
     "JobsGetBody",
     "JobsSubmitBody",
+    "McpInvokeBody",
     "McpRegisterBody",
     "McpToolBody",
     "NetworkRequestBody",

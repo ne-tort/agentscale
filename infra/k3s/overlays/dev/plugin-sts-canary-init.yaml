@@ -1,0 +1,107 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: plugin-sts-canary-init
+  labels:
+    app.kubernetes.io/name: plugin-sts-canary-init
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-objects-init
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "9"
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: plugin-sts-canary-init
+        app.kubernetes.io/part-of: agentscale
+    spec:
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: provisioner
+          image: ghcr.io/ne-tort/agentscale-api:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: agentscale-minio
+                  key: root-user
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: agentscale-minio
+                  key: root-password
+          command: ["python", "-c"]
+          args:
+            - |
+              import os
+              import time
+
+              import boto3
+              from botocore.client import Config
+              from botocore.exceptions import ClientError
+
+              BUCKET = "tenant-sts-probe"
+              KEY = "module-sts-probe/__authorization_canary__"
+              client = boto3.client(
+                  "s3",
+                  endpoint_url="http://agentscale-minio:9000",
+                  aws_access_key_id=os.environ["MINIO_ROOT_USER"],
+                  aws_secret_access_key=os.environ["MINIO_ROOT_PASSWORD"],
+                  region_name="us-east-1",
+                  config=Config(
+                      signature_version="s3v4",
+                      connect_timeout=2,
+                      read_timeout=2,
+                      retries={"max_attempts": 0},
+                  ),
+              )
+
+              def error_code(exc):
+                  return str(exc.response.get("Error", {}).get("Code", ""))
+
+              for attempt in range(60):
+                  try:
+                      client.head_bucket(Bucket=BUCKET)
+                      break
+                  except ClientError as exc:
+                      if error_code(exc) in {"NoSuchBucket", "404"}:
+                          try:
+                              client.create_bucket(Bucket=BUCKET)
+                          except ClientError as create_exc:
+                              if error_code(create_exc) not in {
+                                  "BucketAlreadyOwnedByYou", "BucketAlreadyExists",
+                              }:
+                                  raise
+                          break
+                      if attempt == 59:
+                          raise
+                      time.sleep(2)
+                  except Exception:
+                      if attempt == 59:
+                          raise
+                      time.sleep(2)
+              else:
+                  raise RuntimeError("STS canary bucket provisioning timed out")
+
+              try:
+                  client.head_object(Bucket=BUCKET, Key=KEY)
+              except ClientError as exc:
+                  if error_code(exc) in {"NoSuchKey", "NotFound", "404"}:
+                      # Declarative initialization only: create the fixed zero-byte
+                      # object once when absent. The runtime probe never writes.
+                      client.put_object(Bucket=BUCKET, Key=KEY, Body=b"", ContentLength=0)
+                  else:
+                      raise
+
+              client.head_bucket(Bucket=BUCKET)
+              response = client.head_object(Bucket=BUCKET, Key=KEY)
+              if response.get("ContentLength") != 0:
+                  raise RuntimeError("STS canary object must remain zero-byte")
+              print("plugin-sts-canary-init: dedicated bucket and zero-byte object ready")

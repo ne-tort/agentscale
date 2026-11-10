@@ -35,6 +35,19 @@ class LifespanManager:
                 return resource
         return None
 
+    def unregister(self, name: str) -> LifespanResource | None:
+        """Remove one resource by name (composition rollback before startup).
+
+        Counterpart of register(): plugin composition can fail after some
+        resources were registered, and the rollback must not leave stale
+        entries that would start/close owners whose app.state was already
+        rolled back. Not intended for use after startup_all().
+        """
+        for index, resource in enumerate(self._resources):
+            if resource.name == name:
+                return self._resources.pop(index)
+        return None
+
     @property
     def resources(self) -> tuple[LifespanResource, ...]:
         return tuple(self._resources)

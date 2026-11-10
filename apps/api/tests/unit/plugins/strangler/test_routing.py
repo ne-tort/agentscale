@@ -1,6 +1,6 @@
 """Тесты ``routing.py``: ровно ОДИН handler, fail-closed, typed error (§8, кр. 16).
 
-Тесты НЕ запускались (verification freeze).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 """
 
 from __future__ import annotations

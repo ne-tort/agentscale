@@ -32,9 +32,12 @@ from prodavan.application.plugins.objects.service import AUDIT_EVENT, PluginObje
 from prodavan.infrastructure.plugins.minio import adapters
 from prodavan.infrastructure.plugins.minio import config as cfgmod
 from prodavan.infrastructure.plugins.minio import build_plugin_object_store
+from tests.unit.plugins.minio.test_integration_blockers import build_wired_sts
 from tests.unit.plugins.minio.conftest import (  # type: ignore[import-not-found]
     ADMIN_KEY,
     ADMIN_SECRET,
+    ADMIN_ACCESS_REF,
+    PRESIGN_ACCESS_REF,
     ENDPOINT,
     PRESIGN_KEY,
     PRESIGN_SECRET,
@@ -46,6 +49,7 @@ from tests.unit.plugins.minio.conftest import (  # type: ignore[import-not-found
     FakeStsClient,
     make_config,
     make_env,
+    make_secret_store,
 )
 
 COMPANY = "co_123"
@@ -54,6 +58,13 @@ PLUGIN_A = "mod_equipment"
 PLUGIN_B = "mod_invoices"
 BUCKET = iam.bucket_name(COMPANY)
 OTHER_BUCKET = iam.bucket_name(OTHER_COMPANY)
+
+
+def _from_env(env: dict[str, str], store: Any = None) -> cfgmod.MinioPluginConfig:
+    return cfgmod.MinioPluginConfig.from_env(
+        env,
+        secret_store=store if store is not None else make_secret_store(),
+    )
 
 
 def _admin(**kw: Any) -> adapters.MinioBucketAdmin:
@@ -184,9 +195,7 @@ def test_merge_rejects_wide_or_agentscale_policy() -> None:
 async def test_sts_unavailable_by_default_never_returns_root_creds() -> None:
     """Документация MinIO STS не подтверждена ⇒ StsUnavailable ДО вызова."""
     sts_client = FakeStsClient()
-    sts = adapters.MinioSts(
-        config=make_config(), sts_client=sts_client, sts_available=False
-    )
+    sts = adapters.MinioSts(config=make_config(), sts_client=sts_client)
     session = iam.session_policy(COMPANY, PLUGIN_A)
     with pytest.raises(err.StsUnavailable):
         await sts.assume_role(
@@ -203,10 +212,10 @@ async def test_sts_failure_does_not_fallback_to_admin_creds() -> None:
     """Даже при включённом флаге сбой AssumeRole = StsUnavailable, не root."""
     sts_client = FakeStsClient(fail=True)
     sts = adapters.MinioSts(
-        config=make_config(sts_enabled=True),
+        config=make_config(sts_enabled=True, sts_probe_enabled=True),
         sts_client=sts_client,
-        sts_available=True,
     )
+    assert await sts.probe() is False
     with pytest.raises(err.StsUnavailable):
         await sts.assume_role(
             company_id=COMPANY, plugin_id=PLUGIN_A, ttl_seconds=900,
@@ -219,9 +228,11 @@ async def test_sts_rejects_admin_or_root_like_credentials() -> None:
     """Адаптер не имеет права вернуть admin-ключи как «временные»."""
     sts_client = FakeStsClient(return_admin_creds=True)
     sts = adapters.MinioSts(
-        config=make_config(sts_enabled=True),
-        sts_client=sts_client, sts_available=True, clock=FakeClock(),
+        config=make_config(sts_enabled=True, sts_probe_enabled=True),
+        sts_client=sts_client,
+        clock=FakeClock(),
     )
+    assert await sts.probe() is False
     with pytest.raises(err.StsUnavailable):
         await sts.assume_role(
             company_id=COMPANY, plugin_id=PLUGIN_A, ttl_seconds=900,
@@ -234,9 +245,11 @@ async def test_sts_rejects_creds_without_session_token() -> None:
     """Без SessionToken это постоянные креды — отказ."""
     sts_client = FakeStsClient(return_without_token=True)
     sts = adapters.MinioSts(
-        config=make_config(sts_enabled=True),
-        sts_client=sts_client, sts_available=True, clock=FakeClock(),
+        config=make_config(sts_enabled=True, sts_probe_enabled=True),
+        sts_client=sts_client,
+        clock=FakeClock(),
     )
+    assert await sts.probe() is False
     with pytest.raises(err.StsUnavailable):
         await sts.assume_role(
             company_id=COMPANY, plugin_id=PLUGIN_A, ttl_seconds=900,
@@ -248,9 +261,8 @@ async def test_sts_rejects_creds_without_session_token() -> None:
 async def test_sts_rejects_tampered_session_policy() -> None:
     """Session policy не равна канонической → отказ ДО сети."""
     sts_client = FakeStsClient()
-    sts = adapters.MinioSts(
-        config=make_config(sts_enabled=True), sts_client=sts_client,
-        sts_available=True,
+    sts, sts_client, _canary = await build_wired_sts(
+        make_config(sts_enabled=True), FakeClock(), sts_client=sts_client,
     )
     tampered = iam.session_policy(COMPANY, PLUGIN_A)
     tampered["Statement"][0]["Resource"] = ["*"]
@@ -259,7 +271,7 @@ async def test_sts_rejects_tampered_session_policy() -> None:
             company_id=COMPANY, plugin_id=PLUGIN_A, ttl_seconds=900,
             session_policy=tampered,
         )
-    assert sts_client.calls == []
+    assert len(sts_client.calls) == 1  # probe only; tampered policy has no target call
 
 
 @pytest.mark.asyncio
@@ -267,9 +279,8 @@ async def test_sts_opt_in_returns_scoped_credentials() -> None:
     """При opt-in: только временные креды, свой bucket/prefix, TTL-граница."""
     clock = FakeClock(now=1_800_000_000.0)
     sts_client = FakeStsClient(clock=clock)
-    sts = adapters.MinioSts(
-        config=make_config(sts_enabled=True), sts_client=sts_client,
-        sts_available=True, clock=clock,
+    sts, sts_client, _canary = await build_wired_sts(
+        make_config(sts_enabled=True), clock, sts_client=sts_client,
     )
     session = iam.session_policy(COMPANY, PLUGIN_A)
     creds = await sts.assume_role(
@@ -286,9 +297,15 @@ async def test_sts_opt_in_returns_scoped_credentials() -> None:
     assert creds.policy == session
     assert creds.expires_at <= clock.time() + 900
     # AssumeRole получил ровно каноническую session policy и TTL.
-    call = sts_client.calls[0]
+    call = sts_client.calls[1]
     assert call["DurationSeconds"] == 900
     assert json.loads(call["Policy"]) == session
+
+
+@pytest.mark.parametrize("name", ["io_test_sts_available", "minio_sts_available"])
+def test_factory_rejects_legacy_sts_availability_keywords(name: str) -> None:
+    with pytest.raises(TypeError, match="unexpected keyword"):
+        build_plugin_object_store(make_config(), **{name: True})  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
@@ -457,6 +474,51 @@ async def test_service_presign_normalizes_and_uses_presigner() -> None:
     for event in sink.rows:
         assert "url" not in str(event).lower() or "key_digest" in event
         assert "X-Amz-Signature" not in str(event)
+
+
+@pytest.mark.asyncio
+async def test_presign_head_uses_exact_head_method_without_list_permission() -> None:
+    client = FakeS3Client()
+    presigner = adapters.MinioPresigner(
+        config=make_config(), client=client,
+        expected_prefix=iam.module_prefix(PLUGIN_A),
+    )
+    url = await presigner.presign_head(
+        bucket=BUCKET, key=f"module-{PLUGIN_A}/reports/q1.xlsx", ttl_seconds=60,
+    )
+    call = client.presign_calls[0]
+    assert call["operation"] == "head_object"
+    assert call["HttpMethod"] == "HEAD"
+    assert call["Params"] == {
+        "Bucket": BUCKET, "Key": f"module-{PLUGIN_A}/reports/q1.xlsx",
+    }
+    assert call["ExpiresIn"] == 60
+    assert "X-Amz-Expires=60" in url
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("leak", [ADMIN_KEY, ADMIN_SECRET, PRESIGN_SECRET])
+async def test_presign_rejects_url_containing_static_or_admin_credentials(leak: str) -> None:
+    client = FakeS3Client(endpoint=f"{ENDPOINT}/{leak}")
+    presigner = adapters.MinioPresigner(config=make_config(), client=client)
+    with pytest.raises(err.BucketUnavailable, match="credential material") as caught:
+        await presigner.presign_get(
+            bucket=BUCKET, key=f"module-{PLUGIN_A}/a.txt", ttl_seconds=900,
+        )
+    assert leak not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_presigner_closes_only_its_dedicated_client_once() -> None:
+    client = FakeS3Client()
+    presigner = adapters.MinioPresigner(config=make_config(), client=client)
+    await presigner.aclose()
+    await presigner.aclose()
+    assert client.close_calls == 1
+    with pytest.raises(err.BucketUnavailable, match="closed"):
+        await presigner.presign_get(
+            bucket=BUCKET, key=f"module-{PLUGIN_A}/a.txt", ttl_seconds=900,
+        )
 
 
 # ===========================================================================
@@ -652,7 +714,7 @@ async def test_list_prefix_and_usage_are_metadata_only() -> None:
 # Config: fail-closed, запрет root, отдельный presigner
 # ===========================================================================
 def test_config_from_env_ok() -> None:
-    config = cfgmod.MinioPluginConfig.from_env(make_env())
+    config = _from_env(make_env())
     assert config.endpoint == ENDPOINT
     assert config.sts_enabled is False
     assert config.admin_access_key != config.presign_access_key
@@ -666,10 +728,10 @@ def test_config_from_env_ok() -> None:
     "missing",
     [
         "PLUGIN_MINIO_ENDPOINT",
-        "PLUGIN_MINIO_ADMIN_ACCESS_KEY",
-        "PLUGIN_MINIO_ADMIN_SECRET_KEY",
-        "PLUGIN_MINIO_PRESIGN_ACCESS_KEY",
-        "PLUGIN_MINIO_PRESIGN_SECRET_KEY",
+        "PLUGIN_MINIO_ADMIN_ACCESS_KEY_REF",
+        "PLUGIN_MINIO_ADMIN_SECRET_KEY_REF",
+        "PLUGIN_MINIO_PRESIGN_ACCESS_KEY_REF",
+        "PLUGIN_MINIO_PRESIGN_SECRET_KEY_REF",
     ],
 )
 def test_config_without_credentials_fails_closed(missing: str) -> None:
@@ -681,33 +743,33 @@ def test_config_without_credentials_fails_closed(missing: str) -> None:
     env["MINIO_ROOT_PASSWORD"] = "agentscale123"
     env["S3_BUCKET"] = "agentscale"
     with pytest.raises(err.BucketUnavailable):
-        cfgmod.MinioPluginConfig.from_env(env)
+        _from_env(env)
 
 
 def test_config_rejects_root_and_as_built_access_keys() -> None:
     for bad in ("agentscale", "agentscale-api", "root", "minio", "minioadmin"):
+        admin_store = make_secret_store()
+        admin_store.values[ADMIN_ACCESS_REF] = bad
         with pytest.raises(err.BucketUnavailable):
-            cfgmod.MinioPluginConfig.from_env(
-                make_env(PLUGIN_MINIO_ADMIN_ACCESS_KEY=bad)
-            )
+            _from_env(make_env(), admin_store)
+        presign_store = make_secret_store()
+        presign_store.values[PRESIGN_ACCESS_REF] = bad
         with pytest.raises(err.BucketUnavailable):
-            cfgmod.MinioPluginConfig.from_env(
-                make_env(PLUGIN_MINIO_PRESIGN_ACCESS_KEY=bad)
-            )
+            _from_env(make_env(), presign_store)
 
 
 def test_config_requires_distinct_admin_and_presigner_principals() -> None:
     """Один ключ на admin и подпись = широкая политика as-built → отказ."""
+    store = make_secret_store()
+    store.values[PRESIGN_ACCESS_REF] = ADMIN_KEY
     with pytest.raises(err.BucketUnavailable):
-        cfgmod.MinioPluginConfig.from_env(
-            make_env(PLUGIN_MINIO_PRESIGN_ACCESS_KEY=ADMIN_KEY)
-        )
+        _from_env(make_env(), store)
 
 
 def test_config_unknown_sts_flag_is_error() -> None:
     """Неопознанный флаг STS → ошибка, а не молчаливый False/True."""
     with pytest.raises(err.BucketUnavailable):
-        cfgmod.MinioPluginConfig.from_env(
+        _from_env(
             make_env(PLUGIN_MINIO_STS_ENABLED="maybe")
         )
 
@@ -720,11 +782,11 @@ def test_config_rejects_endpoint_with_credentials_or_path() -> None:
         "not-a-url",
     ):
         with pytest.raises(err.BucketUnavailable):
-            cfgmod.MinioPluginConfig.from_env(make_env(PLUGIN_MINIO_ENDPOINT=bad))
+            _from_env(make_env(PLUGIN_MINIO_ENDPOINT=bad))
 
 
 def test_config_public_endpoint_used_for_presign_only() -> None:
-    config = cfgmod.MinioPluginConfig.from_env(
+    config = _from_env(
         make_env(PLUGIN_MINIO_PUBLIC_ENDPOINT=PUBLIC_ENDPOINT)
     )
     assert config.endpoint == ENDPOINT          # админ ходит in-cluster

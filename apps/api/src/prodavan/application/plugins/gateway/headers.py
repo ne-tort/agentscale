@@ -21,18 +21,24 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from prodavan.application.plugins.gateway.ports import GatewayClaims, GatewayGrant
+from prodavan.application.plugins.gateway.ports import (
+    GatewayClaims,
+    GatewayGrant,
+    VerifiedWebhook,
+)
 
 # ---------------------------------------------------------------------------
 # Доверенные заголовки (перезаписываются значениями из claims/grant)
 # ---------------------------------------------------------------------------
 
 HEADER_PLUGIN_ID = "X-Plugin-ID"
+HEADER_PLUGIN_INSTANCE_ID = "X-Plugin-Instance-ID"
+HEADER_ARTIFACT_DIGEST = "X-Plugin-Artifact-Digest"
 HEADER_COMPANY_ID = "X-Company-ID"
 HEADER_PROJECT_ID = "X-Project-ID"
 HEADER_CAPABILITY_TOKEN = "X-Plugin-Capability-Token"
 
-#: Полный allowlist доверенных заголовков (ровно четыре из §6.4/§7.2).
+#: Полный allowlist identity из §6.4/§7.2 + durable instance/artifact.
 #: Ни один из этих ключей не может прийти от клиента — см. ``sanitize_incoming``.
 #:
 #: ПРИМЕЧАНИЕ ДЛЯ ИНТЕГРАТОРА: задача 09 кладёт свежий ``PluginClaims`` из
@@ -44,6 +50,8 @@ HEADER_CAPABILITY_TOKEN = "X-Plugin-Capability-Token"
 TRUSTED_HEADERS: frozenset[str] = frozenset(
     {
         HEADER_PLUGIN_ID,
+        HEADER_PLUGIN_INSTANCE_ID,
+        HEADER_ARTIFACT_DIGEST,
         HEADER_COMPANY_ID,
         HEADER_PROJECT_ID,
         HEADER_CAPABILITY_TOKEN,
@@ -53,7 +61,7 @@ TRUSTED_HEADERS: frozenset[str] = frozenset(
 #: Заголовки, которые клиент не имеет права задавать. Сравнение — по нижнему
 #: регистру (HTTP-заголовки регистронезависимы).
 #:
-#: ВАЖНО: сюда входят ВСЕ четыре доверенных заголовка. Клиент может прислать
+#: ВАЖНО: сюда входят ВСЕ доверенные заголовки. Клиент может прислать
 #: ``X-Company-Id`` (другой регистр!), а ``build_trusted_headers`` оперирует
 #: каноническим ``X-Company-ID``. Если оставить клиентский вариант, dict с
 #: регистроразличимыми ключами сохранит ОБА значения и downstream выберет
@@ -66,13 +74,18 @@ _STRIPPED_EXACT: frozenset[str] = frozenset(
         "proxy-authorization",
         "proxy-authenticate",
         "x-plugin-id",
+        "x-plugin-instance-id",
+        "x-plugin-artifact-digest",
         "x-company-id",
         "x-project-id",
         "x-plugin-capability-token",
-        # HMAC-подпись — артефакт аутентификации САМОГО шлюза (§7.5). Её
-        # проверяет GatewayAuth; downstream её получить не должен, иначе
-        # backend решит, что «тоже проверил подпись» и ослабит проверку JWT.
+        # Клиентские HMAC-артефакты удаляются ДО auth. После успешной проверки
+        # build_forward_headers явно вернёт их из VerifiedWebhook для hello.
         "x-prodavan-signature",
+        "x-prodavan-signature-version",
+        "x-prodavan-timestamp",
+        "x-prodavan-event",
+        "x-prodavan-delivery",
     }
 )
 
@@ -148,7 +161,9 @@ def build_trusted_headers(
     перезаписывают всё, что могло остаться после ``sanitize_incoming``.
     В v1 было наоборот — клиентские заголовки шли после доверенных.
 
-    - ``X-Plugin-ID``, ``X-Company-ID`` — всегда из ``claims``;
+    - ``X-Plugin-ID``, ``X-Plugin-Instance-ID``,
+      ``X-Plugin-Artifact-Digest``, ``X-Company-ID`` — только из trusted
+      claims/grant; клиентское значение безусловно удалено;
     - ``X-Project-ID`` — из ``claims`` (у anon отсутствует: ключ удаляется);
     - ``X-Plugin-Capability-Token`` — из активного ``grant`` (у anon пуст,
       ключ удаляется). Клиентский токен отброшен ещё в ``sanitize_incoming``.
@@ -156,10 +171,28 @@ def build_trusted_headers(
     Возвращается НОВЫЙ dict: вызывающий не может случайно изменить исходные
     заголовки и «протащить» клиентское значение обратно.
     """
+    if (
+        claims.plugin_instance_id
+        and grant.plugin_instance_id
+        and claims.plugin_instance_id != grant.plugin_instance_id
+    ):
+        raise ValueError("claims and grant plugin_instance_id mismatch")
+    if (
+        claims.artifact_digest
+        and grant.artifact_digest
+        and claims.artifact_digest != grant.artifact_digest
+    ):
+        raise ValueError("claims and grant artifact_digest mismatch")
+    instance_id = claims.plugin_instance_id or grant.plugin_instance_id
+    artifact_digest = claims.artifact_digest or grant.artifact_digest
     trusted: dict[str, str] = {
         HEADER_PLUGIN_ID: claims.plugin_id,
         HEADER_COMPANY_ID: claims.company_id,
     }
+    if instance_id:
+        trusted[HEADER_PLUGIN_INSTANCE_ID] = instance_id
+    if artifact_digest:
+        trusted[HEADER_ARTIFACT_DIGEST] = artifact_digest
 
     # Проект есть только у авторизованного запроса; урезанный anon-scope его
     # не содержит. Явное удаление защищает от «остатков» в клиентских данных.
@@ -182,6 +215,8 @@ def build_forward_headers(
     incoming: Mapping[str, str],
     claims: GatewayClaims,
     grant: GatewayGrant,
+    *,
+    verified_webhook: VerifiedWebhook | None = None,
 ) -> dict[str, str]:
     """Полный конвейер: сначала санитизация, затем доверенная перезапись.
 
@@ -200,13 +235,19 @@ def build_forward_headers(
     for key in [k for k in out if isinstance(k, str) and k.lower() in trusted_lower]:
         out.pop(key, None)
     out.update(build_trusted_headers(claims, grant))
+    if verified_webhook is not None:
+        # Только результат успешной GatewayAuth. Входящая подпись уже удалена,
+        # поэтому клиент не может обойти HMAC и заявить доверенное значение.
+        out.update(verified_webhook.as_headers())
     return out
 
 
 __all__ = [
+    "HEADER_ARTIFACT_DIGEST",
     "HEADER_CAPABILITY_TOKEN",
     "HEADER_COMPANY_ID",
     "HEADER_PLUGIN_ID",
+    "HEADER_PLUGIN_INSTANCE_ID",
     "HEADER_PROJECT_ID",
     "TRUSTED_HEADERS",
     "build_forward_headers",

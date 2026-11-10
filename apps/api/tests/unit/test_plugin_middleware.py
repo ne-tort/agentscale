@@ -106,5 +106,5 @@ def test_anonymous_request_is_not_blocked_by_allowlist() -> None:
     assert client.get("/capabilities/v1/health").status_code == 200
 
 
-if __name__ == "__main__":  # pragma: no cover - не запускать в verification freeze
+if __name__ == "__main__":  # pragma: no cover - ручной запуск
     pytest.main([__file__])

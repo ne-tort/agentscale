@@ -360,7 +360,7 @@ class PluginObjectStore:
         """Выдать short-lived STS creds ТОЛЬКО на ``module-<plugin>/``.
 
         Гарантии:
-          * ``ttl_seconds`` в ``[60, 3600]`` (иначе ``InvalidTtl``, не кламп);
+          * ``ttl_seconds`` в ``[900, 3600]`` (иначе ``InvalidTtl``, не кламп);
           * ``session_policy`` — подмножество родительской ``bucket_policy``;
           * ``StsPort`` обязателен: нет адаптера/вызов упал → ``StsUnavailable``,
             а НЕ root-креды и НЕ presigned от service user;
@@ -371,7 +371,7 @@ class PluginObjectStore:
             ожидаемый бакет вычисляется из своего ``company_id``, и любое
             расхождение отклоняется.
         """
-        ttl = ports.validate_ttl(ttl_seconds)
+        ttl = ports.validate_sts_ttl(ttl_seconds)
         expected_bucket = iam.bucket_name(company_id)
         expected_prefix = iam.module_prefix(plugin_id)
         s_policy = iam.session_policy(company_id, plugin_id)

@@ -32,9 +32,15 @@ class EventEnvelope:
     cabinet_id: str | None = None
     payload: dict[str, Any] = field(default_factory=dict)
     schema_version: int = 1
+    # Present on privileged auth_command/auth_event envelopes at the bus edge.
+    # Excluded when absent so direct calls/other buses keep their existing shape.
+    signature: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        if self.signature is None:
+            data.pop("signature", None)
+        return data
 
     @staticmethod
     def now_iso() -> str:
@@ -91,14 +97,19 @@ def auth_command_envelope(
     event_type: str,
     payload: dict[str, Any] | None = None,
     occurred_at: str | None = None,
+    signing_secret: str | None = None,
 ) -> EventEnvelope:
-    return EventEnvelope(
+    # Local import avoids a module cycle: the signer uses EventEnvelope.
+    from prodavan.core.events.auth_command import sign_auth_command_envelope
+
+    envelope = EventEnvelope(
         bus="auth_command",
         event_id=event_id,
         event_type=event_type,
         occurred_at=occurred_at or EventEnvelope.now_iso(),
         payload=payload or {},
     )
+    return sign_auth_command_envelope(envelope, signing_secret=signing_secret)
 
 
 def auth_event_envelope(

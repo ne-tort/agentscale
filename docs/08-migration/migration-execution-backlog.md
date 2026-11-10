@@ -157,15 +157,15 @@ A task is `ready` only after static review of its contract and artifacts. A task
 - **Rollback/gate:** disable the affected app/version and retain prior signed snapshot; never fall back to a privileged hardcoded screen. Gate requires schema/context boundary review.
 - **Mandatory parent report:** common contract plus browser isolation or API contract blockers.
 
-### MIG-WEB-02 — declarative renderer and isolated code-plugin host
+### MIG-WEB-02 — declarative renderer and plugin import-graph guard
 
-- **Exclusive file zone:** `apps/web/src/dynamic/declarative/**`, `apps/web/src/dynamic/plugin-host.ts`, `apps/web/src/dynamic/broker.ts` and their task-owned tests.
-- **Dependencies:** MIG-WEB-01; gateway contract and canonical capability decision; approved iframe/CSP/origin policy.
-- **Deliverables:** allowlisted declarative renderer, isolated iframe host, versioned postMessage RPC, shell-side capability broker, response validation, cancellation/timeout and kill-switch handling; no cookies, raw tokens, shell DOM or arbitrary network access.
-- **Source acceptance/test artifacts (not executed):** browser fixtures for same-origin/cookie/token isolation, malformed/replayed RPC, unknown component rejection, direct gateway deny, quota/timeout, plugin kill switch, and generic infrastructure capability denial.
-- **Promotion record requirements:** plugin artifact/signature/origin digests, CSP and allowlist snapshot, RPC protocol version, grant snapshot reference, browser observation checkpoint and owner.
-- **Rollback/gate:** disable/quarantine artifact or route, revoke broker session and keep shell route healthy; no rollback by granting broader capability. Gate requires isolated-origin and gateway recheck evidence.
-- **Mandatory parent report:** common contract plus unresolved CSP, browser, or gateway blockers.
+- **Exclusive file zone (after dead-host cleanup):** `apps/web/src/dynamic/declarative/renderer.ts`, its focused `renderer.test.ts` and `README.md`, plus `apps/web/src/dynamic/legacy-host-import-graph.test.ts`.
+- **Dependencies:** MIG-WEB-01 for the preserved schema/registry path. The current plugin bootstrap/RPC source path under `apps/web/src/features/plugins/**` is a separate work zone and was not changed by this cleanup.
+- **Deliverables:** allowlisted declarative renderer, focused renderer fixtures and a static graph from `main.tsx` through the current bootstrap/RPC modules. The unreferenced React host/barrel and registry-artifact iframe host/broker, together with their obsolete host/RPC tests, were removed; no broad dynamic→plugin rename was made.
+- **Source acceptance/test artifacts (not executed):** text-only rendering, table states, unknown-node rejection, disabled unbound buttons, current plugin-path reachability and rejection of imports to removed legacy modules.
+- **Promotion record requirements:** preserved renderer/schema/registry paths and the router→bootstrap→iframe/RPC source chain. The graph guard is not live plugin acceptance and does not change STOP-SHIP status.
+- **Rollback/gate:** do not recreate legacy hosts to satisfy their former fixtures. Any restoration requires a new production reference and contract review; registry, shared schema/context utilities and M05 `dynamic-apps` remain intact.
+- **Mandatory parent report:** deleted and preserved files, import/reference evidence and intentionally unrun verification commands.
 
 ## 7. Equipment ingestion/domain
 

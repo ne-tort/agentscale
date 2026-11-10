@@ -9,7 +9,7 @@ Acceptance-критерии задачи:
     (caller не получает SyncReceipt);
   * audit не содержит секретов/DSN.
 
-Тесты НАПИСАНЫ, НО НЕ ЗАПУСКАЛИСЬ (verification freeze, план миграции §0.2).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 """
 
 from __future__ import annotations

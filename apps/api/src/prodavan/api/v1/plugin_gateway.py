@@ -3,7 +3,7 @@
 Единая точка входа для::
 
     POST/GET/PUT/DELETE /webhook/{plugin}/{company}/{path:path}
-    GET/POST           /pluginpage/{plugin}/{company}/{path:path}
+    GET/HEAD/POST      /pluginpage/{plugin}/{company}/{path:path}
     GET                /health
 
 Роутер **не владеет** композицией портов: интегратор (родитель, F11) вызывает
@@ -27,17 +27,20 @@ Backend **обязан** проверить capability-токен/JWT, а не �
 
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from starlette.requests import ClientDisconnect
 
 from prodavan.application.plugins.gateway.auth import (
     GatewayAuth,
     PageAuthResult,
     WebhookAuthResult,
 )
+from prodavan.application.plugins.gateway.canonical import canonical_raw_query
 from prodavan.application.plugins.gateway.errors import (
     BackendNotReadyError,
     GatewayError,
@@ -75,6 +78,26 @@ class PluginGatewayRuntime:
 def install_plugin_gateway_runtime(app: Any, runtime: PluginGatewayRuntime) -> None:
     """Composition hook для родителя: смонтировать рантайм на ``app.state``."""
     setattr(app.state, RUNTIME_STATE_ATTR, runtime)
+    # install_api_plugin_platform attaches the fully built platform immediately
+    # before this hook. Capture its concrete ports once and install an explicit
+    # per-app dependency; request handlers never perform a global state lookup.
+    platform = getattr(app.state, "plugin_platform", None)
+    registry = getattr(platform, "registry", None)
+    if callable(getattr(registry, "resolve", None)):
+        from prodavan.application.plugins.runtime.provider_api import ProviderError
+        from prodavan.application.plugins.runtime.providers import (
+            build_scoped_runtime_provider,
+            install_scoped_runtime_provider,
+        )
+
+        try:
+            provider = build_scoped_runtime_provider(platform)
+        except ProviderError:
+            # Custom/incomplete compositions keep the zero-arg 503 dependency;
+            # they must not break unrelated webhook/pluginpage gateway routes.
+            provider = None
+        if provider is not None:
+            install_scoped_runtime_provider(app, provider)
 
 
 def get_plugin_gateway_runtime(request: Request) -> PluginGatewayRuntime | None:
@@ -102,6 +125,123 @@ def _request_id(request: Request) -> str:
 
 def _incoming_headers(request: Request) -> dict[str, str]:
     return dict(request.headers.items())
+
+
+async def _read_bounded_body(request: Request, *, limit_bytes: int) -> bytes:
+    """Прочитать не более configured cap без лишнего chunk после его достижения.
+
+    Content-Length проверяется до первого чтения. ASGI ``more_body`` позволяет
+    отличить валидное тело ровно с cap в последнем сообщении от продолжения,
+    которое отклоняется сразу, до чтения следующего chunk. request.body() не
+    вызывается.
+    """
+    if limit_bytes < 1:
+        raise GatewayError(
+            GatewayErrorCode.PORT_UNAVAILABLE,
+            detail="request body limit must be positive",
+        )
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        if not content_length.isascii() or not content_length.isdigit():
+            raise GatewayError(
+                GatewayErrorCode.INVALID_CONTENT_LENGTH,
+                detail="Content-Length must be a non-negative decimal integer",
+            )
+        try:
+            declared = int(content_length, 10)
+        except (TypeError, ValueError) as exc:
+            raise GatewayError(
+                GatewayErrorCode.INVALID_CONTENT_LENGTH,
+                detail="Content-Length must be a non-negative decimal integer",
+            ) from exc
+        if declared < 0:
+            raise GatewayError(
+                GatewayErrorCode.INVALID_CONTENT_LENGTH,
+                detail="Content-Length must be a non-negative decimal integer",
+            )
+        if declared > limit_bytes:
+            raise GatewayError(
+                GatewayErrorCode.PAYLOAD_TOO_LARGE,
+                detail=f"request body exceeds the configured {limit_bytes} byte limit",
+            )
+
+    body = bytearray()
+    while True:
+        message = await request.receive()
+        message_type = message.get("type")
+        if message_type == "http.disconnect":
+            raise ClientDisconnect()
+        if message_type != "http.request":
+            continue
+        chunk = message.get("body", b"")
+        more_body = bool(message.get("more_body", False))
+        if chunk:
+            remaining = limit_bytes - len(body)
+            if len(chunk) > remaining:
+                # Не добавляем лишние байты и не читаем следующий chunk.
+                raise GatewayError(
+                    GatewayErrorCode.PAYLOAD_TOO_LARGE,
+                    detail=f"request body exceeds the configured {limit_bytes} byte limit",
+                )
+            body.extend(chunk)
+        if len(body) == limit_bytes and more_body:
+            # Cap уже достигнут, а ASGI подтверждает продолжение: 413 до auth и
+            # до получения следующего chunk из producer.
+            raise GatewayError(
+                GatewayErrorCode.PAYLOAD_TOO_LARGE,
+                detail=f"request body exceeds the configured {limit_bytes} byte limit",
+            )
+        if not more_body:
+            return bytes(body)
+
+
+def _raw_query(request: Request) -> bytes:
+    value = request.scope.get("query_string", b"")
+    try:
+        return canonical_raw_query(value)
+    except (TypeError, ValueError) as exc:
+        raise GatewayError(
+            GatewayErrorCode.INVALID_PATH,
+            detail="raw query must use printable ASCII/percent-encoding without fragments",
+        ) from exc
+
+
+def _is_trusted_proxy(host: str, *, cidrs: tuple[str, ...]) -> bool:
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    for configured in cidrs:
+        try:
+            network = ipaddress.ip_network(configured, strict=False)
+        except ValueError:
+            continue
+        if address in network:
+            return True
+    return False
+
+
+def _client_ip(request: Request) -> str:
+    """Peer IP; XFF только от настроенного trusted proxy, иначе игнорируется."""
+    direct = str(getattr(request.client, "host", "") or "unknown")
+    limits = _require_runtime(request).auth.limits
+    if not _is_trusted_proxy(direct, cidrs=limits.trusted_proxy_cidrs):
+        return direct
+    forwarded = request.headers.get("x-forwarded-for", "")
+    candidates: list[str] = []
+    for item in forwarded.split(","):
+        candidate = item.strip()
+        try:
+            ipaddress.ip_address(candidate)
+        except ValueError:
+            continue
+        candidates.append(candidate)
+    # Справа налево пропускаем доверенные proxy hops. Первый untrusted — ближайший
+    # клиентский адрес, которому можно доверять в рамках этой proxy-цепочки.
+    for candidate in reversed(candidates):
+        if not _is_trusted_proxy(candidate, cidrs=limits.trusted_proxy_cidrs):
+            return candidate
+    return candidates[0] if candidates else direct
 
 
 def _is_sse(headers: dict[str, str]) -> bool:
@@ -319,9 +459,12 @@ async def _handle_webhook(
     try:
         runtime = _require_runtime(request)
         headers = _incoming_headers(request)
-        # raw_body читается ОДИН раз и целиком: HMAC считается ровно по нему
-        # (as-built контракт ``docs/external-api.md:51``), без JSON-ресериализации.
-        raw_body = await request.body()
+        raw_query = _raw_query(request)
+        # HMAC считается по фактически прочитанным raw bytes; cap срабатывает
+        # до auth и не даёт chunked-клиенту обойти проверку Content-Length.
+        raw_body = await _read_bounded_body(
+            request, limit_bytes=runtime.auth.limits.webhook_body_limit_bytes
+        )
         result: WebhookAuthResult = await runtime.auth.authorize_webhook(
             plugin_id=plugin,
             company_id=company,
@@ -330,6 +473,8 @@ async def _handle_webhook(
             raw_body=raw_body,
             headers=headers,
             request_id=_request_id(request),
+            raw_query=raw_query,
+            client_ip=_client_ip(request),
         )
 
         # Повтор delivery → 200 БЕЗ повторной обработки (§7.5, критерий №7).
@@ -345,16 +490,35 @@ async def _handle_webhook(
                 headers={"Idempotent-Replayed": "true"},
             )
 
-        response = await runtime.proxy.forward(
-            path=path,
-            method=request.method,
-            body=raw_body,
-            headers=headers,
-            claims=result.claims,
-            grant=result.grant,
-            stream=False,
-            request_id=_request_id(request),
-        )
+        try:
+            response = await runtime.proxy.forward(
+                path=path,
+                method=request.method,
+                body=raw_body,
+                headers=headers,
+                claims=result.claims,
+                grant=result.grant,
+                stream=False,
+                request_id=_request_id(request),
+                query_string=raw_query,
+                verified_webhook=result.verified,
+            )
+        except Exception:
+            # Timeout/5xx transport/not-ready не считаются обработкой. Release
+            # делаем best-effort, чтобы не маскировать исходный typed отказ;
+            # при недоступном Redis lease сам истечёт по короткому TTL.
+            try:
+                await runtime.auth.release_webhook(result)
+            except GatewayError:
+                pass
+            raise
+
+        if 200 <= response.status_code < 300 and response.status_code != 202:
+            # 202 означает лишь принятие backend'ом, но НЕ подтверждённую
+            # обработку; только остальные 2xx создают durable idempotency done.
+            await runtime.auth.commit_webhook(result)
+        else:
+            await runtime.auth.release_webhook(result)
         return _to_response(response, stream=False, proxy=runtime.proxy)
     except BackendNotReadyError:
         return _backend_not_ready_response(runtime)
@@ -410,8 +574,14 @@ async def _handle_pluginpage(
     try:
         runtime = _require_runtime(request)
         headers = _incoming_headers(request)
-        body = await request.body()
+        raw_query = _raw_query(request)
         is_api = _is_api_path(path)
+        body_limit = (
+            runtime.auth.limits.typed_payload_limit_bytes
+            if is_api
+            else runtime.auth.limits.page_body_limit_bytes
+        )
+        body = await _read_bounded_body(request, limit_bytes=body_limit)
         stream = _is_sse(headers)
         result: PageAuthResult = await runtime.auth.authorize_page(
             plugin_id=plugin,
@@ -419,12 +589,19 @@ async def _handle_pluginpage(
             path=path,
             headers=headers,
             is_api=is_api,
+            method=request.method,
+            raw_body=body,
+            raw_query=raw_query,
+            # Server-derived suffix uses the same namespace as signed public_pages.
+            # Client headers/query cannot select a different authorization route.
+            route_path="/" + path.lstrip("/"),
             request_id=_request_id(request),
+            client_ip=_client_ip(request),
         )
 
         if is_api:
-            # Backend: wake → hold-until-Ready → forward. Аноним сюда не
-            # попадает: GatewayAuth.authorize_page(is_api=True) вернул 401.
+            # Backend: wake → hold-until-Ready → forward. Anonymous reaches this
+            # branch only for an exact signed public read-only GET/HEAD declaration.
             response = await runtime.proxy.forward(
                 path=path,
                 method=request.method,
@@ -434,10 +611,12 @@ async def _handle_pluginpage(
                 grant=result.grant,
                 stream=stream,
                 request_id=_request_id(request),
+                query_string=raw_query,
             )
         else:
             # Статика: отдельный always-running origin, без wake, без
-            # capability-токена, без index.html-fallback.
+            # capability-токена, без index.html-fallback. Reduced anonymous grant
+            # already carries the exact authenticated/published digest binding.
             response = await runtime.proxy.forward_static(
                 path=path,
                 method=request.method,
@@ -446,6 +625,7 @@ async def _handle_pluginpage(
                 grant=result.grant,
                 is_api=is_api,
                 request_id=_request_id(request),
+                query_string=raw_query,
             )
         return _to_response(response, stream=stream, proxy=runtime.proxy)
     except BackendNotReadyError:
@@ -459,6 +639,12 @@ async def pluginpage_get(request: Request, plugin: str, company: str, path: str)
     return await _handle_pluginpage(request, plugin=plugin, company=company, path=path)
 
 
+@router.head("/pluginpage/{plugin}/{company}/{path:path}")
+async def pluginpage_head(request: Request, plugin: str, company: str, path: str) -> Response:
+    """HEAD использует тот же read-only auth/proxy contract, что и GET."""
+    return await _handle_pluginpage(request, plugin=plugin, company=company, path=path)
+
+
 @router.post("/pluginpage/{plugin}/{company}/{path:path}")
 async def pluginpage_post(request: Request, plugin: str, company: str, path: str) -> Response:
     """POST допустим только для ``/api/*``; статику POST не принимает.
@@ -466,6 +652,16 @@ async def pluginpage_post(request: Request, plugin: str, company: str, path: str
     Авторизация одинакова для GET и POST: ``GatewayAuth`` + ``GatewayProxy``.
     """
     return await _handle_pluginpage(request, plugin=plugin, company=company, path=path)
+
+
+# The protected provider surface shares this already-mounted router.  Keeping
+# registration here avoids a second composition root or a main.py change.
+from prodavan.api.v1.plugin_runtime import (
+    install_plugin_runtime_routes as _install_plugin_runtime_routes,
+)
+
+_install_plugin_runtime_routes(router)
+del _install_plugin_runtime_routes
 
 
 __all__ = [

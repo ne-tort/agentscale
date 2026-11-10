@@ -1,9 +1,38 @@
 # Plugin Architecture — Полный дизайн (v4)
 
-**Дата:** 2026-11-08 (v4: пересмотр «переиспользования as-built»)  
-**Статус:** целевая модель, подлежит утверждению перед реализацией.  
-**Принцип:** в конечном состоянии declarative-app удалён полностью («всё под нож»).  
-**Метод:** strangler с фича-флагом, а не big bang — см. §8.
+> ## AUTHORITATIVE STATUS / ERRATA — читать перед документом
+>
+> **Это target-design snapshot, не as-built и не разрешение на включение.**
+> Независимый аудит на HEAD `6ee720dd` завершён вердиктом **STOP-SHIP**:
+> текущий S1 рабочий, но plugin v4 **не является подтверждённым vertical slice**.
+> Ни один сквозной plugin-сценарий не подтверждён live. Plugin platform сейчас
+> **emergency disabled** после security audit. Параллельный emergency remediation
+> не считается этим документом завершённым или проверенным.
+>
+> **Приоритет чтения:** принятые ADR-006/007/008 + этот errata → текст ниже как
+> история проектирования. ADR-009 имеет статус **«Предложено»**, не «Принято».
+> Текущее состояние и доказательства: [STOP-SHIP status](../migration/plugin-migration-status.md),
+> [acceptance map](../migration/plugin-acceptance-map.md). Практическая матрица:
+> [PLUGIN-AUTHORING](../PLUGIN-AUTHORING.md).
+>
+> | Место / старое утверждение | Обязательная развязка |
+> |---|---|
+> | §0 цель 2: DDL исполняет доверенная платформенная роль | **Отменено.** Plugin role владеет схемой и сама выполняет DDL собственных миграций. Платформа делает provisioning БД/схемы/роли и проверяет артефакт, но не plugin DDL. Абзац исправлен inline. |
+> | §2.2/§2.3 и любые plugin-ссылки на `:8001`, tenant tags без presigned | **Отменено.** `:8001` и `PodBridgeClaims` только агентам. Плагины используют `PluginClaims` + `/capabilities/v1/*` в **Plugin Gateway**. Objects — tenant/prefix-scoped, **scoped presigned по умолчанию**, STS только отдельно проверенная опция. Абзацы исправлены inline. |
+> | §5.1 неполный manifest | Пример исправлен и содержит все **11 обязательных полей**. Это target-пример, не подтверждение publication. Машинная schema/protocol становится контрактом после стабилизации; незавершённые RPC-детали не описываются как факт. |
+> | §7.3 обязательная доработка `ProjectIdlePauseService`, §14 шаг 8 | **A7 отменён.** Agent idle-pause не связывается с plugin jobs. Plugin activator учитывает собственные `active_job_ids`/leases; A7 не является completed acceptance. |
+> | §8 cutover сначала дропает таблицы и затем удаляет код | **Не выполнять.** Канон — [безопасный cutover](../migration/plugin-cutover-safety.md): pending `2026110802` не переносить, `removal.py` не запускать, code-first expand/contract A→B, migration-only helpers сохранить. Раздел заменён безопасной сводкой. |
+> | §9 работа прямо на main, §14 порядок реализации, исторические acceptance claims | Это исторические планы, не текущая инструкция и не evidence. Действуют корневой AGENTS.md, verification freeze, STOP-SHIP и live-only acceptance map. |
+> | «Snapshot не нужен» | Речь только о snapshot **dev-данных**. Source snapshot/patch в предложенном ADR-009 — другой механизм authoring без Git credentials в pod. |
+>
+> **Любые не перечисленные утверждения о реализации ниже остаются design notes на
+> дату v4 и не становятся as-built.** Полная переработка всего текста не
+> выполнялась; этот блок является authoritative списком superseded абзацев.
+
+**Дата:** 2026-11-08 (v4: пересмотр «переиспользования as-built»)
+**Статус:** target snapshot; ADR-006/007/008 приняты как target, ADR-009 — **Предложено**. Реализация и live acceptance не подтверждены; текущий cutover остановлен.
+**Принцип target:** в конечном состоянии declarative-app удаляется только после code-first cutover.
+**Метод target:** code-first expand/contract strangler, а не big bang или drop-first — см. §8 и safe-cutover документ.
 
 > История версий: v1 отвергнут (изобретал уже существующую инфраструктуру,
 > неработающая безопасность); v2 исправил ошибки v1, но ошибочно выбрал typed
@@ -18,7 +47,7 @@
 ## 0. Цели
 
 1. Плагин — **полноценное приложение**: свой frontend, свой backend, свои реальные таблицы (не JSONB-строки `module_instance_data_rows`).
-2. Плагин **сам описывает и мигрирует свою схему** (Liquibase / Flyway / Alembic), но DDL исполняется **доверенной платформенной ролью**, а не ролью плагина.
+2. Плагин **сам описывает и мигрирует свою схему** (Liquibase / Flyway / Alembic): DDL выполняет **роль плагина — владелец его схемы**. Платформа только provisioning БД/схемы/роли и проверка артефакта/границ.
 3. Доступ к инфраструктуре — только через **capability gateway** по типизированным контрактам; плагин не знает, что за реализация стоит за адаптером.
 4. Изоляция: tenant / module / project; регулируемый egress; единая модель фаерволла для плагинов **и** контейнеров агентов.
 5. Динамическая загрузка кода (не на этапе сборки shell).
@@ -172,8 +201,9 @@ ALTER ROLE tenant_co_123_plugin_mod_equipment
 - `CONNECT` только на `tenant_co_123`; `prodavan` и чужие БД недоступны.
 - `search_path` зафиксирован, `CREATE` только на свою схему; чужие схемы компании
   не видны (нет `USAGE`).
-- `NetworkPolicy`: egress пода плагина → только tenant PostgreSQL + gateway `:8001`
-  + egress-proxy. Платформенный Postgres в принципе не достижим с пода плагина.
+- `NetworkPolicy` (target): egress пода плагина → только явно выданные tenant
+  PostgreSQL, **Plugin Gateway `/capabilities/v1/*`** и egress-proxy grants.
+  Агентский `:8001` не расширяется. Платформенный Postgres недостижим.
 - `pgaudit` на tenant-кластере: все DDL/DML пишутся в append-only лог.
 
 ### 2.3 Роль остальной инфраструктуры
@@ -185,8 +215,8 @@ ALTER ROLE tenant_co_123_plugin_mod_equipment
 |---|---|
 | Свои таблицы | **прямой DSN**, полный SQL |
 | Cache / Redis | `cache` capability, key-rewrite, TTL, квоты |
-| Objects / MinIO | `objects` capability, tenant-теги, без presigned |
-| Docs / Mongo, Events, MCP, Pods, Secrets, Network | typed adapters gateway `:8001` |
+| Objects / MinIO | `objects` capability в Plugin Gateway, tenant/prefix-scoped; **scoped presigned по умолчанию**, STS только отдельно проверенная опция |
+| Docs / Mongo, Events, MCP, Pods, Secrets, Network | typed adapters `/capabilities/v1/*` в **Plugin Gateway**; агентский `:8001` не используется |
 | Платформенная БД `prodavan` | **недоступна вообще** |
 
 То есть «БД лучше иметь прямой доступ» удовлетворено буквально, а «к остальной
@@ -443,27 +473,45 @@ ghcr.io/ne-tort/plugins/mod_equipment@sha256:<digest>   ← подписано c
 - **Quarantine/rollback:** неподписанный или несовпавший digest не публикуется;
   откат = деплой предыдущего immutable digest.
 
-Manifest (подписан как OCI annotation, без самореференции):
+Target-пример manifest (подписан как OCI annotation, без самореференции).
+Он содержит **все 11 обязательных полей** текущего draft whitelist; после
+стабилизации машинная `schema.json` является контрактом. Пример не утверждает,
+что publication или RPC уже работают, и не содержит `artifact_digest` /
+`signature` / встроенный egress allowlist:
 
 ```json
 {
-  "plugin_id": "mod_equipment", "version": "1.2.0",
-  "frontend": {"entry": "index.html"},
+  "plugin_id": "mod_equipment",
+  "version": "1.2.0",
+  "protocol": "plugin-rpc/1",
+  "frontend": {
+    "entry": "index.html",
+    "base_path": "/plugins/mod_equipment/1.2.0/"
+  },
   "backend": {"port": 8080, "health": "/health"},
-  "capabilities": ["cache","objects","docs","events","jobs","pods","mcp","secrets","network"],
-  "migrations": {"engine": "liquibase", "path": "migrations/liquibase/changelog.xml"},
-  "egress_ref": "grant:...",
+  "capabilities": ["cache", "objects", "docs", "events", "jobs", "pods", "mcp", "secrets", "network"],
+  "migrations": {
+    "engine": "liquibase",
+    "path": "migrations/liquibase/changelog.xml"
+  },
+  "egress_ref": "grant:mod_equipment",
   "public_pages": [],
-  "webhooks": ["/webhook/external-system"]
+  "webhooks": ["/webhook/external-system"],
+  "min_platform_version": "4.0.0"
 }
 ```
+
+В manifest **нет** поля `artifact_digest`: digest вычисляется платформой после
+сборки. Предложенная ADR-009 backend+bundle digest pair хранится вне подписанного
+JSON и пока не является принятым as-built контрактом.
 
 **Установка (идемпотентная):**
 1. Реестр: `cosign verify` → digest → manifest → compatibility gate.
 2. Frontend → **отдельный static-origin** (§5.2), версионированный путь.
 3. Backend → Deployment `replicas: 0` по образу из того же OCI digest; Secret
-   получает `GATEWAY_URL`, `PLUGIN_ID`, короткий `PluginClaims` lease и
-   **`TENANT_DB_DSN`** только своей БД компании.
+   получает только конфигурацию `GATEWAY_URL`, `PLUGIN_ID` и **`TENANT_DB_DSN`**
+   своей БД компании. Статический `PluginClaims` в env не помещается:
+   identity mint/verify выполняется на request/короткий lease Plugin Gateway.
 4. Старт контейнера: Liquibase `update` по §3 → `/health` Ready.
 5. Grant → `CapabilityGrant` (в БД, долгоживущий) + `PluginClaims` (короткий).
 6. Регистрация маршрутов и egress-правил из grant.
@@ -482,8 +530,12 @@ v1 использовал `sandbox="allow-scripts allow-same-origin"` на то�
 ```
 
 - отдельный origin (не `agentscale.dev`), opaque origin, собственный CSP
-- общение с shell только через `postMessage` с проверкой `event.origin`; протокол — `plugin-rpc/1` handshake (`plugin.ready` с `plugin_id`/`version`/`digest`), как требует `docs/08-migration/dynamic-ui-implementation-contract.md:216-239`
-- capability token **не** попадает во frontend — только в backend, коротким TTL через handshake; **никогда в URL query** (утечка через Referer, историю и access-логи)
+- общение с shell — **target** `postMessage` с проверкой `event.origin`; точный
+  `plugin-rpc/1` envelope и opaque-origin handling определяются машинной схемой
+  **после её стабилизации**, этот абзац не объявляет незавершённый RPC готовым
+- capability token **не** попадает во frontend и не хранится статически в pod env:
+  Plugin Gateway передаёт backend короткую per-request/lease identity в доверенном
+  заголовке; **никогда в URL query** (утечка через Referer, историю и access-логи)
 - публичные страницы объявляются явно в `manifest.public_pages`. По умолчанию Gateway требует сессию и проверяет `employee ∈ company` + grant; публичная страница получает урезанный anon-scope с отдельным rate limit. Вариант «прямой redirect без iframe» исключён: он уводит страницу в общий origin shell.
 
 ### 5.3 Роутинг frontend: v1 static-origin, цель — wildcard subdomain
@@ -551,9 +603,11 @@ v1 использовал `sandbox="allow-scripts allow-same-origin"` на то�
 
 `migrate-to-plugin` **исключён**: перенос данных не нужен, это dev-разработка.
 
-Секреты: `TENANT_DB_DSN` и `PluginClaims` — короткоживущие `secret_ref` с ротацией при
-reinstall/revoke; plaintext в манифесте запрещён. ADR-003 действует для агентов,
-для плагинов отменён в части `db.direct` (§2.6, ADR-007).
+Секреты: `TENANT_DB_DSN` — `secret_ref` с ротацией при reinstall/revoke;
+plaintext в манифесте запрещён. `PluginClaims` не хранится как статический env:
+короткая per-request/lease identity передаётся Gateway на запрос и проверяется
+заново. ADR-003 действует для агентов, для плагинов отменён в части `db.direct`
+(§2.6, ADR-007).
 
 ---
 
@@ -754,10 +808,11 @@ Backend — отдельный stateless контейнер, не имеет k8s
   теряет события при простое консьюмера — для плагинов он заменяется на dispatch.
 - **Celery beat** остаётся для cron-расписаний (строки в `beat_schedule` + lock
   coalescing + `run_id`). KEDA/Temporal/k8s Job-runner **не вводятся**.
-- **Обязательная доработка:** `ProjectIdlePauseService._last_activity_at`
-  (`idle_pause.py:25-40`) считает idle только по agent-сессиям и не видит активные
-  job'ы. Добавляется реестр активных `job_id` с lease, иначе backend уснёт посреди
-  xlsx-экспорта (acceptance №14 в v3 не был реализуем).
+- **A7 отменён (2026-11-09):** `ProjectIdlePauseService` принадлежит агентским
+  проектам и **не изменяется** для plugin jobs. Plugin activator ведёт собственный
+  реестр активных `job_id` с lease (`ActivationState.active_job_ids`) и не
+  усыпляет plugin workload посреди задачи. Это target-инвариант, не completed
+  acceptance; ADR-008 фиксирует разделение lifecycle.
 - Wake-up по событию делает Plugin Gateway при публикации (он владеет lifecycle).
 
 ### 7.5 Webhook-контракт
@@ -820,34 +875,52 @@ Wake-up триггеры: HTTP (iframe, webhook, pluginpage), cron перед с
 
 ---
 
-## 8. Путь миграции: цель «под нож», метод — strangler
+## 8. Путь миграции: STOP для текущего cutover, target — code-first strangler
 
-Разрешаем противоречие v1: **«всё под нож» — про конечное состояние, а не про способ перехода.** В финале declarative-app (`module_meta_documents`, generic runtime, `module_instance_data_rows`, `ModuleRuntime.tsx`) удалён полностью. Параллельный прогон нужен **только из-за объёма кода**, а не из-за данных:
+**Текущее решение после независимого аудита: STOP-SHIP.** S1 остаётся рабочим
+продуктом, plugin v4 не является подтверждённым vertical slice. Старый план
+«сначала дропнуть таблицы, затем удалить код» отменён: он оставляет действующие
+readers/writers и исторические migrations в неконсистентном состоянии.
 
-- `mod_equipment` — ~13k строк: 18 Python-файлов (9 678 строк) + 16 TS/TSX (3 485 строк), отдельная страница `/equipment`, Celery beat/sweep, MCP-сервер, OpenSearch-индексы.
-- Это **dev-разработка**: данные эфемерны, бэкапы не нужны, перенос данных не нужен, DOWN-миграции платформы не требуются. Любые тестовые данные создаются заново сидом.
+Конечная цель удалить declarative-app сохраняется как **target**, но порядок
+только code-first expand/contract A→B:
 
-**Этапы:**
+1. S1 и additive expand не трогают действующие `module_*` таблицы, runtime и
+   migration-only helpers.
+2. Plugin vertical slice должен быть отдельно подтверждён live по acceptance map;
+   написанный код и исторические тестовые числа не засчитываются.
+3. Каждый bounded context переносится отдельным решением, с собственными CI и
+   import-graph доказательствами отсутствия старых зависимостей.
+4. Только после удаления runtime readers/writers и отдельного contract-решения
+   допускается новая финальная schema revision.
 
-1. **Инфраструктура** — tenant PostgreSQL (отдельный Deployment/Service/Secret), роли/БД при grant, PgBouncer, `pgaudit`, **PluginClaims + `/capabilities/v1/*`** (а не расширение `:8001`), OCI/cosign в CI, bucket-per-tenant + STS, Redpanda dispatch, egress-генератор, Ingress priority 120, Plugin Gateway + activator, `ignoreDifferences`. Declarative-app работает как прежде.
-2. **Пилот** — первый плагин с собственными таблицами и Liquibase-миграциями за фича-флагом `plugin_enabled_modules[]`. Данные — только тестовые, созданные сидом плагина.
-3. **Перенос frontend** — страница плагина в iframe; backend-логика пока в API.
-4. **Перенос backend по одному bounded context'у** — офферы → цены → бюджет → документы → тендеры. Каждый шаг за флагом; старый путь можно просто выключить, сравнивать нечего.
-5. **Cutover** — переключение флага.
-6. **Удаление** — убрать declarative-app, `mod_management` перевести на plugin, старые таблицы `module_*` дропаются ревизией Alembic без переноса содержимого.
+**Сейчас запрещено:** переносить pending `2026110802` в `alembic/versions/`,
+выполнять `strangler/removal.py`, удалять `product_module_upsert`, product
+seeds или `management_module_merge`. Applied migrations не редактируются.
 
-Ни `migrate-to-plugin`, ни snapshot, ни dual-read/dual-write, ни «сверка контрольных сумм», ни «N недель наблюдения» — **не требуются**. Все доводы v2 про потерю данных были про prod-данные, которых на dev нет.
+Будущая финальная ревизия создаётся только после code-first removal, **без env
+guard** и со **schema-only downgrade**; она не восстанавливает данные. Pending
+файл не является такой готовой ревизией. Полный безопасный порядок и объяснение,
+почему historical writers не выполняются на каждом повторном `upgrade head`, —
+[plugin-cutover-safety.md](../migration/plugin-cutover-safety.md).
+
+Отсутствие потребности в backup/dual-read **dev-данных** не отменяет source
+snapshot/patch в предложенном ADR-009 и не превращает feature flag в доказательство
+работающей новой ветки.
 
 ---
 
 ## 9. Формат работы
 
-- Ветка: `main` (dev), без feature-веток. Микрокоммиты `git add -A && git commit && git push`, без гигиены и без переписывания истории.
-- Каждый коммит → PR в main → CI Gate → auto-merge → CI Images → Argo → Verify Dev.
-- Тесты пишутся как часть реализации, но **не запускаются** до явного решения (verification freeze). Исключение: инфраструктурные проверки, требующие живого кластера, выносятся в Verify Dev.
-- Изоляция между субагентами — по файлам/директориям; общий коммит делается одной командой без «кто чьё закоммитил».
+Действуют корневой `AGENTS.md`, текущий verification freeze и отдельные решения
+о снятии freeze. Этот design snapshot **не разрешает** commit/push/deploy,
+включение plugin platform, выполнение cutover или запуск формальной верификации.
+Старый абзац про работу прямо на `main` — исторический и не применяется к
+изолированным migration worktrees.
 
-Подробнее: [`docs/workflow/main-branch-workflow.md`](../workflow/main-branch-workflow.md).
+Написанные тесты и acceptance-планы остаются планами до live evidence. Текущий
+статус — [STOP-SHIP](../migration/plugin-migration-status.md); чек-боксы —
+[acceptance map](../migration/plugin-acceptance-map.md).
 
 ---
 
@@ -912,7 +985,7 @@ Wake-up триггеры: HTTP (iframe, webhook, pluginpage), cron перед с
 2. **Cross-module sharing** — пока запрещено; если понадобится, только через явный grant в gateway.
 3. **Маркетплейс** — публикация/установка плагинов, отдельный документ.
 4. **Billing** — привязка `quota_ref` к тарифу.
-5. **ADR-008** — разделение lifecycle агентов/плагинов и выбор собственного activator (обязателен до реализации §7.4).
+5. **ADR-008** — принят как target: разделение lifecycle и собственный activator. Это не подтверждение реализации §7.4 и не основание снять emergency disabled.
 6. **Переход на wildcard subdomain** — условия в §5.3 (публичный домен, cert-manager DNS-01, whitelist kinds).
 7. **KEDA HTTP Add-on** — целевой вариант после снятия ограничений whitelist/бюджета; в v4 не вводится.
 8. **MinIO STS** — официальная документация `AssumeRole` / session policy /
@@ -981,11 +1054,11 @@ Wake-up триггеры: HTTP (iframe, webhook, pluginpage), cron перед с
 5. CI: `provenance`/`sbom` = true, cosign keyless, pin по digest; реестр на `AppVersion`/`RegistryOutcome`.
 6. Egress-генератор (правила из grant в БД) + две NP + единая схема аудита + CSP/static-origin.
 7. Plugin Gateway + Ingress (`router.priority: 120`) + тест приоритетов + webhook-контракт.
-8. Redpanda dispatch (`agentscale.plugin.events`, ручной commit/DLQ/earliest) + реестр активных `job_id` в idle-pause.
+8. Redpanda dispatch (`agentscale.plugin.events`, ручной commit/DLQ/earliest) + реестр активных `job_id` **в plugin ActivationState**; `ProjectIdlePauseService` агентов не изменять (A7 отменён).
 9. Activator: `Deployment replicas: 0` + wake/hold-until-Ready + `ignoreDifferences /spec/replicas`; агенты остаются на `SandboxClaim`.
 10. Пилотный плагин за фича-флагом `plugin_enabled_modules[]` с собственными таблицами, Liquibase и тестовыми данными.
 11. Strangler по контекстам `mod_equipment` → cutover → удаление declarative-app.
 
 ---
 
-**Конец документа.** Дизайн, не код. Реализация через субагентов на main; микрокоммиты `git add -A && git commit && git push`, без гигиены и без переписывания истории; тесты пишутся, но не запускаются до явного решения. Блокирующее условие — принятие ADR-008 (принят). MinIO STS снят через выбор scoped presigned по умолчанию.
+**Конец документа.** Это target-design snapshot, не код и не acceptance. ADR-006/007/008 приняты как target, ADR-009 — **Предложено**. Plugin platform emergency disabled; cutover остановлен. MinIO STS остаётся опциональным, scoped presigned — target default. Актуальные решения и live evidence находятся только в связанных ADR, STOP-SHIP status и acceptance map.

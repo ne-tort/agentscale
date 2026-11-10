@@ -63,3 +63,15 @@ infra/.kube/*
 # Scratch files: probes, tsc dumps, junit captures written during a run
 apps/*/_*.txt
 apps/*/_probe_*.py
+
+# Local run logs. Sanitized, cited evidence lives in reports/module-audit/ and is
+# committed explicitly; personal pytest/vitest captures never belong in git.
+apps/api/*.log
+apps/web/_*.log
+
+# Raw local verification captures (sanitized evidence lives in reports/module-audit/).
+.scratch-evidence/
+apps/api/artifacts/
+
+# Local verification tool binaries downloaded during audit (never commit)
+.scratch-evidence/tools/

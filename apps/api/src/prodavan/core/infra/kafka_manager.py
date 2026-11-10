@@ -3,11 +3,26 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from collections import deque
 from typing import Any, Literal
 
+from prodavan.core.events.auth_command import (
+    AuthCommandError,
+    validate_auth_command_signing_secret,
+    verified_auth_command_envelope,
+    verify_auth_command_envelope,
+)
+from prodavan.core.events.auth_event import (
+    AuthEventError,
+    AuthEventReplay,
+    sign_auth_event_envelope,
+    validate_auth_event_signing_secret,
+    verified_auth_event_envelope,
+    verify_auth_event_envelope,
+)
 from prodavan.core.events.envelope import EventEnvelope
 from prodavan.core.lifespan.resource import LifespanResource
 
@@ -59,7 +74,9 @@ class KafkaManager(LifespanResource):
         topic_platform_events: str = "prodavan.platform.events",
         topic_project_triggers: str = "prodavan.project.triggers",
         topic_auth_commands: str = "prodavan.auth.commands",
+        topic_auth_command_dlq: str | None = None,
         topic_auth_events: str = "prodavan.auth.events",
+        topic_auth_event_dlq: str | None = None,
         topic_relation_events: str = "prodavan.relation.events",
         topic_metrics_events: str = "prodavan.metrics.events",
         topic_document_events: str = "prodavan.document.events",
@@ -76,6 +93,8 @@ class KafkaManager(LifespanResource):
         rematerialize_via_bus: bool = False,
         drain_debounce_sec: float = 1.0,
         consumer_mode: str = "kick",
+        auth_command_signing_secret: str | None = None,
+        auth_event_signing_secret: str | None = None,
     ) -> None:
         self._enabled = enabled
         self._bootstrap = (bootstrap_servers or "").strip() or None
@@ -83,7 +102,9 @@ class KafkaManager(LifespanResource):
         self._topic_platform = topic_platform_events
         self._topic_triggers = topic_project_triggers
         self._topic_auth_commands = topic_auth_commands
+        self._topic_auth_command_dlq = topic_auth_command_dlq or f"{topic_auth_commands}.dlq"
         self._topic_auth_events = topic_auth_events
+        self._topic_auth_event_dlq = topic_auth_event_dlq or f"{topic_auth_events}.dlq"
         self._topic_relation_events = topic_relation_events
         self._topic_metrics_events = topic_metrics_events
         self._topic_document_events = topic_document_events
@@ -120,6 +141,29 @@ class KafkaManager(LifespanResource):
         self._auth_bind_enqueues: int = 0
         self._relation_events_handled: int = 0
         self._local_auth_depth: int = 0
+        self._auth_command_signing_secret_override = auth_command_signing_secret
+        self._auth_commands_rejected: int = 0
+        self._auth_commands_dlq: int = 0
+        self._auth_command_dlq_buffer: deque[dict[str, Any]] = deque(maxlen=max(1, buffer_size))
+        self._auth_event_signing_secret_override = auth_event_signing_secret
+        self._auth_events_rejected: int = 0
+        self._auth_events_dlq: int = 0
+        self._auth_event_dlq_buffer: deque[dict[str, Any]] = deque(maxlen=max(1, buffer_size))
+
+    def _auth_command_secret(self) -> str | None:
+        if self._auth_command_signing_secret_override is not None:
+            return self._auth_command_signing_secret_override
+        from prodavan.config.settings import settings
+
+        return settings.auth_command_signing_secret
+
+    def _auth_event_secret(self) -> str | None:
+        if self._auth_event_signing_secret_override is not None:
+            return self._auth_event_signing_secret_override
+        from prodavan.config.settings import settings
+
+        return settings.auth_event_signing_secret
+
     @property
     def name(self) -> str:
         return "kafka"
@@ -163,6 +207,30 @@ class KafkaManager(LifespanResource):
     def rematerialize_enqueues(self) -> int:
         return self._rematerialize_enqueues
 
+    @property
+    def auth_commands_rejected(self) -> int:
+        return self._auth_commands_rejected
+
+    @property
+    def auth_commands_dlq(self) -> int:
+        return self._auth_commands_dlq
+
+    def recent_auth_command_dlq(self) -> list[dict[str, Any]]:
+        """Sanitized rejection metadata, never the original command payload."""
+
+        return list(self._auth_command_dlq_buffer)
+
+    @property
+    def auth_events_rejected(self) -> int:
+        return self._auth_events_rejected
+
+    @property
+    def auth_events_dlq(self) -> int:
+        return self._auth_events_dlq
+
+    def recent_auth_event_dlq(self) -> list[dict[str, Any]]:
+        return list(self._auth_event_dlq_buffer)
+
     def topic_for(self, bus: str) -> str:
         if bus == "platform":
             return self._topic_platform
@@ -194,8 +262,38 @@ class KafkaManager(LifespanResource):
         """Drop in-memory auth buffer between integration tests (no-broker path)."""
         self._buffer.clear()
         self._local_auth_depth = 0
+        self._auth_command_dlq_buffer.clear()
+        self._auth_commands_rejected = 0
+        self._auth_commands_dlq = 0
+        self._auth_event_dlq_buffer.clear()
+        self._auth_events_rejected = 0
+        self._auth_events_dlq = 0
 
     async def publish(self, envelope: EventEnvelope) -> bool:
+        if envelope.bus == "auth_command":
+            try:
+                # Even an internally constructed envelope cannot bypass signing.
+                verify_auth_command_envelope(envelope, signing_secret=self._auth_command_secret())
+            except AuthCommandError as exc:
+                await self._reject_auth_command(envelope.to_dict(), exc.code)
+                return False
+            try:
+                # A command must never create a Keycloak user if its result cannot
+                # subsequently pass the independent signed identity-bind path.
+                validate_auth_event_signing_secret(self._auth_event_secret())
+            except AuthEventError as exc:
+                await self._reject_auth_command(envelope.to_dict(), exc.code)
+                return False
+        if envelope.bus == "auth_event":
+            try:
+                # Direct domain calls may return an unsigned result; the trusted
+                # bus producer is the single edge that signs every auth event.
+                if envelope.signature is None:
+                    sign_auth_event_envelope(envelope, signing_secret=self._auth_event_secret())
+                verify_auth_event_envelope(envelope, signing_secret=self._auth_event_secret())
+            except AuthEventError as exc:
+                await self._reject_auth_event(envelope.to_dict(), exc.code)
+                return False
         payload = envelope.to_dict()
         self._buffer.append(payload)
         if not self.enabled:
@@ -214,10 +312,20 @@ class KafkaManager(LifespanResource):
         try:
             await self._producer.send_and_wait(topic, value=value, key=key)
             return True
-        except Exception:
-            logger.exception("kafka: publish failed topic=%s id=%s", topic, envelope.event_id)
-            if self._required:
-                raise
+        except Exception as exc:
+            if envelope.bus in {"auth_command", "auth_event"}:
+                # Broker errors can echo serialized values (including refs/PII).
+                logger.error(
+                    "kafka: auth bus publish failed bus=%s error_type=%s",
+                    envelope.bus,
+                    type(exc).__name__,
+                )
+                if self._required:
+                    raise RuntimeError("auth bus publish failed") from None
+            else:
+                logger.exception("kafka: publish failed topic=%s id=%s", topic, envelope.event_id)
+                if self._required:
+                    raise
             return False
 
     async def _local_auth_dispatch(self, envelope: EventEnvelope) -> None:
@@ -230,31 +338,36 @@ class KafkaManager(LifespanResource):
             if envelope.bus == "auth_command":
                 from prodavan.application.auth.register import handle_auth_command_envelope
 
-                result = await handle_auth_command_envelope(envelope)
+                result = await handle_auth_command_envelope(
+                    envelope, signing_secret=self._auth_command_secret()
+                )
                 self._auth_register_handled += 1
                 if result is not None:
                     await self.publish(result)
                 return
             if envelope.bus == "auth_event":
-                from prodavan.application.auth.register import AUTH_USER_REGISTERED
-
-                if envelope.event_type != AUTH_USER_REGISTERED:
-                    return
-                # Bind in-process (Identity SoT). Celery optional fan-out is unreliable
-                # across prefork event loops — never gate identity bind on the queue.
-                await self._apply_auth_bind(envelope.payload or {})
+                # Same signed/fresh/one-time lifecycle as the broker consumer.
+                await self._handle_auth_event_envelope(envelope)
                 return
             if envelope.bus == "relation_event":
                 from prodavan.application.relations.commands import handle_relation_event_envelope
 
                 await handle_relation_event_envelope(envelope)
                 self._relation_events_handled += 1
-        except Exception:
-            logger.exception(
-                "kafka: local auth dispatch failed bus=%s type=%s",
+        except AuthCommandError as exc:
+            await self._reject_auth_command(envelope.to_dict(), exc.code)
+        except AuthEventError as exc:
+            await self._reject_auth_event(envelope.to_dict(), exc.code)
+        except Exception as exc:
+            # Exception messages/tracebacks may contain command data.
+            logger.error(
+                "kafka: local auth dispatch failed bus=%s type=%s error_type=%s",
                 envelope.bus,
                 envelope.event_type,
+                type(exc).__name__,
             )
+            if envelope.bus == "auth_event":
+                await self._reject_auth_event(envelope.to_dict(), "AUTH_EVENT_HANDLER_FAILED")
         finally:
             self._local_auth_depth -= 1
 
@@ -398,19 +511,129 @@ class KafkaManager(LifespanResource):
                 self._dispatch_enqueues,
             )
 
+    async def _reject_auth_command(
+        self,
+        data: dict[str, Any],
+        reason: str,
+        *,
+        source_partition: int | None = None,
+        source_offset: int | None = None,
+    ) -> bool:
+        """Dead-letter sanitized metadata only; never copy command payload/secrets."""
+
+        self._auth_commands_rejected += 1
+        raw_event_id = str(data.get("event_id") or "")[:200]
+        # Rejected input is attacker-controlled: never echo its fields into
+        # logs/DLQ, even if a secret was copied into an unexpected field.
+        event_id_hash = hashlib.sha256(raw_event_id.encode("utf-8")).hexdigest()[:16]
+        record = {
+            "schema_version": 1,
+            "event_id_hash": event_id_hash,
+            "source_topic": self._topic_auth_commands,
+            "source_partition": source_partition,
+            "source_offset": source_offset,
+            "rejected_at": EventEnvelope.now_iso(),
+            "reason": reason,
+        }
+        self._auth_command_dlq_buffer.append(record)
+        logger.warning(
+            "kafka: auth command rejected reason=%s id_hash=%s offset=%s",
+            reason,
+            event_id_hash,
+            source_offset,
+        )
+        if not self.enabled:
+            self._auth_commands_dlq += 1
+            return True
+        try:
+            await self._producer.send_and_wait(
+                self._topic_auth_command_dlq,
+                value=json.dumps(record, ensure_ascii=False).encode("utf-8"),
+                key=event_id_hash.encode("utf-8"),
+            )
+            self._auth_commands_dlq += 1
+            return True
+        except Exception:
+            # Do not expose broker exception text, which may echo message bytes.
+            logger.error("kafka: auth command DLQ publish failed reason=%s", reason)
+            return False
+
+    async def _process_auth_command_data(
+        self,
+        data: dict[str, Any],
+        *,
+        source_partition: int | None = None,
+        source_offset: int | None = None,
+    ) -> bool:
+        """Verify raw Kafka data first; only then parse and dispatch the command."""
+
+        from prodavan.application.auth.register import handle_auth_command_envelope
+
+        try:
+            envelope = verified_auth_command_envelope(
+                data, signing_secret=self._auth_command_secret()
+            )
+        except AuthCommandError as exc:
+            await self._reject_auth_command(
+                data,
+                exc.code,
+                source_partition=source_partition,
+                source_offset=source_offset,
+            )
+            return False
+        try:
+            validate_auth_event_signing_secret(self._auth_event_secret())
+        except AuthEventError as exc:
+            await self._reject_auth_command(
+                data,
+                exc.code,
+                source_partition=source_partition,
+                source_offset=source_offset,
+            )
+            return False
+        try:
+            result = await handle_auth_command_envelope(
+                envelope, signing_secret=self._auth_command_secret()
+            )
+            self._auth_register_handled += 1
+            if result is not None:
+                await self.publish(result)
+            return True
+        except AuthCommandError as exc:
+            await self._reject_auth_command(
+                data,
+                exc.code,
+                source_partition=source_partition,
+                source_offset=source_offset,
+            )
+            return False
+        except Exception as exc:
+            logger.error(
+                "kafka: auth command handler failed id=%s error_type=%s",
+                envelope.event_id,
+                type(exc).__name__,
+            )
+            await self._reject_auth_command(
+                data,
+                "AUTH_COMMAND_HANDLER_FAILED",
+                source_partition=source_partition,
+                source_offset=source_offset,
+            )
+            return False
+
     async def _consume_auth_commands(self, stop: asyncio.Event) -> None:
         assert self._auth_commands_consumer is not None
-        from prodavan.application.auth.register import handle_auth_command_envelope
-        from prodavan.core.events.envelope import EventEnvelope
 
         try:
             while not stop.is_set():
                 try:
                     batch = await self._auth_commands_consumer.getmany(timeout_ms=500, max_records=20)
-                except Exception:
+                except Exception as exc:
                     if stop.is_set():
                         break
-                    logger.exception("kafka: auth commands getmany failed")
+                    logger.error(
+                        "kafka: auth commands getmany failed error_type=%s", type(exc).__name__
+                    )
                     await asyncio.sleep(1.0)
                     continue
                 if not batch:
@@ -419,45 +642,151 @@ class KafkaManager(LifespanResource):
                     for msg in messages:
                         try:
                             data = json.loads(msg.value.decode("utf-8"))
-                            envelope = EventEnvelope(
-                                bus=data.get("bus") or "auth_command",
-                                event_id=str(data.get("event_id") or ""),
-                                event_type=str(data.get("event_type") or ""),
-                                occurred_at=str(data.get("occurred_at") or EventEnvelope.now_iso()),
-                                company_id=data.get("company_id"),
-                                project_id=data.get("project_id"),
-                                cabinet_id=data.get("cabinet_id"),
-                                payload=dict(data.get("payload") or {}),
-                                schema_version=int(data.get("schema_version") or 1),
+                            if not isinstance(data, dict):
+                                raise TypeError("auth command envelope must be an object")
+                        except Exception:
+                            await self._reject_auth_command(
+                                {},
+                                "AUTH_COMMAND_JSON_INVALID",
+                                source_partition=getattr(msg, "partition", None),
+                                source_offset=getattr(msg, "offset", None),
                             )
-                        except Exception:
-                            logger.warning("kafka: skip bad auth command offset=%s", msg.offset)
                             continue
-                        try:
-                            result = await handle_auth_command_envelope(envelope)
-                            self._auth_register_handled += 1
-                            if result is not None:
-                                await self.publish(result)
-                        except Exception:
-                            logger.exception("kafka: auth command handle failed id=%s", envelope.event_id)
+                        await self._process_auth_command_data(
+                            data,
+                            source_partition=getattr(msg, "partition", None),
+                            source_offset=getattr(msg, "offset", None),
+                        )
         finally:
             logger.info(
-                "kafka: auth commands consumer stopped handled=%s",
+                "kafka: auth commands consumer stopped handled=%s rejected=%s dlq=%s",
                 self._auth_register_handled,
+                self._auth_commands_rejected,
+                self._auth_commands_dlq,
             )
+
+    async def _reject_auth_event(
+        self,
+        data: dict[str, Any],
+        reason: str,
+        *,
+        source_partition: int | None = None,
+        source_offset: int | None = None,
+    ) -> bool:
+        """Reject auth events without binding or copying potentially forged payload."""
+
+        self._auth_events_rejected += 1
+        raw_event_id = str(data.get("event_id") or "")[:200]
+        event_id_hash = hashlib.sha256(raw_event_id.encode("utf-8")).hexdigest()[:16]
+        record = {
+            "schema_version": 1,
+            "event_id_hash": event_id_hash,
+            "source_topic": self._topic_auth_events,
+            "source_partition": source_partition,
+            "source_offset": source_offset,
+            "rejected_at": EventEnvelope.now_iso(),
+            "reason": reason,
+        }
+        self._auth_event_dlq_buffer.append(record)
+        logger.warning(
+            "kafka: auth event rejected reason=%s id_hash=%s offset=%s",
+            reason,
+            event_id_hash,
+            source_offset,
+        )
+        if not self.enabled:
+            self._auth_events_dlq += 1
+            return True
+        try:
+            await self._producer.send_and_wait(
+                self._topic_auth_event_dlq,
+                value=json.dumps(record, ensure_ascii=False).encode("utf-8"),
+                key=event_id_hash.encode("utf-8"),
+            )
+            self._auth_events_dlq += 1
+            return True
+        except Exception:
+            logger.error("kafka: auth event DLQ publish failed reason=%s", reason)
+            return False
+
+    async def _handle_auth_event_envelope(self, envelope: EventEnvelope) -> bool:
+        from prodavan.application.auth.event_replay import claim_auth_event_once
+        from prodavan.application.auth.register import AUTH_USER_REGISTERED
+
+        verify_auth_event_envelope(envelope, signing_secret=self._auth_event_secret())
+        try:
+            claimed = await claim_auth_event_once(envelope.event_id)
+        except Exception:
+            raise AuthEventError(
+                "AUTH_EVENT_REPLAY_STORE_UNAVAILABLE",
+                "Auth event replay store is unavailable",
+            ) from None
+        if not claimed:
+            raise AuthEventReplay("AUTH_EVENT_REPLAYED", "Auth event was already consumed")
+        if envelope.event_type != AUTH_USER_REGISTERED:
+            return False
+        # Bind in-process only after separate event provenance + one-time claim.
+        await self._apply_auth_bind(envelope.payload or {})
+        return True
+
+    async def _process_auth_event_data(
+        self,
+        data: dict[str, Any],
+        *,
+        source_partition: int | None = None,
+        source_offset: int | None = None,
+    ) -> bool:
+        """Verify raw event HMAC/freshness before identity bind."""
+
+        try:
+            envelope = verified_auth_event_envelope(
+                data, signing_secret=self._auth_event_secret()
+            )
+        except AuthEventError as exc:
+            await self._reject_auth_event(
+                data,
+                exc.code,
+                source_partition=source_partition,
+                source_offset=source_offset,
+            )
+            return False
+        try:
+            await self._handle_auth_event_envelope(envelope)
+            return True
+        except AuthEventError as exc:
+            await self._reject_auth_event(
+                data,
+                exc.code,
+                source_partition=source_partition,
+                source_offset=source_offset,
+            )
+            return False
+        except Exception as exc:
+            logger.error(
+                "kafka: auth event handler failed error_type=%s",
+                type(exc).__name__,
+            )
+            await self._reject_auth_event(
+                data,
+                "AUTH_EVENT_HANDLER_FAILED",
+                source_partition=source_partition,
+                source_offset=source_offset,
+            )
+            return False
 
     async def _consume_auth_events(self, stop: asyncio.Event) -> None:
         assert self._auth_events_consumer is not None
-        from prodavan.application.auth.register import AUTH_USER_REGISTERED
 
         try:
             while not stop.is_set():
                 try:
                     batch = await self._auth_events_consumer.getmany(timeout_ms=500, max_records=20)
-                except Exception:
+                except Exception as exc:
                     if stop.is_set():
                         break
-                    logger.exception("kafka: auth events getmany failed")
+                    logger.error(
+                        "kafka: auth events getmany failed error_type=%s", type(exc).__name__
+                    )
                     await asyncio.sleep(1.0)
                     continue
                 if not batch:
@@ -466,25 +795,27 @@ class KafkaManager(LifespanResource):
                     for msg in messages:
                         try:
                             data = json.loads(msg.value.decode("utf-8"))
+                            if not isinstance(data, dict):
+                                raise TypeError("auth event envelope must be an object")
                         except Exception:
-                            logger.warning("kafka: skip bad auth event offset=%s", msg.offset)
-                            continue
-                        if data.get("bus") != "auth_event":
-                            continue
-                        if data.get("event_type") != AUTH_USER_REGISTERED:
-                            continue
-                        payload = dict(data.get("payload") or {})
-                        try:
-                            await self._apply_auth_bind(payload)
-                        except Exception:
-                            logger.exception(
-                                "kafka: auth bind failed client_ref=%s",
-                                payload.get("client_ref"),
+                            await self._reject_auth_event(
+                                {},
+                                "AUTH_EVENT_JSON_INVALID",
+                                source_partition=getattr(msg, "partition", None),
+                                source_offset=getattr(msg, "offset", None),
                             )
+                            continue
+                        await self._process_auth_event_data(
+                            data,
+                            source_partition=getattr(msg, "partition", None),
+                            source_offset=getattr(msg, "offset", None),
+                        )
         finally:
             logger.info(
-                "kafka: auth events consumer stopped binds=%s",
+                "kafka: auth events consumer stopped binds=%s rejected=%s dlq=%s",
                 self._auth_bind_enqueues,
+                self._auth_events_rejected,
+                self._auth_events_dlq,
             )
 
     async def _consume_relation_events(self, stop: asyncio.Event) -> None:
@@ -578,7 +909,9 @@ class KafkaManager(LifespanResource):
             self._topic_platform,
             self._topic_triggers,
             self._topic_auth_commands,
+            self._topic_auth_command_dlq,
             self._topic_auth_events,
+            self._topic_auth_event_dlq,
             self._topic_relation_events,
             self._topic_metrics_events,
             self._topic_document_events,
@@ -621,6 +954,18 @@ class KafkaManager(LifespanResource):
 
     async def startup(self) -> None:
         set_kafka_manager(self)
+        if self._consumer_enabled:
+            try:
+                # Auth consumers must never start with a missing/dev-fallback key.
+                validate_auth_command_signing_secret(self._auth_command_secret())
+            except AuthCommandError:
+                set_kafka_manager(None)
+                raise
+            try:
+                validate_auth_event_signing_secret(self._auth_event_secret())
+            except AuthEventError:
+                set_kafka_manager(None)
+                raise
         if not self._enabled:
             logger.info("kafka: disabled (KAFKA_ENABLED=false); dual-write uses memory buffer only")
             return

@@ -17,11 +17,12 @@ Fail-closed: ``QuotaPort`` отсутствует/ошибается → отк�
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from threading import Lock
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from prodavan.application.plugins.capabilities.contracts import TypedContractError
 
@@ -39,6 +40,17 @@ class QuotaOp(StrEnum):
     KEYS = "keys"
     OBJECT_BYTES = "object_bytes"
     EGRESS_BYTES = "egress_bytes"
+
+
+QUOTA_FIELDS = (
+    "ops_per_minute",
+    "max_rows",
+    "max_bytes",
+    "max_keys",
+    "max_object_bytes",
+    "max_egress_bytes",
+)
+"""Обязательные шесть лимитов durable grant; порядок не является defaults."""
 
 
 class QuotaReason(StrEnum):
@@ -133,6 +145,62 @@ class PluginQuota:
         except KeyError as exc:
             raise TypedContractError(f"unknown quota operation: {op!r}") from exc
 
+    @classmethod
+    def from_grant(cls, raw: Any) -> PluginQuota:
+        """Сконвертировать именно ``invocation.grant.quotas`` без defaults/coercion.
+
+        Поддерживаются durable ``QuotaSet`` и JSON-подобный mapping. Отсутствие
+        любого из шести полей — ошибка, а не повод подставить ``PluginQuota()``.
+        """
+        if raw is None or isinstance(raw, (str, bytes, bytearray)):
+            raise TypedContractError("grant.quotas must contain all six limits")
+        missing = object()
+        values: dict[str, int] = {}
+        for name in QUOTA_FIELDS:
+            value = raw.get(name, missing) if isinstance(raw, Mapping) else getattr(raw, name, missing)
+            if value is missing:
+                raise TypedContractError(f"grant.quotas.{name} is required")
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise TypedContractError(f"grant.quotas.{name} must be a positive integer")
+            values[name] = value
+        return cls(**values)
+
+
+@dataclass(frozen=True, slots=True)
+class QuotaUsage:
+    """Полные единицы одного invoke, измеренные typed server-side meter'ом.
+
+    Все поля обязательны: отсутствие измерения нельзя замаскировать под ноль.
+    Ноль допустим только как явный результат meter'а для неприменимой единицы.
+    """
+
+    ops: int
+    rows: int
+    bytes: int
+    keys: int
+    object_bytes: int
+    egress_bytes: int
+
+    def __post_init__(self) -> None:
+        for name in ("ops", "rows", "bytes", "keys", "object_bytes", "egress_bytes"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise TypedContractError(f"quota usage {name} must be a non-negative integer")
+
+    def amount_for(self, op: QuotaOp) -> int:
+        amounts = {
+            QuotaOp.OPS: self.ops,
+            QuotaOp.ROWS: self.rows,
+            QuotaOp.BYTES: self.bytes,
+            QuotaOp.KEYS: self.keys,
+            QuotaOp.OBJECT_BYTES: self.object_bytes,
+            QuotaOp.EGRESS_BYTES: self.egress_bytes,
+        }
+        try:
+            return amounts[op]
+        except KeyError as exc:
+            raise TypedContractError(f"unknown quota operation: {op!r}") from exc
+
 
 @dataclass(frozen=True, slots=True)
 class QuotaDecision:
@@ -174,9 +242,19 @@ class QuotaDecision:
 
 @runtime_checkable
 class QuotaPort(Protocol):
-    """Граница проверки квот; enforcement ДО адаптера (§4.4)."""
+    """Enforcement ДО адаптера; ``limits`` обязателен из exact durable grant.
 
-    def enforce(self, key: PluginQuotaKey, op: QuotaOp, amount: int) -> QuotaDecision: ...
+    Хранилище не владеет policy/defaults. Каждый invoke вызывает OPS ровно один
+    раз и каждый ненулевой result dimension не более одного раза.
+    """
+
+    async def enforce(
+        self, key: PluginQuotaKey, op: QuotaOp, amount: int, limits: PluginQuota
+    ) -> QuotaDecision: ...
+
+    async def release(
+        self, key: PluginQuotaKey, op: QuotaOp, amount: int
+    ) -> None: ...
 
 
 class InMemoryQuota:
@@ -189,8 +267,13 @@ class InMemoryQuota:
     Redis-реализация с тем же ``cache_key()``.
     """
 
-    def __init__(self, quota: PluginQuota | None = None, *, now: datetime | None = None) -> None:
-        self._quota = quota or PluginQuota()
+    def __init__(
+        self, quota: PluginQuota | None = None, *, now: datetime | None = None
+    ) -> None:
+        # Compatibility for the existing composition root, which still passes
+        # PluginQuota(). It is deliberately NOT stored/read: enforce() requires
+        # exact invocation.grant.quotas on every call.
+        _ = quota
         self._now = now
         self._lock = Lock()
         self._ops: dict[tuple[str, str, str], list[tuple[float, int]]] = {}
@@ -205,8 +288,10 @@ class InMemoryQuota:
     def _current_time(self) -> float:
         return self._epoch(self._now) if self._now is not None else datetime.now(UTC).timestamp()
 
-    def enforce(self, key: PluginQuotaKey, op: QuotaOp, amount: int) -> QuotaDecision:
-        """Проверить И зарезервировать ``amount``; превышение → QUOTA_EXCEEDED.
+    async def enforce(
+        self, key: PluginQuotaKey, op: QuotaOp, amount: int, limits: PluginQuota
+    ) -> QuotaDecision:
+        """Проверить И зарезервировать ``amount`` по exact-grant ``limits``.
 
         Отказ НЕ изменяет счётчик (шумный плагин не «доедает» лимит соседей,
         но и не получает allow). Отрицательный ``amount`` отклоняется.
@@ -218,7 +303,12 @@ class InMemoryQuota:
         if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
             return self._deny(key, op, 0, QuotaReason.QUOTA_KEY_INVALID, 0, 0, "amount must be non-negative")
 
-        limit = self._quota.limit_for(op)
+        if not isinstance(limits, PluginQuota):
+            return self._deny(
+                key, op, amount, QuotaReason.QUOTA_KEY_INVALID, 0, 0,
+                "exact grant limits are required",
+            )
+        limit = limits.limit_for(op)
         ident = key.to_tuple()
         now = self._current_time()
 
@@ -250,6 +340,35 @@ class InMemoryQuota:
             self._counters[counter_key] = used + amount
             remaining = max(0, limit - (used + amount))
             return self._allow(key, op, amount, limit, used + amount, remaining)
+
+    async def release(
+        self, key: PluginQuotaKey, op: QuotaOp, amount: int
+    ) -> None:
+        """Вернуть ранее разрешённые единицы (откат составного резерва).
+
+        Нужен, когда запрос прошёл по OPS, но был отклонён по другой
+        размерности: без возврата отклонённый запрос съедал бы бюджет.
+        """
+        if not isinstance(key, PluginQuotaKey) or not isinstance(op, QuotaOp):
+            raise TypedContractError("invalid quota release key/op")
+        if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
+            return
+        ident = key.to_tuple()
+        with self._lock:
+            if op is QuotaOp.OPS:
+                events = list(self._ops.get(ident, ()))
+                remaining_budget = amount
+                kept: list[tuple[float, int]] = []
+                for ts, qty in reversed(events):
+                    if remaining_budget > 0 and qty <= remaining_budget:
+                        remaining_budget -= qty
+                        continue
+                    kept.append((ts, qty))
+                self._ops[ident] = list(reversed(kept))
+                return
+            counter_key = (ident, op)
+            used = self._counters.get(counter_key, 0)
+            self._counters[counter_key] = max(0, used - amount)
 
     @staticmethod
     def _allow(
@@ -315,6 +434,7 @@ def quota_key_from_claims(
 
 
 __all__ = [
+    "QUOTA_FIELDS",
     "InMemoryQuota",
     "PluginQuota",
     "PluginQuotaKey",
@@ -322,5 +442,6 @@ __all__ = [
     "QuotaOp",
     "QuotaPort",
     "QuotaReason",
+    "QuotaUsage",
     "quota_key_from_claims",
 ]

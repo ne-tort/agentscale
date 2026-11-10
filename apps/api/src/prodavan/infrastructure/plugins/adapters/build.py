@@ -52,6 +52,7 @@ from prodavan.application.plugins.gateway.ports import (
     GrantPort,
     SecretPort,
     SessionPort,
+    StaticResponsePolicy,
 )
 
 from .gateway_adapters import BackendHttpAdapter, BearerAuthorizationInjector
@@ -120,6 +121,7 @@ def build_gateway_runtime(
     backend_http: BackendHttpPort | None = None,
     static_http: BackendHttpPort | None = None,
     limits: GatewayLimits | None = None,
+    shell_origin: str | None = None,
     inject_trusted_bearer: bool = True,
 ) -> PluginGatewayRuntime:
     """Собрать ``PluginGatewayRuntime`` из 9 адаптеров + лимитов.
@@ -147,6 +149,7 @@ def build_gateway_runtime(
             "BackendHttpPort": backend_http,
             "static_http": static_http,
             "GatewayLimits": limits,
+            "PLUGIN_SHELL_ORIGIN": shell_origin,
         }
     )
 
@@ -156,7 +159,11 @@ def build_gateway_runtime(
         (sessions, "SessionPort", ("resolve", "employee_in_company")),
         (grants, "GrantPort", ("active_grant", "public_pages")),
         (secrets, "SecretPort", ("webhook_secret",)),
-        (rate_limit, "RateLimitPort", ("allow", "claim_delivery")),
+        (
+            rate_limit,
+            "RateLimitPort",
+            ("allow", "claim_delivery_lease", "commit_delivery", "release_delivery"),
+        ),
         (audit, "AuditPort", ("record",)),
         (hmac_verifier, "HmacPort", ("verify",)),
         (activation, "ActivationPort", ("wake", "wait_ready")),
@@ -193,6 +200,9 @@ def build_gateway_runtime(
         static_http=static_http,
         audit=audit,  # type: ignore[arg-type]
         limits=limits,  # type: ignore[arg-type]
+        static_response_policy=StaticResponsePolicy(
+            shell_origin=shell_origin or ""
+        ),
     )
     return PluginGatewayRuntime(auth=auth, proxy=proxy)
 
@@ -208,9 +218,11 @@ def build_event_dispatcher(
     consumer: Any | None = None,
     topic_admin: Any | None = None,
     dlq: Any | None = None,
+    raw_dlq: Any | None = None,
     subscriptions: Any | None = None,
     published_events: Any | None = None,
     idempotency: Any | None = None,
+    delivery_claims: Any | None = None,
     audit: Any | None = None,
     handler: Any | None = None,
     wake_hook: Any | None = None,
@@ -231,9 +243,11 @@ def build_event_dispatcher(
             "ConsumerPort": consumer,
             "TopicAdminPort": topic_admin,
             "DlqPort": dlq,
+            "RawDlqPort": raw_dlq,
             "SubscriptionStorePort": subscriptions,
             "PublishedEventStorePort": published_events,
             "IdempotencyStorePort": idempotency,
+            "DeliveryClaimPort": delivery_claims,
             "AuditPort": audit,
             "EventHandlerPort": handler,
             "WakeHookPort": wake_hook,
@@ -241,12 +255,14 @@ def build_event_dispatcher(
     )
     shapes = (
         (producer, "ProducerPort", ("send", "flush")),
-        (consumer, "ConsumerPort", ("poll", "commit", "seek", "close")),
+        (consumer, "ConsumerPort", ("poll", "commit", "seek", "close", "delivery_ownership")),
         (topic_admin, "TopicAdminPort", ("topic_exists", "create_topic")),
         (dlq, "DlqPort", ("publish",)),
+        (raw_dlq, "RawDlqPort", ("publish",)),
         (subscriptions, "SubscriptionStorePort", ("get", "is_active")),
         (published_events, "PublishedEventStorePort", ("seen", "remember")),
         (idempotency, "IdempotencyStorePort", ("seen", "remember")),
+        (delivery_claims, "DeliveryClaimPort", ("acquire", "renew", "complete", "release")),
         (audit, "AuditPort", ("append",)),
         (handler, "EventHandlerPort", ("handle",)),
     )
@@ -264,9 +280,11 @@ def build_event_dispatcher(
         consumer=consumer,
         topic_admin=topic_admin,
         dlq=dlq,
+        raw_dlq=raw_dlq,
         subscriptions=subscriptions,
         published_events=published_events,
         idempotency=idempotency,
+        delivery_claims=delivery_claims,
         audit=audit,
         handler=handler,
         wake_hook=wake_hook,
@@ -288,6 +306,8 @@ class KafkaEventAdapters:
     consumer: AiokafkaConsumerAdapter
     topic_admin: KafkaTopicAdminAdapter
     dlq: KafkaDlqAdapter
+    raw_dlq: Any
+    delivery_claims: Any
     raw_producer: Any = None
 
     def as_ports(self) -> dict[str, Any]:
@@ -296,6 +316,8 @@ class KafkaEventAdapters:
             "consumer": self.consumer,
             "topic_admin": self.topic_admin,
             "dlq": self.dlq,
+            "raw_dlq": self.raw_dlq,
+            "delivery_claims": self.delivery_claims,
         }
 
     async def close(self) -> None:
@@ -320,6 +342,8 @@ async def build_kafka_event_adapters(
     producer: Any = None,
     consumer: Any = None,
     admin: Any = None,
+    raw_dlq: Any = None,
+    delivery_claims: Any = None,
 ) -> KafkaEventAdapters:
     """Поднять реальные aiokafka-адаптеры и **обязательно** подготовить топики.
 
@@ -343,6 +367,14 @@ async def build_kafka_event_adapters(
         getattr(subscription, "consumer_group", None), str
     ):
         raise AdapterCompositionError(("subscription.consumer_group",))
+    if raw_dlq is None:
+        raise AdapterCompositionError(("RawDlqPort",))
+    if delivery_claims is None:
+        raise AdapterCompositionError(("DeliveryClaimPort",))
+    if not _protocol_shape_ok(raw_dlq, "publish"):
+        raise AdapterCompositionError(("RawDlqPort: не реализует контракт",))
+    if not _protocol_shape_ok(delivery_claims, "acquire", "renew", "complete", "release"):
+        raise AdapterCompositionError(("DeliveryClaimPort: не реализует контракт",))
 
     admin_adapter = KafkaTopicAdminAdapter(
         bootstrap_servers=bootstrap_servers, admin=admin
@@ -385,5 +417,7 @@ async def build_kafka_event_adapters(
         consumer=consumer_adapter,
         topic_admin=admin_adapter,
         dlq=dlq_adapter,
+        raw_dlq=raw_dlq,
+        delivery_claims=delivery_claims,
         raw_producer=raw_producer if owns_producer else None,
     )

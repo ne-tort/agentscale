@@ -141,6 +141,7 @@ def test_no_dev_fallback_on_empty_secret() -> None:
         enabled=True,
         claims_secret="",
         static_origin="https://plugins.example.test",
+        shell_origin="https://agentscale.example.test",
     )
     # Пустой секрет ловит ДУБЛЬ guard'а в validate(), до обращения к KeyRing:
     # это и есть «ошибка сборки», а не «возьмём AUTH_TEST_SECRET».
@@ -161,7 +162,9 @@ def test_duplicate_rotation_secret_rejected() -> None:
     config = PluginPlatformConfig(
         enabled=True,
         claims_secret=TEST_SECRET,
+        event_signing_secret_ref=FakeSettings().plugin_event_signing_secret_ref,
         static_origin="https://plugins.example.test",
+        shell_origin="https://agentscale.example.test",
         cosign_identity=FakeSettings().plugin_cosign_identity,
         previous_claims_secrets=(TEST_OLD_SECRET_1, TEST_OLD_SECRET_1),
     )

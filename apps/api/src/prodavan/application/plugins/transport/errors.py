@@ -117,6 +117,7 @@ _CODE_MAP: dict[str, tuple[int, str, str]] = {
     # Адаптер / capability — 503 (fail-closed: нет интеграции ≠ allow).
     "adapter_missing": (503, "ADAPTER_MISSING", "Adapter Missing"),
     "adapter_failed": (503, "ADAPTER_FAILED", "Adapter Failed"),
+    "outcome_unknown": (503, "OUTCOME_UNKNOWN", "Outcome Unknown"),
     "capability_unknown": (503, "CAPABILITY_UNKNOWN", "Capability Unknown"),
     "quota_unavailable": (503, "QUOTA_UNAVAILABLE", "Quota Unavailable"),
     "service_unavailable": (503, "SERVICE_UNAVAILABLE", "Service Unavailable"),

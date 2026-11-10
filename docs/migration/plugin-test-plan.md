@@ -1,5 +1,11 @@
 # Executable test plan миграции plugin-модулей (v4 → acceptance)
 
+> **HISTORICAL REPORT / NOT CURRENT ACCEPTANCE.** Содержимое относится к ранней
+> волне и не переподтверждено на audited HEAD `6ee720dd`. Любые «реализовано»,
+> `[x]`, `acceptance ✓`, «эталон» и прошлые test counts — только historical
+> claims. Актуальный статус: [STOP-SHIP](plugin-migration-status.md) и
+> [live-only acceptance map](plugin-acceptance-map.md). Написанный код ≠ live.
+
 **Источник:** [`docs/ARCHITECTURE/plugin-architecture-complete.md`](../ARCHITECTURE/plugin-architecture-complete.md) §11 (22 критерия),
 [`docs/migration/plugin-acceptance-map.md`](plugin-acceptance-map.md) (карта владельцев, ведёт родитель),
 [`docs/migration/plugin-migration-plan.md`](plugin-migration-plan.md) (§2 таблица владения).

@@ -1,6 +1,9 @@
 """Acceptance contracts for the declarative-app capability service boundary."""
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from prodavan.application.capability_gateway_service import (
     AuditEvent,
@@ -153,3 +156,56 @@ def test_missing_adapter_is_denied_after_authorization() -> None:
 
     assert decision.code is DecisionCode.ADAPTER_MISSING
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_async_known_capabilities_dry_run_and_single_invoke() -> None:
+    class CountingQuota:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def allows(self, request) -> bool:
+            self.calls += 1
+            return True
+
+    class AsyncCacheAdapter:
+        capability = "cache"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def invoke(self, request):
+            self.calls += 1
+            return {"resource": request.resource}
+
+    plugin_request = replace(
+        request(), capability="cache", operation="cache.get",
+        resource="plugin/inst/cache", domain="cache",
+    )
+    plugin_grant = replace(
+        grant(), capability="cache", operations=frozenset({"cache.get"}),
+        resources=frozenset({"plugin/inst/cache"}), domains=frozenset({"cache"}),
+    )
+    quota = CountingQuota()
+    adapter = AsyncCacheAdapter()
+    gateway = CapabilityGatewayService(
+        requested_capabilities=("cache",),
+        known_capabilities=("cache",),
+        grants=(plugin_grant,),
+        identity=Allow(),
+        scope=Allow(),
+        quota=quota,
+        audit=Audit(),
+        adapters={"cache": adapter},
+    )
+
+    dry = await gateway.authorize_async(plugin_request, now=NOW, reserve_quota=False)
+    assert dry.allowed is True
+    assert quota.calls == 0
+    assert adapter.calls == 0
+
+    decision, result = await gateway.invoke_async(plugin_request, now=NOW)
+    assert decision.allowed is True
+    assert result == {"resource": "plugin/inst/cache"}
+    assert quota.calls == 1
+    assert adapter.calls == 1

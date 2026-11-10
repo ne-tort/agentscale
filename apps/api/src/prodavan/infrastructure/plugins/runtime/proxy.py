@@ -80,11 +80,12 @@ from prodavan.application.plugins.gateway.ports import (
     BackendResponse,
     GatewayClaims,
     GatewayGrant,
+    is_valid_artifact_digest,
 )
 
 from .config import RuntimeConfig
 from .errors import RuntimeConfigError
-from .k8s_scale import normalize_k8s_name
+from .k8s_scale import plugin_service_name, validate_plugin_resource_name
 
 logger = logging.getLogger(__name__)
 
@@ -171,29 +172,80 @@ def sanitize_incoming(headers: Mapping[str, str]) -> dict[str, str]:
     return out
 
 
-def _gateway_claims(claims: MintedClaims, *, plugin_instance_id: str) -> GatewayClaims:
-    """Доверенный identity для ``build_forward_headers`` — ТОЛЬКО из claims.
-
-    ``claims.claims`` — уже проверенный payload ``PluginClaims``
-    (``identity/mint.py:206-224``): ``plugin_id``, ``company_id``,
-    ``project_id``, ``sub``. Никаких клиентских значений.
-    """
-    payload: Mapping[str, Any] = claims.claims or {}
-    plugin_id = str(payload.get("plugin_id") or "").strip()
-    company_id = str(payload.get("company_id") or "").strip()
-    subject = str(payload.get("sub") or "").strip() or f"plugin:{plugin_instance_id}"
-    project = payload.get("project_id")
-    if not plugin_id or not company_id:
+def _gateway_identity(
+    claims: MintedClaims, *, plugin_instance_id: str
+) -> tuple[GatewayClaims, GatewayGrant]:
+    """Project a complete, fresh authoritative identity without any fallback."""
+    if not isinstance(claims, MintedClaims) or not claims.token.strip():
+        raise ProxyConfigurationError("fresh capability token is required")
+    if claims.expired_at(now=datetime.now(UTC)):
+        raise ProxyConfigurationError("capability token is expired")
+    payload = claims.claims
+    if not isinstance(payload, Mapping):
+        raise ProxyConfigurationError("claims payload is missing")
+    for name in (
+        "grant_id",
+        "company_id",
+        "plugin_id",
+        "plugin_instance_id",
+        "sub",
+    ):
+        value = payload.get(name)
+        if not isinstance(value, str) or not value.strip():
+            raise ProxyConfigurationError(f"claims missing required {name}")
+    bound_instance = payload["plugin_instance_id"]
+    if bound_instance != plugin_instance_id:
         raise ProxyConfigurationError(
-            "claims не содержат plugin_id/company_id: доверенные заголовки невозможны"
+            "claims plugin_instance_id does not match the expected durable instance"
         )
-    return GatewayClaims(
+    artifact_digest = payload.get("artifact_digest")
+    if not is_valid_artifact_digest(artifact_digest):
+        raise ProxyConfigurationError(
+            "claims artifact_digest is missing or malformed"
+        )
+    plugin_id = payload["plugin_id"]
+    company_id = payload["company_id"]
+    expected_sub = f"plugin:{plugin_id}:{company_id}:{bound_instance}"
+    if payload["sub"] != expected_sub:
+        raise ProxyConfigurationError(
+            "claims sub does not match company/plugin/instance binding"
+        )
+    project = payload.get("project_id")
+    if project is not None and not isinstance(project, str):
+        raise ProxyConfigurationError("claims project_id must be a string or null")
+    gateway_claims = GatewayClaims(
         plugin_id=plugin_id,
         company_id=company_id,
-        subject_id=subject,
-        project_id=str(project) if project else None,
-        grant_id=str(payload.get("grant_id") or "") or None,
+        subject_id=payload["sub"],
+        project_id=project or None,
+        grant_id=payload["grant_id"],
+        plugin_instance_id=bound_instance,
+        artifact_digest=artifact_digest,
     )
+    grant = GatewayGrant(
+        grant_id=payload["grant_id"],
+        plugin_instance_id=bound_instance,
+        artifact_digest=artifact_digest,
+        active=True,
+        capability_token=claims.token.strip(),
+    )
+    return gateway_claims, grant
+
+
+def _build_outgoing_headers(
+    incoming: Mapping[str, str],
+    *,
+    token: str,
+    claims: GatewayClaims,
+    grant: GatewayGrant,
+) -> dict[str, str]:
+    out = dict(
+        build_forward_headers(sanitize_incoming(incoming), claims, grant)
+    )
+    out[HEADER_GRANT_ID] = grant.grant_id
+    # Bearer comes only from the fresh wake token, after all client values.
+    out[HEADER_AUTHORIZATION] = f"{BEARER_PREFIX}{token}"
+    return out
 
 
 def trusted_x_plugin_headers(
@@ -201,21 +253,12 @@ def trusted_x_plugin_headers(
     *,
     plugin_instance_id: str,
 ) -> dict[str, str]:
-    """Доверенные ``X-Plugin-*`` ИСКЛЮЧИТЕЛЬНО из свежих claims.
-
-    Делегирует :func:`build_forward_headers` задачи 11 (allowlist + порядок
-    перезаписи), поэтому НЕ дублирует санитизацию. Добавляет только два
-    дополнительных доверенных идентификатора (instance/grant).
-    """
-    grant = GatewayGrant(
-        grant_id=str((claims.claims or {}).get("grant_id") or plugin_instance_id),
-        active=True,
-        capability_token=claims.token,
+    """Build trusted identity headers exclusively from validated claims."""
+    gateway_claims, grant = _gateway_identity(
+        claims, plugin_instance_id=plugin_instance_id
     )
-    out = dict(
-        build_forward_headers({}, _gateway_claims(claims, plugin_instance_id=plugin_instance_id), grant)
-    )
-    out[HEADER_INSTANCE_ID] = plugin_instance_id
+    out = dict(build_forward_headers({}, gateway_claims, grant))
+    out[HEADER_GRANT_ID] = grant.grant_id
     return out
 
 
@@ -225,35 +268,16 @@ def build_outgoing_headers(
     *,
     plugin_instance_id: str,
 ) -> dict[str, str]:
-    """Полный конвейер: санитизация -> доверенные X-Plugin-* -> Bearer.
-
-    Канонический allowlist берётся из задачи 11 (``build_forward_headers``):
-    клиентские ``Authorization``/``Cookie``/``X-Plugin-*`` удаляются, доверенные
-    значения выставляются последними. Затем ЯВНО добавляется
-    ``Authorization: Bearer <claims.token>`` — этот заголовок ``headers.py``
-    намеренно не ставит (``headers.py:38-43``), а задачи 02/09 его требуют.
-    """
-    safe_incoming = sanitize_incoming(incoming)
-    grant = GatewayGrant(
-        grant_id=str((claims.claims or {}).get("grant_id") or plugin_instance_id),
-        active=True,
-        capability_token=claims.token,
+    """Sanitize client headers, then apply exact claims/grant and fresh Bearer."""
+    gateway_claims, grant = _gateway_identity(
+        claims, plugin_instance_id=plugin_instance_id
     )
-    out = dict(
-        build_forward_headers(
-            safe_incoming,
-            _gateway_claims(claims, plugin_instance_id=plugin_instance_id),
-            grant,
-        )
+    return _build_outgoing_headers(
+        incoming,
+        token=grant.capability_token,
+        claims=gateway_claims,
+        grant=grant,
     )
-    # Дополнительные доверенные идентификаторы (не из клиентских данных).
-    out[HEADER_INSTANCE_ID] = plugin_instance_id
-    if (claims.claims or {}).get("grant_id"):
-        out[HEADER_GRANT_ID] = str(claims.claims["grant_id"])
-    # Bearer ВСЕГДА из свежего токена, ПОСЛЕДНИМ: клиентский Authorization
-    # физически не достигает backend'а. Оба заголовка несут ОДИН токен.
-    out[HEADER_AUTHORIZATION] = f"{BEARER_PREFIX}{claims.token}"
-    return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -337,18 +361,36 @@ def coerce_request(request: Any) -> HeldRequest:
     )
 
 
-def plugin_service_url(plugin_instance_id: str, config: RuntimeConfig) -> str:
-    """In-cluster базовый URL Service плагина (динамическое имя, §5.1).
+def plugin_service_url(
+    plugin_instance_id: str,
+    config: RuntimeConfig,
+    *,
+    plugin_id: str,
+    service_name_resolver: Callable[[str], str] | None = None,
+) -> str:
+    """Canonical per-instance Service URL; общего ``plugin-runtime`` НЕТ.
 
-    ``http://<service>.<namespace>.svc:<port>`` — короткий DNS-суффикс
-    ``.svc`` резолвится через search domains пода (как as-built
-    ``prodavan-api.prodavan.svc``). Никаких внешних адресов.
+    Resolver из admin read model имеет приоритет и должен быть ТЕМ ЖЕ callable,
+    который передан в ``K8sScalePort``. Без resolver оба id обязательны для
+    единого DNS1035 builder; instance-only short name не создаётся.
     """
-    name = f"{config.deployment_prefix}{normalize_k8s_name(plugin_instance_id)}"
-    if config.service_suffix:
-        suffix = config.service_suffix
-        name += suffix if suffix.startswith("-") else f"-{suffix}"
+    if service_name_resolver is not None:
+        name = validate_plugin_resource_name(str(service_name_resolver(plugin_instance_id)))
+    else:
+        name = plugin_service_name(
+            plugin_id,
+            plugin_instance_id,
+            prefix=config.deployment_prefix,
+        )
     return f"http://{name}.{config.namespace}.svc:{config.service_port}"
+
+
+def _trusted_header(headers: Mapping[str, str], name: str) -> str:
+    lowered = name.lower()
+    for key, value in headers.items():
+        if isinstance(key, str) and key.lower() == lowered and isinstance(value, str):
+            return value.strip()
+    return ""
 
 
 class HttpProxyPort:
@@ -356,9 +398,10 @@ class HttpProxyPort:
 
     ``backend_http`` — ЯВНЫЙ транспорт (тесты/один инстанс). Если он не передан,
     используется ``backend_http_factory(instance_id)``; фабрика по умолчанию
-    создаёт :class:`BackendHttpAdapter` задачи 11 под динамическое имя Service
-    и кэширует его до :meth:`aclose`. Оба варианта обязательны: без транспорта
-    сборка падает (fail-closed).
+    дополнительно получает trusted ``plugin_id`` из claims и создаёт
+    :class:`BackendHttpAdapter` задачи 11 под canonical per-instance Service.
+    Общий ``resource_name_resolver`` может заменить lookup в admin read model.
+    Адаптеры кэшируются до :meth:`aclose`; без транспорта сборка падает.
 
     ``gateway_forward`` — НЕобязательная ГОТОВАЯ корутина/объект с тем же
     контрактом, что и ``ProxyPort.forward`` (keyword-only ``plugin_instance_id``,
@@ -374,6 +417,7 @@ class HttpProxyPort:
         config: RuntimeConfig,
         backend_http: BackendSenderPort | None = None,
         backend_http_factory: Callable[[str], BackendSenderPort] | None = None,
+        service_name_resolver: Callable[[str], str] | None = None,
         gateway_forward: Any | None = None,
         client: Any = None,
     ) -> None:
@@ -383,6 +427,8 @@ class HttpProxyPort:
             raise ProxyConfigurationError("backend_http обязан реализовывать send()")
         if backend_http_factory is not None and not callable(backend_http_factory):
             raise ProxyConfigurationError("backend_http_factory обязан быть вызываемым")
+        if service_name_resolver is not None and not callable(service_name_resolver):
+            raise ProxyConfigurationError("service_name_resolver обязан быть вызываемым")
         if gateway_forward is not None and not (
             callable(getattr(gateway_forward, "forward", None)) or callable(gateway_forward)
         ):
@@ -391,29 +437,37 @@ class HttpProxyPort:
             )
         self._config = config
         self._backend: BackendSenderPort | None = backend_http
+        self._service_name_resolver = service_name_resolver
         self._gateway_forward = gateway_forward
         self._owned: list[Any] = []
         # Фабрика по умолчанию: НЕ импортируем соседний каталог на уровне
         # модуля, чтобы тесты могли подменить транспорт без IO. Фабрика
         # КЭШИРУЕТ адаптеры по instance_id: один httpx.AsyncClient на инстанс,
         # соединение живёт до Release (aclose), SSE не обрывается.
-        self._factory = backend_http_factory
-        self._cache: dict[str, BackendSenderPort] = {}
+        self._factory: Callable[..., BackendSenderPort] | None = backend_http_factory
+        self._factory_uses_canonical_identity = False
+        self._cache: dict[tuple[str, str], BackendSenderPort] = {}
         if self._backend is None and self._factory is None and self._gateway_forward is None:
             self._factory = self._default_factory(client)
+            self._factory_uses_canonical_identity = True
         if self._backend is None and self._factory is None and self._gateway_forward is None:
             raise ProxyConfigurationError("HttpProxyPort: отсутствует HTTP-транспорт")
 
-    def _default_factory(self, client: Any) -> Callable[[str], BackendSenderPort]:
+    def _default_factory(self, client: Any) -> Callable[[str, str], BackendSenderPort]:
         from prodavan.infrastructure.plugins.adapters.gateway_adapters import (
             BackendHttpAdapter,
         )
 
         config = self._config
 
-        def build(instance_id: str) -> BackendSenderPort:
+        def build(instance_id: str, plugin_id: str) -> BackendSenderPort:
             adapter = BackendHttpAdapter(
-                base_url=plugin_service_url(instance_id, config),
+                base_url=plugin_service_url(
+                    instance_id,
+                    config,
+                    plugin_id=plugin_id,
+                    service_name_resolver=self._service_name_resolver,
+                ),
                 client=client,
                 max_timeout_seconds=config.stream_timeout_seconds,
                 inject_trusted_bearer=True,
@@ -431,7 +485,12 @@ class HttpProxyPort:
     def gateway_forward(self) -> Any | None:
         return self._gateway_forward
 
-    def _resolve_backend(self, plugin_instance_id: str) -> BackendSenderPort:
+    def _resolve_backend(
+        self,
+        plugin_instance_id: str,
+        *,
+        plugin_id: str | None = None,
+    ) -> BackendSenderPort:
         if self._backend is not None:
             return self._backend
         if self._factory is None:
@@ -440,16 +499,48 @@ class HttpProxyPort:
                 detail=f"HTTP-транспорт плагина не подключён "
                 f"({ActivationErrorCode.PROXY_MISSING.value})",
             )
-        cached = self._cache.get(plugin_instance_id)
+        cache_key = (plugin_id or "", plugin_instance_id)
+        cached = self._cache.get(cache_key)
         if cached is not None:
             return cached
-        created = self._factory(plugin_instance_id)
+        if self._factory_uses_canonical_identity:
+            if not plugin_id:
+                raise ProxyConfigurationError(
+                    "canonical Service URL требует plugin_id + plugin_instance_id"
+                )
+            created = self._factory(plugin_instance_id, plugin_id)  # type: ignore[call-arg]
+        else:
+            # Пользовательская фабрика сохраняет прежний DI-контракт: resolver
+            # имён/маршрутизации целиком принадлежит инъекции.
+            created = self._factory(plugin_instance_id)
         if not callable(getattr(created, "send", None)):
             raise ProxyConfigurationError(
                 "backend_http_factory вернул объект без send() (fail-closed)"
             )
-        self._cache[plugin_instance_id] = created
+        self._cache[cache_key] = created
         return created
+
+    async def send(self, request: BackendRequest) -> BackendResponse:
+        """``BackendHttpPort`` для Gateway: маршрут по trusted identity headers.
+
+        Текущий общий Gateway ещё не добавляет ``X-Plugin-Instance-ID`` в
+        ``BackendRequest``; такой вызов намеренно fail-closed до integration
+        с admin resolver. Activation ``forward()`` имеет оба id и работает с
+        canonical URL без этого дополнительного заголовка.
+        """
+        if not isinstance(request, BackendRequest):
+            raise ProxyConfigurationError("send ожидает BackendRequest")
+        if self._backend is not None:
+            return await self._backend.send(request)
+        plugin_id = _trusted_header(request.headers, HEADER_PLUGIN_ID)
+        instance_id = _trusted_header(request.headers, HEADER_INSTANCE_ID)
+        if not plugin_id or not instance_id:
+            raise ProxyConfigurationError(
+                "per-instance backend send требует trusted X-Plugin-ID и "
+                "X-Plugin-Instance-ID; общий plugin-runtime Service запрещён"
+            )
+        backend = self._resolve_backend(instance_id, plugin_id=plugin_id)
+        return await backend.send(request)
 
     async def forward(
         self,
@@ -475,6 +566,10 @@ class HttpProxyPort:
                 detail="capability-токен истёк до проксирования",
             )
 
+        gateway_claims, grant = _gateway_identity(
+            claims, plugin_instance_id=plugin_instance_id
+        )
+
         if self._gateway_forward is not None:
             # Тонкая делегация задаче 11 (готовый маппер с тем же контрактом):
             # Gateway сам строит allowlist и wake, дублирования заголовков нет.
@@ -497,10 +592,11 @@ class HttpProxyPort:
             return result
 
         held = coerce_request(request)
-        headers = build_outgoing_headers(
+        headers = _build_outgoing_headers(
             held.headers,
-            claims,
-            plugin_instance_id=plugin_instance_id,
+            token=grant.capability_token,
+            claims=gateway_claims,
+            grant=grant,
         )
         timeout = (
             held.timeout_seconds
@@ -518,8 +614,11 @@ class HttpProxyPort:
             body=bytes(held.body),
             timeout_seconds=float(timeout),
             stream=held.stream,
+            plugin_instance_id=gateway_claims.plugin_instance_id,
         )
-        backend = self._resolve_backend(plugin_instance_id)
+        backend = self._resolve_backend(
+            plugin_instance_id, plugin_id=gateway_claims.plugin_id
+        )
         try:
             # НЕ читаем response.body и НЕ закрываем соединение здесь: SSE
             # остаётся живым итератором до Release потребителем потока.
@@ -568,18 +667,25 @@ def build_backend_request(
     Ничего не отправляет: удобно проверять «Authorization из свежего токена +
     доверенные X-Plugin-*» без httpx и без Gateway.
     """
+    gateway_claims, grant = _gateway_identity(
+        claims, plugin_instance_id=plugin_instance_id
+    )
     held = coerce_request(request)
     return BackendRequest(
         path=held.path,
         method=held.method.upper(),
-        headers=build_outgoing_headers(
-            held.headers, claims, plugin_instance_id=plugin_instance_id
+        headers=_build_outgoing_headers(
+            held.headers,
+            token=grant.capability_token,
+            claims=gateway_claims,
+            grant=grant,
         ),
         body=bytes(held.body),
         timeout_seconds=(
             stream_timeout_seconds if held.stream else backend_timeout_seconds
         ),
         stream=held.stream,
+        plugin_instance_id=gateway_claims.plugin_instance_id,
     )
 
 

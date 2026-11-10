@@ -1,7 +1,8 @@
 # ADR-006: Plugin-модули как целевая модель
 
-**Статус:** Принято (2026-11-07), пересмотрено 2026-11-08 после архитектурного ревью.  
-**Номер:** 006 (первоначально ошибочно опубликован как ADR-002; ADR-002 уже занят `capability-gateway`).  
+**Статус:** Принято (2026-11-07), пересмотрено 2026-11-08 и 2026-11-09 после архитектурного ревью. **Это target design, а не as-built:** на audited HEAD `6ee720dd` plugin v4 не является подтверждённым vertical slice и остаётся emergency disabled.
+**ADR-009:** авторинг/self-service отдельно предложен ADR-009 и пока не принят.
+**Номер:** 006 (первоначально ошибочно опубликован как ADR-002; ADR-002 уже занят `capability-gateway`).
 **Связанные:** ADR-001 (build-time UI), ADR-002 (capability gateway), ADR-003 (no direct infra access), ADR-004 (runtime revision), ADR-005 (equipment bounded context).
 
 ## Контекст
@@ -17,25 +18,25 @@
 
 ## Решение
 
-**Целевая модель** — plugin-модули: полноценные приложения (frontend + backend), загружаемые динамически, с доступом к инфраструктуре через **существующий capability gateway** (`CapabilityGatewayService`, pod-gateway `:8001`, `PodBridgeClaims`).
+**Целевая модель** — plugin-модули: полноценные приложения (frontend + backend), загружаемые динамически, с переиспользованием кода `CapabilityGatewayService` в **отдельном trust-контуре `PluginClaims` + `/capabilities/v1/*` в Plugin Gateway**. Agent pod-gateway `:8001` и `PodBridgeClaims` не расширяются и не используются плагинами.
 
 ### Ключевые принципы
 
-1. **Переиспользование as-built** — не строить новый сервис адаптеров, не mint'ить новый формат JWT, не создавать БД на компанию. Расширяем `CapabilityGatewayService`, `TenantUserDbService`, `tenant_infra/*`, `:8001`. См. полный дизайн: `docs/ARCHITECTURE/plugin-architecture-complete.md` (v2).
+1. **Переиспользование кода, а не транспорта/identity** — ядро `CapabilityGatewayService`, audit/quota/grant contracts и domain registry переиспользуются. Для плагинов создаются `PluginClaims` и `/capabilities/v1/*` в Plugin Gateway, отдельная tenant БД на компанию и scoped objects; `TenantUserDbService` остаётся для агентов. См. v4-дизайн только вместе с errata и ADR-008.
 2. **Реальные таблицы и прямой DSN** — отдельная БД `tenant_<company_id>`, схема `module_<module_id>` во владении роли плагина, полный SQL и self-managed Liquibase/Flyway/Alembic миграции. Плагин **не** получает доступ к платформенной `prodavan`. Подробности и границы — ADR-007.
 3. **Миграции как инфраструктура** — плагин поставляет подписанный Liquibase/Flyway/Alembic changelog и применяет его сам при старте контейнера под своей ролью (`NOCREATEDB NOCREATEROLE`). Безопасность = привилегии PostgreSQL + отдельная БД + `pgaudit`, а не парсер SQL. Произвольный SQL из тела HTTP-запроса к платформе отсутствует (ADR-002).
 4. **Изоляция** — отдельная **БД** `tenant_<company>`, `GRANT CONNECT` только на неё, схема с owner = плагин, NetworkPolicy без egress к `prodavan`, отдельный origin для iframe **без** `allow-same-origin`. RLS не является границей.
-5. **Единый фаерволл** — egress-контроллер с режимами `none`/`webhooks-only`/`full` для плагинов **и** контейнеров агентов.
+5. **Единая схема фаерволла, не единая реализация** — правила `none`/`webhooks-only`/`full` для плагинов **и** агентов из общего генератора и с общим audit envelope; implementation не объединяет agent и plugin lifecycle.
 6. **Засыпание** — Deployment `replicas: 0` + Plugin Gateway activator (ADR-008). `SandboxClaim` остаётся только агентам; Knative не вводится.
 7. **Внешние адреса** — path-based `/webhook/{plugin}/{company}/*` и `/pluginpage/{plugin}/{company}/*` на отдельном Ingress с `router.priority: 120`.
 
-### Конечное состояние
+### Конечное состояние (target)
 
-Declarative-app удалён **полностью** («всё под нож»): `module_meta_documents`, generic runtime, `module_instance_data_rows`, `ModuleRuntime.tsx`.
+Declarative-app удаляется **только после подтверждённого code-first strangler cutover**: `module_meta_documents`, generic runtime, `module_instance_data_rows`, `ModuleRuntime.tsx`. Это не разрешение текущего cutover и не основание удалять migration-only helpers.
 
 ### Метод перехода
 
-Strangler с фича-флагом — **только из-за объёма кода** `mod_equipment` (~13k строк), а не из-за данных. Это dev-разработка: данные эфемерны, **бэкапы, перенос данных, snapshot, dual-read/dual-write, `migrate-to-plugin` и длительное наблюдение не требуются**.
+Strangler с фича-флагом — **только из-за объёма кода** `mod_equipment` (~13k строк), а не из-за данных. Это dev-разработка: данные эфемерны, **бэкапы, перенос данных, snapshot данных, dual-read/dual-write, `migrate-to-plugin` и длительное наблюдение не требуются**. Исходный snapshot/patch агента — отдельный, предложенный ADR-009 механизм authoring.
 
 ## Последствия
 
@@ -43,8 +44,8 @@ Strangler с фича-флагом — **только из-за объёма к�
 
 - Реальные таблицы, типы, индексы, constraints вместо JSONB.
 - Сложная бизнес-логика живёт в плагине, а не раздувает generic runtime.
-- Один ACL/квота/аудит/отзыв токена (существующий gateway), а не две реализации.
-- Динамическая загрузка кода, внешние webhook'ы и страницы, общее с агентами засыпание.
+- Общее ядро ACL/квота/аудит/grant и отдельный `PluginClaims`, а не повторное использование `PodBridgeClaims`.
+- Динамическая загрузка кода, внешние webhook'ы и страницы, общий lifecycle-контракт при разных реализациях для агентов и плагинов.
 
 ### Риски и митигации
 
@@ -54,7 +55,7 @@ Strangler с фича-флагом — **только из-за объёма к�
 | Межтенантовая утечка | исключена конструктивно: роль не имеет `CONNECT` к чужой БД |
 | Подмена `X-Plugin-*` | Gateway строит headers allowlist'ом |
 | iframe снимает sandbox | отдельный origin, CSP, `postMessage` с проверкой origin, без `allow-same-origin` |
-| Сломанный cutover | strangler + фича-флаг; откат = выключить флаг, данные dev пересоздаются сидом |
+| Сломанный cutover | Текущий статус STOP: cutover запрещён до live acceptance. Target — code-first expand/contract A→B; rollback кода не означает destructive rollback БД. См. `docs/migration/plugin-cutover-safety.md` |
 | `/webhook/` уезжает в SPA | `router.priority: 120` + тест приоритетов |
 
 ## Альтернативы
@@ -67,16 +68,19 @@ Strangler с фича-флагом — **только из-за объёма к�
 
 ## Связанные документы
 
-- `docs/ARCHITECTURE/plugin-architecture-complete.md` — **полный дизайн v4 (источник истины)**
+- `docs/ARCHITECTURE/plugin-architecture-complete.md` — **v4 target snapshot, только вместе с authoritative errata**
 - `docs/architecture-migration/ADR-007-direct-plugin-db.md` — прямой DSN
 - `docs/architecture-migration/ADR-008-lifecycle-and-boundaries.md` — разделение trust/lifecycle, замена as-built привязок
 - `docs/ARCHITECTURE/plugin-modules.md` — краткое введение
-- `docs/PRODUCT.md` — раздел «Целевая модель: plugin-модули»
-- `docs/workflow/main-branch-workflow.md` — работа на main
+- `docs/PRODUCT.md` — раздел «Целевая модель: plugin v4 (TARGET, не as-built)»
+- `docs/PLUGIN-AUTHORING.md` — Supported/Target/Not implemented матрица
+- `docs/migration/plugin-cutover-safety.md` — безопасный cutover и STOP gates
+- `AGENTS.md` и `docs/LEGACY.md` — действующий workflow и категории документации
 
 ## Статусы соседних ADR
 
-- ADR-001 (build-time UI registry) — **Superseded where applicable** настоящим ADR.
+- ADR-001 (build-time UI registry) — **Superseded where applicable** настоящим ADR; запрет исполняемого неподписанного кода остаётся.
+- ADR-009 (source authoring/self-service) — **Предложено**; не as-built и не supersede ADR-006 до принятия.
 - ADR-002 (capability gateway) — **действует**, расширяется, не отменяется.
 - ADR-003 (no direct infra access) — **действует**; вариант с прямым DSN требует его явного supersede.
 - ADR-004 / ADR-005 — действуют; определяют параллельные ревизии и границы equipment-контекста.

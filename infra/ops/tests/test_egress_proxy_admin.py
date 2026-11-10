@@ -117,7 +117,7 @@ def test_service_does_not_expose_admin_port() -> None:
 
 
 def test_networkpolicy_does_not_open_admin_port() -> None:
-    """NP плагинов разрешает egress-proxy только :8080 (не :9901)."""
+    """NP не открывает egress-proxy; plugin-gateway разрешён только на :8080."""
     np = yaml.safe_load(
         (BASE_PLUGINS / "networkpolicy-plugin.yaml").read_text(encoding="utf-8")
     )
@@ -128,8 +128,16 @@ def test_networkpolicy_does_not_open_admin_port() -> None:
         if peer.get("podSelector", {}).get("matchLabels", {}).get("app") == "egress-proxy"
         for p in rule.get("ports", [])
     }
-    assert proxy_ports == {8080}
-    assert ADMIN_PORT not in proxy_ports
+    gateway_ports = {
+        p["port"]
+        for rule in np["spec"]["egress"]
+        for peer in rule.get("to", [])
+        if peer.get("podSelector", {}).get("matchLabels", {}).get("app") == "plugin-gateway"
+        for p in rule.get("ports", [])
+    }
+    assert proxy_ports == set(), "egress-proxy временно запрещён fail-closed policy"
+    assert gateway_ports == {8080}
+    assert ADMIN_PORT not in proxy_ports | gateway_ports
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +255,8 @@ def test_argo_applies_egress_configmap_data() -> None:
         "egress-proxy-config не должен быть в ignoreDifferences /data: "
         "иначе Argo никогда не применит admin 0.0.0.0 из Git"
     )
-    # Остальные controller-правимые объекты по-прежнему защищены.
+    # Активационный CAS защищен; Git-owned конфиги контроллер-менеджера — НЕТ.
     protected = {(i.get("kind"), i.get("name")) for i in ignored}
-    assert ("ConfigMap", "tenant-postgres-config") in protected
-    assert ("Secret", "pgbouncer-credentials") in protected
+    assert ("ConfigMap", "plugin-activation-state") in protected
+    assert ("ConfigMap", "tenant-postgres-config") not in protected
+    assert ("Secret", "pgbouncer-credentials") not in protected

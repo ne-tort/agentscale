@@ -1,8 +1,9 @@
-"""Тесты ``identity_adapter``: async-обёртка revocation + mint (НЕ запускать).
+"""Тесты ``identity_adapter``: async-обёртка revocation + mint.
 
 Покрытие по заданию:
 * каждый адаптер транслирует вызов корректно;
-* async-обёртка revocation возвращает bool = ПОДТВЕРЖДЕНИЕ записи;
+* canonical async revocation await'ится и возвращает bool = ПОДТВЕРЖДЕНИЕ записи;
+* AST-regression запрещает не-awaited source.revoke/is_revoked/is_active;
 * ``reason`` не теряется, но и не попадает в токен;
 * mint заполняет ``jti``/``expires_at`` из проверенного payload (``issued_at``
   восстанавливается как ``expires_at - ttl_seconds`` — отдельного поля в
@@ -13,6 +14,8 @@
 
 from __future__ import annotations
 
+import ast
+import inspect
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -42,7 +45,7 @@ from prodavan.application.plugins.identity.revocation import (
 )
 from prodavan.application.plugins.identity.types import PluginTokenError
 
-from .fakes import COMPANY, DIGEST, INSTANCE, PLUGIN, SECRET, FakeSyncRevocation
+from .fakes import COMPANY, DIGEST, INSTANCE, PLUGIN, SECRET, FakeAsyncRevocation
 
 
 def _mint_request() -> MintRequest:
@@ -91,23 +94,34 @@ def test_mint_port_alias_collision_is_resolved() -> None:
 # --------------------------------------------------------------------------- revocation
 
 
-async def test_revocation_adapter_wraps_sync_revoke_and_returns_bool() -> None:
-    """Sync ``revoke(grant_id)`` → async ``revoke(*, grant_id, reason) -> bool``."""
+async def test_revocation_adapter_awaits_async_revoke_and_returns_bool() -> None:
+    """Async ``revoke(grant_id) -> bool`` сохраняет typed success и reason."""
 
-    source = FakeSyncRevocation()
+    source = FakeAsyncRevocation()
     adapter = IdentityRevocationAdapter(source)
 
     result = await adapter.revoke(grant_id="grant_001", reason="admin revoke")
 
-    assert result is True  # не «вызов не упал», а подтверждение записи
+    assert result is True
     assert any(c.method == "revoke" and c.args == ("grant_001",) for c in source.calls)
+    assert any(c.method == "is_revoked" for c in source.calls)
     assert adapter.reasons == {"grant_001": "admin revoke"}
+
+
+async def test_revocation_bool_is_false_when_source_rejects_write() -> None:
+    """Даже отозванное состояние не маскирует typed ``revoke=False`` источника."""
+
+    source = FakeAsyncRevocation(revoke_result=False)
+    adapter = IdentityRevocationAdapter(source)
+
+    assert await adapter.revoke(grant_id="grant_001", reason="admin revoke") is False
+    assert source.revoked == {"grant_001"}
 
 
 async def test_revocation_bool_is_false_when_write_not_confirmed() -> None:
     """Запись не подтверждена реестром → ``False`` (сервис даст REVOKE_FAILED)."""
 
-    source = FakeSyncRevocation()
+    source = FakeAsyncRevocation()
     # После revoke реестр по-прежнему сообщает «активен» → не подтверждено.
     source.active_override["grant_001"] = True
     adapter = IdentityRevocationAdapter(source)
@@ -123,6 +137,49 @@ async def test_revocation_is_idempotent() -> None:
     assert await adapter.revoke(grant_id="grant_001", reason="repeat") is True
     assert await adapter.is_revoked(grant_id="grant_001") is True
     assert adapter.reasons["grant_001"] == "repeat"
+
+
+async def test_revocation_adapter_awaits_is_revoked_for_both_states() -> None:
+    source = FakeAsyncRevocation()
+    adapter = IdentityRevocationAdapter(source)
+
+    assert await adapter.is_revoked(grant_id="grant_001") is False
+    source.revoked.add("grant_001")
+    assert await adapter.is_revoked(grant_id="grant_001") is True
+    assert [c.method for c in source.calls if c.method == "is_revoked"] == [
+        "is_revoked",
+        "is_revoked",
+    ]
+
+
+class _ActiveOnlyRevocation:
+    """Минимальный canonical порт без необязательного ``is_revoked``."""
+
+    def __init__(self) -> None:
+        self.revoked: set[str] = set()
+        self.active_calls: list[datetime | None] = []
+
+    async def revoke(self, grant_id: str) -> bool:
+        self.revoked.add(grant_id)
+        return True
+
+    async def is_active(self, grant_id: str, *, now: datetime | None = None) -> bool:
+        self.active_calls.append(now)
+        return grant_id not in self.revoked
+
+
+async def test_revocation_adapter_awaits_is_active_fallback() -> None:
+    source = _ActiveOnlyRevocation()
+    adapter = IdentityRevocationAdapter(source)
+
+    assert await adapter.is_revoked(grant_id="grant_001") is False
+    assert await adapter.revoke(grant_id="grant_001", reason="admin revoke") is True
+    assert await adapter.is_revoked(grant_id="grant_001") is True
+    assert len(source.active_calls) == 3
+    assert all(
+        moment is not None and moment.tzinfo is not None
+        for moment in source.active_calls
+    )
 
 
 async def test_revocation_is_revoked_fail_closed_on_empty_id() -> None:
@@ -146,6 +203,44 @@ async def test_revocation_unbound_grant_revocation_fails_loudly() -> None:
 def test_revocation_adapter_requires_source() -> None:
     with pytest.raises(ValueError, match="источник отзывов"):
         IdentityRevocationAdapter(None)  # type: ignore[arg-type]
+
+
+def test_revocation_adapter_statically_awaits_every_source_call() -> None:
+    """Запрещаем возврат к coroutine-to-bool и unawaited coroutine warnings."""
+
+    tree = ast.parse(inspect.getsource(IdentityRevocationAdapter))
+    parents = {
+        child: parent
+        for parent in ast.walk(tree)
+        for child in ast.iter_child_nodes(parent)
+    }
+    checked: set[str] = set()
+    method_names = {"revoke", "is_revoked", "is_active"}
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        function = node.func
+        if isinstance(function, ast.Attribute):
+            method_name = function.attr
+            is_source_call = (
+                isinstance(function.value, ast.Attribute)
+                and function.value.attr == "_source"
+            )
+        elif isinstance(function, ast.Name):
+            method_name = function.id
+            # Ветка optional is_revoked вызывает bound async method через local.
+            is_source_call = function.id == "is_revoked"
+        else:
+            continue
+        if method_name not in method_names or not is_source_call:
+            continue
+        assert isinstance(parents[node], ast.Await), (
+            f"source.{method_name}() должен быть непосредственным аргументом await"
+        )
+        checked.add(method_name)
+
+    assert checked == method_names
 
 
 # --------------------------------------------------------------------------- mint

@@ -1,82 +1,65 @@
-/* frontend/app.js — пилотный плагин hello_plugin, протокол plugin-rpc/1.
- *
- * Контур (§5.2, §5.3, §7.1 v4 + dynamic-ui-implementation-contract.md 4.2/4.3):
- *   * iframe живёт на ОТДЕЛЬНОМ static-origin, без cookie и без сетевого доступа
- *     (connect-src 'none' в CSP). Никаких сетевых вызовов к платформенному API:
- *     все вызовы backend идут ТОЛЬКО через postMessage к хосту, который
- *     проксирует их в /pluginpage/{plugin}/{company}/api/* (задача 13 / §7.1).
- *   * capability-токен во frontend НЕ попадает и НИКОГДА не кладётся в URL
- *     (утечка через Referer, историю и access-логи, §5.2).
- *     Здесь нет ни одного сетевого URL вообще — только postMessage.
- *   * проверка `event.origin` ОБЯЗАТЕЛЬНА для КАЖДОГО сообщения, включая ответы:
- *     fail-closed, чужой origin (в т.ч. opaque "null") отбрасывается молча.
- *   * handshake: host.ready -> plugin.ready -> grant.ready. Идентификаторы
- *     (instance_id, nonce, digest) не придумываются плагином, а приходят от хоста.
- *
- * «plugin.rpc.request» — имя RPC-запроса пилота: envelope с kind="request"
- * (закрытая форма контракта 4.3) и type="plugin.rpc.request" как тегом маршрута
- * для хоста. Ответ — kind="response" / type="plugin.rpc.response".
- */
+/* hello_plugin frontend: единый plugin-rpc/1, только postMessage, без сети. */
 (function () {
   "use strict";
 
   var PROTOCOL = "plugin-rpc/1";
-  var TYPE_PLUGIN_READY = "plugin.ready";
-  var TYPE_REQUEST = "plugin.rpc.request";
-  var TYPE_RESPONSE = "plugin.rpc.response";
   var MAX_MESSAGE_BYTES = 64 * 1024;
+  var REQUEST_TIMEOUT_MS = 30 * 1000;
+  var DIGEST = /^sha256:[0-9a-f]{64}$/;
+  var INSTANCE_TOKEN = /^[A-Za-z0-9_-]{16,128}$/;
+  var REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+  var CAPABILITY = /^[a-z][a-z0-9._-]{0,127}(?:@[0-9A-Za-z][0-9A-Za-z._+-]{0,63})?$/;
+  var ERROR_CODES = [
+    "ORIGIN_MISMATCH", "PROTOCOL_UNSUPPORTED", "HANDSHAKE_MISMATCH", "HANDSHAKE_TIMEOUT",
+    "NONCE_MISMATCH", "UNKNOWN_METHOD", "CAPABILITY_DENIED", "DUPLICATE_REQUEST_ID",
+    "PAYLOAD_TOO_LARGE", "SCOPE_DENIED", "GRANT_EXPIRED", "INVALID_ENVELOPE",
+    "REQUEST_FAILED", "REQUEST_TIMEOUT"
+  ];
 
   var root = document.documentElement;
   var PLUGIN_ID = root.getAttribute("data-plugin-id") || "";
   var PLUGIN_VERSION = root.getAttribute("data-plugin-version") || "";
-  // Политика доверенного отправителя: публичный origin shell, НЕ секрет.
-  // Пустое/невалидное значение => handshake не выполняется (fail-closed).
-  var HOST_ORIGIN = root.getAttribute("data-host-origin") || "";
+  // data-host-origin remains canonical. Its empty value may fall back only to
+  // the bounded server-derived iframe.name DTO installed by the trusted host.
+  // Neither window.location, URL query, tokens nor first messages are trust inputs.
+  var canonicalHostOrigin = root.getAttribute("data-host-origin") || "";
+  var shellHandoff = null;
+  var HOST_ORIGIN = canonicalHostOrigin;
+  if (!HOST_ORIGIN) {
+    shellHandoff = readShellHandoff();
+    if (shellHandoff) HOST_ORIGIN = shellHandoff.plugin_shell_origin;
+  }
 
   var stateEl = document.getElementById("state");
   var greetBtn = document.getElementById("greet");
   var refreshBtn = document.getElementById("refresh");
   var listEl = document.getElementById("greetings");
-
-  var handshake = {
-    ready: false,
-    instanceId: "",
-    nonce: "",
-    appHandle: "",
-    digest: "",
-    scope: {},
-    capabilities: [],
-    granted: false,
-  };
   var pending = new Map();
+  var grantTimer = null;
+  var handshake = {
+    host_ready: false,
+    granted: false,
+    blocked: false,
+    instance_id: "",
+    nonce: "",
+    artifact_digest: "",
+    capabilities: [],
+    scope: {},
+    expires_at: 0
+  };
 
-  function setState(text, isError) {
-    stateEl.textContent = text;
-    stateEl.className = isError ? "state-error" : "state-ok";
+  function isRecord(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
   }
 
-  function newId() {
-    // crypto.randomUUID доступен только в secure context (HTTPS static-origin).
-    if (window.crypto && typeof window.crypto.randomUUID === "function") {
-      return window.crypto.randomUUID();
-    }
-    throw new Error("crypto.randomUUID недоступен: нужен secure context");
-  }
-
-  /* Единственная проверка происхождения. Отдельный origin обязателен:
-     "null" (opaque origin) НЕ принимается — иначе сообщение может прийти из
-     любого iframe с sandbox. Сверяем и source с точным WindowProxy родителя. */
-  function isTrusted(event) {
-    return (
-      Boolean(HOST_ORIGIN) &&
-      event.origin === HOST_ORIGIN &&
-      event.origin !== "null" &&
-      event.source === window.parent &&
-      event.data !== null &&
-      typeof event.data === "object" &&
-      event.data.protocol === PROTOCOL &&
-      !Array.isArray(event.data)
-    );
+  function exactShape(value, required, optional) {
+    if (!isRecord(value)) return false;
+    var allowed = new Set(required.concat(optional || []));
+    return Object.keys(value).every(function (key) {
+      return allowed.has(key) && key !== "__proto__" && key !== "prototype" && key !== "constructor";
+    }) && required.every(function (key) {
+      return Object.prototype.hasOwnProperty.call(value, key);
+    });
   }
 
   function messageSizeOk(data) {
@@ -87,131 +70,281 @@
     }
   }
 
-  function send(message) {
-    // postMessage ТОЛЬКО родителю и ТОЛЬКО на доверенный origin: '*' запрещён.
-    window.parent.postMessage(message, HOST_ORIGIN);
+  function validHostOrigin(value) {
+    if (!value || value === "null" || value === "*") return false;
+    try {
+      var parsed = new URL(value);
+      return parsed.protocol === "https:" && parsed.origin === value;
+    } catch (_err) {
+      return false;
+    }
   }
 
-  function onHostReady(data) {
-    if (handshake.ready) {
-      // Повторный handshake / навигация инвалидируют инстанс (контракт 4.2).
-      reset("повторный host.ready отклонён");
-      return;
+  function readShellHandoff() {
+    if (window.parent === window || typeof window.name !== "string"
+      || !window.name || window.name.length > 4096) return null;
+    var value;
+    try { value = JSON.parse(window.name); } catch (_err) { return null; }
+    var required = [
+      "protocol", "plugin_shell_origin", "plugin_id", "manifest_version", "artifact_digest"
+    ];
+    if (!exactShape(value, required)
+      || value.protocol !== "agentscale-plugin-shell/1"
+      || !validHostOrigin(value.plugin_shell_origin)
+      || value.plugin_id !== PLUGIN_ID || value.manifest_version !== PLUGIN_VERSION
+      || typeof value.artifact_digest !== "string" || !DIGEST.test(value.artifact_digest)) {
+      return null;
     }
-    if (
-      typeof data.instance_id !== "string" || !data.instance_id ||
-      typeof data.nonce !== "string" || !data.nonce ||
-      typeof data.digest !== "string" || !data.digest ||
-      typeof data.app_handle !== "string" || !data.app_handle ||
-      typeof data.protocol !== "string" || data.protocol !== PROTOCOL
-    ) {
-      reset("некорректный host.ready");
-      return;
+    return value;
+  }
+
+  function isTrusted(event) {
+    return validHostOrigin(HOST_ORIGIN)
+      && event.origin === HOST_ORIGIN
+      && event.source === window.parent
+      && isRecord(event.data);
+  }
+
+  function setState(text, isError) {
+    stateEl.textContent = text;
+    stateEl.className = isError ? "state-error" : "state-ok";
+  }
+
+  function newId() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
     }
+    throw new Error("secure randomUUID unavailable");
+  }
 
-    handshake.ready = true;
-    handshake.instanceId = data.instance_id;
-    handshake.nonce = data.nonce;
-    handshake.appHandle = data.app_handle;
-    // digest артефакта приходит от реестра через хост: самореференции в
-    // манифесте/коде плагина нет (§5.1, запрет artifact_digest/signature).
-    handshake.digest = data.digest;
-    handshake.scope = data.scope && typeof data.scope === "object" ? data.scope : {};
-
-    // plugin.ready: эхо identity + nonce, без токенов и без секретов.
-    send({
+  function envelope(type) {
+    return {
       protocol: PROTOCOL,
-      type: TYPE_PLUGIN_READY,
-      instance_id: handshake.instanceId,
-      nonce: handshake.nonce,
+      type: type,
       plugin_id: PLUGIN_ID,
       version: PLUGIN_VERSION,
-      digest: handshake.digest,
-    });
-    setState("Handshake отправлен, ожидание grant.ready…", false);
+      artifact_digest: handshake.artifact_digest,
+      instance_id: handshake.instance_id,
+      nonce: handshake.nonce
+    };
   }
 
-  function onGrantReady(data) {
-    if (!handshake.ready || data.instance_id !== handshake.instanceId || data.nonce !== handshake.nonce) {
-      reset("grant.ready не привязан к инстансу");
-      return;
+  function hasExpectedIdentity(data) {
+    return data.protocol === PROTOCOL
+      && data.plugin_id === PLUGIN_ID
+      && data.version === PLUGIN_VERSION
+      && data.artifact_digest === handshake.artifact_digest
+      && data.instance_id === handshake.instance_id
+      && data.nonce === handshake.nonce;
+  }
+
+  function send(message) {
+    if (handshake.blocked || !validHostOrigin(HOST_ORIGIN) || !messageSizeOk(message)) return false;
+    try {
+      window.parent.postMessage(message, HOST_ORIGIN);
+      return true;
+    } catch (_err) {
+      return false;
     }
-    if (!Array.isArray(data.capabilities)) {
-      reset("grant.ready без capabilities");
-      return;
-    }
-    handshake.capabilities = data.capabilities;
-    handshake.granted = true;
-    greetBtn.disabled = false;
-    refreshBtn.disabled = false;
-    setState("Плагин готов. Нажмите «Поздороваться».", false);
-    // Сразу показываем список приветствий компании.
-    rpcRequest("list", {});
   }
 
   function reset(reason) {
-    handshake.ready = false;
+    handshake.blocked = true;
+    handshake.host_ready = false;
     handshake.granted = false;
+    if (grantTimer !== null) {
+      clearTimeout(grantTimer);
+      grantTimer = null;
+    }
+    pending.forEach(function (entry) { clearTimeout(entry.timer); });
     pending.clear();
     greetBtn.disabled = true;
     refreshBtn.disabled = true;
-    setState("Handshake сброшен: " + reason, true);
+    // Причина формируется только нашим кодом, не текстом из host payload.
+    setState("Канал закрыт: " + reason, true);
   }
 
-  /* plugin.rpc.request: единственный путь к backend. Хост проксирует вызов в
-     /pluginpage/hello_plugin/{company}/api/greetings (§7.1), перезаписывая
-     доверенные заголовки. Плагин не знает и не задаёт X-Plugin-*/Cookie. */
-  function rpcRequest(operation, params) {
-    if (!handshake.granted) {
-      setState("RPC недоступен: grant не получен", true);
+  function onHostReady(data) {
+    var required = ["protocol", "type", "plugin_id", "version", "artifact_digest", "instance_id", "nonce"];
+    if (handshake.host_ready || handshake.granted || handshake.blocked) {
+      reset("повторный host.ready");
       return;
     }
-    var requestId = newId();
-    var envelope = {
-      protocol: PROTOCOL,
-      kind: "request",
-      type: TYPE_REQUEST,
-      requestId: requestId,
-      instanceId: handshake.instanceId,
-      method: "capability.call",
-      capability: { id: "hello.greetings", version: "1" },
-      context: {
-        cabinetId: handshake.scope.cabinetId || "",
-        projectId: handshake.scope.projectId || "",
-      },
-      idempotencyKey: requestId,
-      input: { method: operation, params: params },
-    };
-    if (!messageSizeOk(envelope)) {
+    if (!exactShape(data, required) || data.type !== "host.ready"
+      || data.protocol !== PROTOCOL || data.plugin_id !== PLUGIN_ID || data.version !== PLUGIN_VERSION
+      || typeof data.artifact_digest !== "string" || !DIGEST.test(data.artifact_digest)
+      || typeof data.instance_id !== "string" || !INSTANCE_TOKEN.test(data.instance_id)
+      || typeof data.nonce !== "string" || !INSTANCE_TOKEN.test(data.nonce)
+      || (shellHandoff !== null && data.artifact_digest !== shellHandoff.artifact_digest)) {
+      reset("некорректный host.ready");
+      return;
+    }
+    handshake.host_ready = true;
+    handshake.instance_id = data.instance_id;
+    handshake.nonce = data.nonce;
+    handshake.artifact_digest = data.artifact_digest;
+    if (!send(envelope("plugin.ready"))) {
+      reset("plugin.ready не отправлен");
+      return;
+    }
+    setState("Ожидание grant.ready…", false);
+  }
+
+  function validScope(scope) {
+    if (!exactShape(scope, ["company_id"], ["cabinet_id", "project_id", "session_id"])) return false;
+    return Object.keys(scope).every(function (key) {
+      return typeof scope[key] === "string" && scope[key].trim().length > 0 && scope[key].length <= 128;
+    });
+  }
+
+  function onGrantReady(data) {
+    var required = [
+      "protocol", "type", "plugin_id", "version", "artifact_digest", "instance_id", "nonce",
+      "capabilities", "scope", "expires_at"
+    ];
+    if (!handshake.host_ready || handshake.granted || !exactShape(data, required)
+      || data.type !== "grant.ready" || !hasExpectedIdentity(data)
+      || !Array.isArray(data.capabilities) || data.capabilities.length > 64
+      || new Set(data.capabilities).size !== data.capabilities.length
+      || data.capabilities.some(function (item) { return typeof item !== "string" || !CAPABILITY.test(item); })
+      || !validScope(data.scope) || typeof data.expires_at !== "string") {
+      reset("некорректный grant.ready");
+      return;
+    }
+    var expiry = Date.parse(data.expires_at);
+    if (!Number.isFinite(expiry) || expiry <= Date.now()) {
+      reset("grant истёк");
+      return;
+    }
+    if (data.capabilities.indexOf("hello.greetings@1.0") < 0) {
+      reset("capability hello.greetings@1.0 не выдана");
+      return;
+    }
+    handshake.capabilities = data.capabilities.slice();
+    handshake.scope = Object.assign({}, data.scope);
+    handshake.expires_at = expiry;
+    handshake.granted = true;
+    grantTimer = setTimeout(function () { reset("grant истёк"); }, Math.max(1, expiry - Date.now()));
+    greetBtn.disabled = false;
+    refreshBtn.disabled = false;
+    setState("Плагин готов.", false);
+    rpcRequest("list", {});
+  }
+
+  function operationParams(operation, params) {
+    // Tenant assertions come only from the verified grant, never from URL or
+    // caller-controlled operation params. Backend still revalidates every value.
+    if (!validScope(handshake.scope) || !isRecord(params)) return undefined;
+    var reserved = ["company_id", "cabinet_id", "project_id", "session_id"];
+    if (Object.keys(params).some(function (key) { return reserved.indexOf(key) >= 0; })) return undefined;
+    var scoped = { company_id: handshake.scope.company_id };
+    ["cabinet_id", "project_id"].forEach(function (key) {
+      if (handshake.scope[key] !== undefined) scoped[key] = handshake.scope[key];
+    });
+    if (operation === "list") {
+      if (Object.keys(params).some(function (key) { return key !== "limit"; })) return undefined;
+      if (params.limit !== undefined
+        && (!Number.isInteger(params.limit) || params.limit < 1 || params.limit > 200)) return undefined;
+    } else if (operation === "greet") {
+      if (Object.keys(params).some(function (key) { return key !== "message"; })) return undefined;
+      if (typeof params.message !== "string" || !params.message.trim() || params.message.length > 4000) return undefined;
+    } else {
+      return undefined;
+    }
+    return Object.assign(scoped, params);
+  }
+
+  function rpcRequest(operation, params) {
+    if (!handshake.granted || handshake.blocked || Date.now() >= handshake.expires_at) {
+      reset("RPC без действующего grant");
+      return;
+    }
+    var scopedParams = operationParams(operation, params);
+    if (!scopedParams) {
+      reset("некорректный scope или params");
+      return;
+    }
+    if (pending.size >= 128) {
+      setState("Слишком много ожидающих RPC", true);
+      return;
+    }
+    var requestId;
+    try { requestId = newId(); } catch (_err) {
+      reset("secure random недоступен");
+      return;
+    }
+    var message = envelope("plugin.rpc.request");
+    message.request_id = requestId;
+    message.method = "capability.call";
+    message.capability = { id: "hello.greetings", version: "1.0" };
+    message.context = Object.assign({}, handshake.scope);
+    message.idempotency_key = requestId;
+    message.input = { method: operation, params: scopedParams };
+    if (!messageSizeOk(message)) {
       setState("RPC-пакет превышает лимит", true);
       return;
     }
-    pending.set(requestId, operation);
-    send(envelope);
+    var timer = setTimeout(function () {
+      pending.delete(requestId);
+      setState("Таймаут RPC", true);
+    }, REQUEST_TIMEOUT_MS);
+    pending.set(requestId, { operation: operation, timer: timer });
+    if (!send(message)) {
+      clearTimeout(timer);
+      pending.delete(requestId);
+      reset("RPC не отправлен");
+    }
+  }
+
+  function validRpcError(error) {
+    return exactShape(error, ["code", "message", "trace_id"])
+      && typeof error.code === "string" && ERROR_CODES.indexOf(error.code) >= 0
+      && typeof error.message === "string" && error.message.length > 0 && error.message.length <= 500
+      && typeof error.trace_id === "string" && REQUEST_ID.test(error.trace_id);
   }
 
   function onRpcResponse(data) {
-    // Тот же строгий origin/source для ОТВЕТА: поддельный результат игнорируем.
-    if (data.type !== TYPE_RESPONSE || data.kind !== "response") return;
-    if (data.instanceId !== handshake.instanceId) return;
-    if (typeof data.requestId !== "string" || !pending.has(data.requestId)) return;
-    // Важно: читаем операцию ДО удаления из pending, иначе ветвление рендера
-    // потеряется (requestId — ключ, а не значение).
-    var operation = pending.get(data.requestId);
-    pending.delete(data.requestId);
-
+    var required = [
+      "protocol", "type", "plugin_id", "version", "artifact_digest", "instance_id", "nonce", "request_id", "ok"
+    ];
+    if (!handshake.granted || !exactShape(data, required, ["result", "error"])
+      || !hasExpectedIdentity(data) || typeof data.request_id !== "string"
+      || !REQUEST_ID.test(data.request_id) || typeof data.ok !== "boolean") {
+      reset("некорректный RPC response");
+      return;
+    }
+    var entry = pending.get(data.request_id);
+    if (!entry) return; // duplicate/unknown response не меняет состояние
+    if ((data.ok && (!Object.prototype.hasOwnProperty.call(data, "result") || data.error !== undefined))
+      || (!data.ok && (data.result !== undefined || !validRpcError(data.error)))) {
+      reset("некорректный RPC result");
+      return;
+    }
+    pending.delete(data.request_id);
+    clearTimeout(entry.timer);
     if (!data.ok) {
-      var code = data.error && typeof data.error.code === "string" ? data.error.code : "REQUEST_FAILED";
-      setState("Ошибка RPC: " + code, true);
+      setState("Ошибка RPC: " + data.error.code, true);
       return;
     }
     var result = data.result;
-    if (operation === "list" || Array.isArray(result)) {
-      renderList(Array.isArray(result) ? result : []);
-    } else if (result && Array.isArray(result.items)) {
-      renderList(result.items);
+    if (entry.operation === "list") {
+      if (Array.isArray(result)) renderList(result);
+      else if (isRecord(result) && Array.isArray(result.items)) renderList(result.items);
+      else {
+        reset("некорректный список приветствий");
+        return;
+      }
     }
     setState("Готово.", false);
+  }
+
+  function onPluginError(data) {
+    var required = ["protocol", "type", "plugin_id", "version", "artifact_digest", "instance_id", "nonce", "error"];
+    if (!exactShape(data, required, ["request_id"]) || !hasExpectedIdentity(data) || !validRpcError(data.error)) {
+      reset("некорректный plugin.error");
+      return;
+    }
+    reset("ошибка протокола " + data.error.code);
   }
 
   function renderList(items) {
@@ -222,16 +355,15 @@
       listEl.appendChild(empty);
       return;
     }
-    items.forEach(function (item) {
+    items.slice(0, 1000).forEach(function (item) {
       var li = document.createElement("li");
-      // textContent: никакой вставки HTML из ответа backend (XSS-безопасность).
-      li.textContent = String(item.message !== undefined ? item.message : "");
+      li.textContent = isRecord(item) && typeof item.message === "string" ? item.message : "";
       listEl.appendChild(li);
     });
   }
 
   window.addEventListener("message", function (event) {
-    if (!isTrusted(event)) return; // fail-closed: чужой origin отбрасывается
+    if (!isTrusted(event)) return;
     var data = event.data;
     if (!messageSizeOk(data)) {
       reset("превышен размер сообщения");
@@ -245,21 +377,21 @@
       onGrantReady(data);
       return;
     }
-    if (data.kind === "response" || data.type === TYPE_RESPONSE) {
+    if (data.type === "plugin.rpc.response") {
       onRpcResponse(data);
       return;
     }
-    // Неизвестный тип envelope — игнорируем (закрытый протокол).
+    if (data.type === "plugin.error") {
+      onPluginError(data);
+      return;
+    }
+    reset("неизвестный тип сообщения");
   });
 
   greetBtn.addEventListener("click", function () {
     rpcRequest("greet", { message: "Привет от hello_plugin" });
   });
-  refreshBtn.addEventListener("click", function () {
-    rpcRequest("list", {});
-  });
+  refreshBtn.addEventListener("click", function () { rpcRequest("list", {}); });
 
-  if (!HOST_ORIGIN) {
-    reset("data-host-origin не задан");
-  }
+  if (!validHostOrigin(HOST_ORIGIN)) reset("data-host-origin/server handoff не настроен");
 })();

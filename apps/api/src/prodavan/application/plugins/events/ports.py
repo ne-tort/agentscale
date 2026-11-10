@@ -23,9 +23,12 @@ from __future__ import annotations
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 from .contracts import (
+    ConsumerAssignment,
+    DeliveryClaim,
     DlqRecord,
     IdempotencyKey,
     PluginEvent,
+    RawDlqRecord,
     Subscription,
 )
 
@@ -38,9 +41,12 @@ from .contracts import (
 class ConsumedRecord(Protocol):
     """Минимальный контракт записи, возвращаемой ``ConsumerPort.poll``.
 
-    Адаптер aiokafka подставляет ``ConsumerRecord`` как есть (у него есть
-    ``value``/``key``/``offset``/``partition``/``topic``), а в unit-тестах
-    используется простая замена. Диспечер читает только эти атрибуты.
+    Адаптер aiokafka подставляет ConsumerRecord с координатами и wire-значением,
+    а в unit-тестах используется простая замена. raw_value сохраняет исходные
+    байты для decode и digest в dispatcher. Для уже декодированных адаптеров
+    допускается None и Mapping/str/bytes в value; исходные байты имеют приоритет.
+    Сырое значение используется только для decode и одностороннего digest и
+    никогда не передаётся в RawDlqRecord/handler/audit.
     """
 
     @property
@@ -56,7 +62,10 @@ class ConsumedRecord(Protocol):
     def key(self) -> bytes | None: ...
 
     @property
-    def value(self) -> Mapping[str, Any]: ...
+    def raw_value(self) -> bytes | None: ...
+
+    @property
+    def value(self) -> Mapping[str, Any] | str | bytes: ...
 
 
 # ---------------------------------------------------------------------------
@@ -129,8 +138,23 @@ class ConsumerPort(Protocol):
 
         ...
 
+    def delivery_ownership(self, record: ConsumedRecord) -> ConsumerAssignment:
+        """Публичный ownership/assignment fence для текущей записи."""
+
+        ...
+
     async def close(self) -> None:
         """Остановить консьюмер; не коммитит необработанные offset'ы."""
+
+        ...
+
+
+@runtime_checkable
+class ConsumerOwnershipPort(Protocol):
+    """Optional public assignment fence supplied by a concrete consumer adapter."""
+
+    def delivery_ownership(self, record: ConsumedRecord) -> ConsumerAssignment:
+        """Return current public assignment; generation may remain unavailable."""
 
         ...
 
@@ -149,7 +173,28 @@ class DlqPort(Protocol):
     """
 
     async def publish(self, record: DlqRecord) -> None:
-        """Записать событие в DLQ с сохранением ``event_id`` и ``run_id``."""
+        """Записать событие в DLQ с сохранением event_id и run_id."""
+
+        ...
+
+
+@runtime_checkable
+class RawDlqPort(Protocol):
+    """Durable DLQ malformed raw records, отдельный от валидного event DLQ.
+
+    publish обязан атомарно дедуплицировать по record.idempotency_key:
+    (topic, partition, offset, consumer_group). True означает новую подтверждённую
+    запись, False — что запись с этим ключом уже подтверждена ранее. Любая
+    неопределённость/ошибка записи выражается исключением, а не False: только
+    после нормального возврата dispatcher может коммитить source offset.
+
+    Реализация обязана быть durable и не хранит сырой payload. In-memory фейки
+    допустимы только в unit-тестах; production wiring без такой реализации
+    получает MISSING_DEPENDENCY и не коммитит poison record.
+    """
+
+    async def publish(self, record: RawDlqRecord) -> bool:
+        """Подтвердить запись или её идемпотентный дубликат."""
 
         ...
 
@@ -225,6 +270,41 @@ class IdempotencyStorePort(Protocol):
 
 
 @runtime_checkable
+class DeliveryClaimPort(Protocol):
+    """Durable per-(subscription_id, source_event_id) delivery ownership.
+
+    acquire returns None while another live owner holds the lease. Otherwise it
+    atomically installs a unique owner token/generation and returns the claim;
+    completed=True means backend delivery was already acknowledged and must not
+    be repeated. renew/complete/release return False for stale, foreign, lost or
+    expired ownership. complete is called only after a real bounded 2xx response
+    and durably preserves completion for duplicate suppression.
+    """
+
+    async def acquire(
+        self, key: IdempotencyKey, *, lease_seconds: float
+    ) -> DeliveryClaim | None:
+        """Acquire a live lease or return None for a foreign live owner."""
+
+        ...
+
+    async def renew(self, claim: DeliveryClaim) -> bool:
+        """Atomically revalidate ownership and extend its TTL."""
+
+        ...
+
+    async def complete(self, claim: DeliveryClaim) -> bool:
+        """Owner-only durable completion after real backend 2xx."""
+
+        ...
+
+    async def release(self, claim: DeliveryClaim) -> bool:
+        """Owner-only release after an ordinary failed delivery attempt."""
+
+        ...
+
+
+@runtime_checkable
 class PublishedEventStorePort(Protocol):
     """Дедупликация ПРОДЮСЕРА по ``event_id`` (защита от ре-паблиша).
 
@@ -254,7 +334,7 @@ class EventHandlerPort(Protocol):
     """Обработчик события на стороне backend плагина (``POST /events/*``)."""
 
     async def handle(self, event: PluginEvent, *, subscription: Subscription) -> None:
-        """Успех = отсутствие исключения; любое исключение → RETRY/DLQ."""
+        """Успех = реальный 2xx backend response; исключение → RETRY/DLQ."""
 
         ...
 
@@ -294,12 +374,15 @@ class AuditPort(Protocol):
 __all__ = [
     "AuditPort",
     "ConsumedRecord",
+    "ConsumerOwnershipPort",
     "ConsumerPort",
+    "DeliveryClaimPort",
     "DlqPort",
     "EventHandlerPort",
     "IdempotencyStorePort",
     "ProducerPort",
     "PublishedEventStorePort",
+    "RawDlqPort",
     "SubscriptionStorePort",
     "TopicAdminPort",
     "WakeHookPort",

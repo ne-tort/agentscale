@@ -1,0 +1,68 @@
+{
+  "status": "PASSED_ACCEPTANCE",
+  "run_id": "bd5b14e08a76",
+  "cluster": "pf-bd5b14e08a76",
+  "real_acceptance": {
+    "collected": 19,
+    "passed": 19,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "exit_code": 0,
+    "junit_time_seconds": 21.276,
+    "cli_time_seconds": 21.28
+  },
+  "targeted_units": {
+    "tests": 101,
+    "passed": 101,
+    "failed": 0,
+    "skipped": 0,
+    "exit_code": 0,
+    "junit_time_seconds": 0.505
+  },
+  "direct_probe": {
+    "authorization_mode": "Node,RBAC",
+    "corrected_audience": "https://kubernetes.default.svc.cluster.local",
+    "api_sa_mints_for_admin": 201,
+    "api_sa_mints_for_unrelated": 403,
+    "unrelated_sa_mints_for_admin": 403,
+    "api_sa_reads_secrets": 403,
+    "scale_get_for_replicas_zero": {
+      "status": 200,
+      "api_version": "autoscaling/v1",
+      "kind": "Scale",
+      "spec": {}
+    }
+  },
+  "production_changes": [
+    "apps/api/src/prodavan/infrastructure/plugins/runtime/deployment_admin.py: canonical pre-projection update fence; omitted-zero scale confirmation with non-Scale denial; empty desired annotations no longer force Service PATCH",
+    "apps/api/src/prodavan/infrastructure/plugins/runtime/k8s_scale.py: omitted Scale.spec.replicas means zero for reads/zero targets; non-zero wake requires explicit confirmation; response kind must be Scale",
+    "apps/api/src/prodavan/infrastructure/plugins/runtime/token_provider.py: TOKEN_AUDIENCE corrected to the real Kubernetes API audience"
+  ],
+  "harness_changes": [
+    "apps/api/tests/e2e/k8s/plugin_acceptance/kubeconfig.py: separate bearer-token TLS contexts without bootstrap client cert; trust_env=False for K8s clients",
+    "apps/api/tests/e2e/k8s/plugin_acceptance/cluster.py: documented core-group resourceNames-scoped TokenRequest role; role remains core after direct probe verification",
+    "apps/api/tests/e2e/k8s/plugin_acceptance/pytest.ini: marker INI syntax fix from the first acceptance task"
+  ],
+  "regression_tests": [
+    "apps/api/tests/unit/plugins/runtime/test_acceptance_harness_contract.py (new)",
+    "apps/api/tests/unit/plugins/runtime/test_deployment_admin.py",
+    "apps/api/tests/unit/plugins/runtime/test_k8s_scale.py",
+    "apps/api/tests/unit/plugins/runtime/test_token_provider.py"
+  ],
+  "forbidden_files_untouched": [
+    "wiring/install.py",
+    "models"
+  ],
+  "cleanup": {
+    "acceptance_namespaces_remaining": 0,
+    "diagnostic_namespaces_remaining": 0,
+    "kind_delete_exit": 0,
+    "owned_cluster_listed": false,
+    "owned_control_plane_container_remaining": false,
+    "temp_directory_removed": true,
+    "default_kubectl_current_context": "unset",
+    "shared_node_image_tag_explicitly_removed": false
+  },
+  "secret_scan_matches": 0
+}

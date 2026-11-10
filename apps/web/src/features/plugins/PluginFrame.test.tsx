@@ -20,6 +20,7 @@ import {
 import { pluginSessionRequired } from "./errors";
 
 const SAFE_SRC = "https://plugin-origin.agentscale.dev/tenant-co_123/mod_equipment/1.2.0/index.html";
+const DIGEST = `sha256:${"a".repeat(64)}`;
 
 function render(element: ReactElement): string {
   return renderToStaticMarkup(<SettingsProvider>{element}</SettingsProvider>);
@@ -30,6 +31,7 @@ function frameMarkup(props: Partial<PluginFrameProps> = {}): string {
     pluginId="mod_equipment"
     companyId="co_123"
     version="1.2.0"
+    artifactDigest={DIGEST}
     src={SAFE_SRC}
     {...props}
   />);
@@ -42,7 +44,16 @@ describe("i18n/units/plugins.ts", () => {
 
   it("содержит ровно требуемые ключи", () => {
     expect(Object.keys(pluginStrings.ru).sort()).toEqual([
-      "close", "loadError", "loading", "notConnected", "notGranted", "open",
+      "approveDigest", "approveDone", "approveFailed", "approveHint",
+      "approveMissing", "approveNotReady", "approveReplayed", "approveSubmit",
+      "approveTitle", "approveVersion",
+      "close", "createDone", "createFailed", "createHint", "createId",
+      "createScopeRequired", "createSubmit", "createTitle", "createVersion",
+      "lifecycleBucket", "lifecycleDatabase", "lifecycleFailed",
+      "lifecycleGrant", "lifecycleGrantId", "lifecycleHint", "lifecycleNotReady",
+      "lifecycleRevoke", "lifecycleStatus", "lifecycleTitle", "lifecycleUninstall",
+      "lifecycleWake",
+      "loadError", "loading", "notConnected", "notGranted", "open",
       "originMismatch", "publicPage", "retry", "timeout", "unsupportedProtocol",
     ]);
   });
@@ -112,6 +123,17 @@ describe("PluginFrame: sandbox / атрибуты / состояния", () => {
     expect(PLUGIN_SANDBOX).not.toContain("allow-same-origin");
   });
 
+  it("permissions policy пуст: плагин не получает ни одной и не может её расширить", () => {
+    const markup = frameMarkup();
+    // `allow=""` — deny-all Permissions Policy. Без этой проверки однажды
+    // добавленный `camera`/`clipboard-read` прошёл бы молча: sandbox его не
+    // заменяет, это две независимые оси ограничений.
+    expect(markup).toContain('allow=""');
+    for (const feature of ["camera", "microphone", "geolocation", "clipboard-read"]) {
+      expect(markup).not.toContain(feature);
+    }
+  });
+
   it("referrerpolicy, credentialless, no-referrer и aria-атрибуты на месте", () => {
     const markup = frameMarkup();
     // `renderToStaticMarkup` (React 19) выводит имя пропа как `referrerPolicy=`,
@@ -140,6 +162,7 @@ describe("PluginFrame: sandbox / атрибуты / состояния", () => {
       pluginId="mod_equipment"
       companyId=""
       version="1.2.0"
+      artifactDigest={DIGEST}
       src={SAFE_SRC}
     />);
     expect(markup).toContain('data-plugin-company=""');

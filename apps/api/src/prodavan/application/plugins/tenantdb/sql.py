@@ -165,6 +165,31 @@ def role_exists(name: object) -> DdlStatement:
     )
 
 
+def role_login_enabled(name: object) -> DdlStatement:
+    """Post-state probe for ALTER ROLE LOGIN/NOLOGIN."""
+    safe = assert_safe_identifier(name, operation="role_login_enabled")
+    return DdlStatement(
+        text="SELECT 1 FROM pg_roles WHERE rolname = :rolname AND rolcanlogin",
+        params={"rolname": safe},
+    )
+
+
+def database_connect_granted(database: object, role: object) -> DdlStatement:
+    """Confirm an explicit role CONNECT ACL, excluding PUBLIC-only access."""
+    db = assert_safe_identifier(database, operation="database_connect_granted")
+    role_name = assert_safe_identifier(role, operation="database_connect_granted")
+    return DdlStatement(
+        text=(
+            "SELECT 1 FROM pg_database AS db WHERE db.datname = :name AND EXISTS ("
+            "SELECT 1 FROM aclexplode(COALESCE(db.datacl, acldefault('d', db.datdba))) AS acl "
+            "JOIN pg_roles AS grantee ON grantee.oid = acl.grantee "
+            "WHERE grantee.rolname = :role AND acl.privilege_type = 'CONNECT'"
+            ")"
+        ),
+        params={"name": db, "role": role_name},
+    )
+
+
 def schema_exists(schema: object) -> DdlStatement:
     """``SELECT 1 FROM information_schema.schemata WHERE schema_name = :schema``.
 
@@ -385,6 +410,18 @@ def drop_database(name: object) -> DdlStatement:
     """
     qi = _qi(name, operation="drop_database")
     return DdlStatement(text=f"DROP DATABASE IF EXISTS {qi}")
+
+
+def terminate_role_sessions(role: object) -> DdlStatement:
+    """Завершить существующие сессии роли после NOLOGIN/REVOKE."""
+    safe = assert_safe_identifier(role, operation="terminate_role_sessions")
+    return DdlStatement(
+        text=(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE usename = :role AND pid <> pg_backend_pid()"
+        ),
+        params={"role": safe},
+    )
 
 
 def terminate_backend(database: object) -> DdlStatement:

@@ -54,6 +54,17 @@ HTTP-клиентов, ни k8s-клиента, ни cosign-CLI: всё внеш
 обязательный порт не передан, собирается fail-closed реализация
 (``DurableGrantRevocation`` требует ``grant_store``; ``ArtifactVerifier``
 требует ``cosign``) — «частично собранной» платформы с тихим allow не бывает.
+
+``grant_store``/``audit``/``quota``/``activation_state_store`` — тоже
+ОБЯЗАТЕЛЬНЫЕ явные порты: in-memory production defaults удалены.
+``grant_store`` проверяется НЕ только в ``_build_revocation``: default
+``_build_capability_service`` требует его независимо от ``revocation``
+override, иначе capability-ядро получило бы ``grant_store=None``.
+``InMemoryAudit``/``InMemoryQuota``/
+``InMemoryStateStore`` принимаются ТОЛЬКО как явные test/dev overrides;
+отсутствие порта при фактической сборке сервиса = ``PluginPlatformConfigError``.
+Полный service override (``capability_service``/``activator``) по-прежнему
+допустим: тогда default-конструктор не вызывается вовсе.
 """
 
 from __future__ import annotations
@@ -63,37 +74,32 @@ from typing import Any, Final, Mapping
 
 from prodavan.application.plugins.activation.activator import PluginActivator, SystemClock
 from prodavan.application.plugins.activation.state import IdlePolicy
-from prodavan.application.plugins.activation.state_store import InMemoryStateStore
 from prodavan.application.plugins.admin.ports import PluginAdminPorts
 from prodavan.application.plugins.admin.service import PluginAdminService
-from prodavan.application.plugins.artifacts.registry import (
-    InMemoryRegistryStore,
-    PluginArtifactRegistry,
-)
+from prodavan.application.plugins.artifacts.registry import PluginArtifactRegistry
 from prodavan.application.plugins.artifacts.verification import (
     PLATFORM_VERSION,
     ArtifactVerifier,
     CompatibilityGate,
     CosignPort,
 )
-from prodavan.application.plugins.capabilities.audit import AuditPort, InMemoryAudit
+from prodavan.application.plugins.capabilities.audit import AuditPort
 from prodavan.application.plugins.capabilities.ports import AdapterRegistry
-from prodavan.application.plugins.capabilities.quotas import (
-    InMemoryQuota,
-    PluginQuota,
-    QuotaPort,
-)
+from prodavan.application.plugins.capabilities.quotas import QuotaPort
 from prodavan.application.plugins.capabilities.service import PluginCapabilityService
 from prodavan.application.plugins.egress.generator import EgressConfigGenerator
 from prodavan.application.plugins.egress.service import EgressService
 from prodavan.application.plugins.events.dispatch import PluginEventDispatcher
 from prodavan.application.plugins.gateway.auth import DEFAULT_LIMITS, GatewayAuth
+from prodavan.application.plugins.gateway.ports import StaticResponsePolicy
 from prodavan.application.plugins.gateway.proxy import GatewayProxy
 from prodavan.application.plugins.identity.keys import KeyRing
 from prodavan.application.plugins.objects.service import PluginObjectStore
 from prodavan.application.plugins.tenantdb.service import TenantDatabaseService
 from prodavan.application.plugins.wiring.adapters import (
     STUB_ADAPTER_NAMES,
+    WIRED_CAPABILITIES,
+    aclose_adapter_registry,
     adapter_report,
     build_adapter_registry,
 )
@@ -132,9 +138,14 @@ PORT_OVERRIDES: Final[frozenset[str]] = frozenset(
         "event_consumer",
         "event_topic_admin",
         "event_dlq",
+        "event_raw_dlq",
         "event_subscriptions",
         "event_published_events",
         "event_idempotency",
+        "event_delivery_claims",
+        "event_delivery_claim_prefix",
+        "event_redis",
+        "redis_client",
         "event_audit",
         "event_handler",
         "event_wake_hook",
@@ -225,6 +236,10 @@ class PluginPlatform:
     admin: PluginAdminService
     event_dispatcher: PluginEventDispatcher
 
+    async def aclose(self) -> None:
+        """Release owned capability transports; repeated shutdown is a no-op."""
+        await aclose_adapter_registry(self.registry)
+
     @property
     def gateway_auth(self) -> GatewayAuth:
         """Решение об авторизации (задача 11, первая половина gateway)."""
@@ -257,7 +272,7 @@ class PluginPlatform:
                 "jwks": self.jwks,
             },
             "adapters": dict(adapter_report(self.registry)),
-            "known_stub_adapters": list(STUB_ADAPTER_NAMES),
+            "known_stub_adapters": list(adapter_report(self.registry)["stub_adapters"]),
             "capability_service": type(self.capability_service).__name__,
             "artifact_verifier": type(self.artifact_verifier).__name__,
             "revocation": type(self.revocation).__name__,
@@ -290,6 +305,51 @@ def _service(name: str, overrides: Mapping[str, Any], factory: Any) -> Any:
             )
         return value
     return factory()
+
+
+def _required_port(overrides: Mapping[str, Any], name: str) -> Any:
+    """Обязательный порт enabled composition: отсутствие = typed config failure.
+
+    Молчаливый process-local default (``InMemoryAudit``/``InMemoryQuota``/
+    ``InMemoryStateStore``) запрещён. Явно переданная реализация принимается
+    как есть: InMemory* doubles допустимы ТОЛЬКО как осознанные test/dev
+    constructor overrides, production обязан передать durable адаптер.
+    Вызывается ТОЛЬКО из factory-замыканий ``_service``: полный service
+    override означает, что default-конструктор не выполняется и порт не нужен.
+    """
+    value = overrides.get(name)
+    if value is None:
+        raise PluginPlatformConfigError(
+            f"build_plugin_platform requires {name}= (explicit durable port); "
+            "no in-memory production default: InMemory* implementations are "
+            "accepted only as explicit test/dev overrides"
+        )
+    return value
+
+
+def _event_delivery_claims(overrides: Mapping[str, Any]) -> Any:
+    """Build the required shared durable claim store, never an in-memory default."""
+
+    supplied = overrides.get("event_delivery_claims")
+    if supplied is not None:
+        return supplied
+    redis = overrides.get("event_redis") or overrides.get("redis_client")
+    if redis is None:
+        raise PluginPlatformConfigError(
+            "build_plugin_platform requires event_delivery_claims= or a shared "
+            "event_redis=/redis_client= for durable delivery ownership"
+        )
+    from prodavan.infrastructure.plugins.adapters.redis_event_claims import (
+        RedisDeliveryClaimStore,
+    )
+
+    return RedisDeliveryClaimStore(
+        redis=redis,
+        prefix=overrides.get(
+            "event_delivery_claim_prefix",
+            "agentscale:plugin:events:delivery-claims:",
+        ),
+    )
 
 
 def _adapter_overrides(overrides: Mapping[str, Any]) -> dict[str, object]:
@@ -372,21 +432,39 @@ def build_plugin_platform(settings: Any, **overrides: Any) -> PluginPlatform | N
     )
     if not isinstance(registry, AdapterRegistry):
         raise PluginPlatformConfigError("registry override must be an AdapterRegistry")
+    registry_report = adapter_report(registry)
+    if registry_report["stub_count"] or set(registry.registered) != set(WIRED_CAPABILITIES):
+        raise PluginPlatformConfigError(
+            "enabled platform registry must contain all real adapters and no UnavailableAdapter"
+        )
+    for capability in WIRED_CAPABILITIES:
+        if not callable(getattr(registry.resolve(capability), "quota_usage", None)):
+            raise PluginPlatformConfigError(
+                f"adapter {capability!r} is missing QuotaMeterPort.quota_usage"
+            )
 
-    audit: AuditPort = overrides.get("audit") or InMemoryAudit()
-    quota: QuotaPort = overrides.get("quota") or InMemoryQuota(PluginQuota())
-    egress_policy = overrides.get("egress_policy")
+    def _build_capability_service() -> PluginCapabilityService:
+        # grant_store/audit/quota — ОБЯЗАТЕЛЬНЫЕ явные порты: молчаливый
+        # process-local источник истины/аудита/квоты запрещён (fail-closed).
+        # grant_store требуется ЗДЕСЬ, а НЕ только в _build_revocation:
+        # revocation override НЕ освобождает capability-ядро от durable
+        # GrantRecordStore — иначе invoke получил бы grant_store=None.
+        grant_store = _required_port(overrides, "grant_store")
+        audit: AuditPort = _required_port(overrides, "audit")
+        quota: QuotaPort = _required_port(overrides, "quota")
+        return PluginCapabilityService(
+            registry=registry,
+            grant_store=grant_store,
+            quota=quota,
+            audit=audit,
+            revocation=revocation,  # тот же объект implements GrantRevocationPort
+            egress_policy=overrides.get("egress_policy"),
+        )
 
     capability_service = _service(
         "capability_service",
         overrides,
-        lambda: PluginCapabilityService(
-            registry=registry,
-            quota=quota,
-            audit=audit,
-            revocation=revocation,  # тот же объект implements GrantRevocationPort
-            egress_policy=egress_policy,
-        ),
+        _build_capability_service,
     )
 
     # --- 4) артефакты (cosign обязателен, иначе карантин) ------------------
@@ -418,14 +496,27 @@ def build_plugin_platform(settings: Any, **overrides: Any) -> PluginPlatform | N
         )
 
     artifact_verifier = _service("artifact_verifier", overrides, _build_verifier)
+    def _build_artifact_registry() -> PluginArtifactRegistry:
+        store = overrides.get("artifact_registry_store")
+        if store is None:
+            # A missing durable store must fail composition. An in-memory
+            # store is accepted only when injected explicitly as a test/dev
+            # override; it is never chosen as the production default.
+            raise PluginPlatformConfigError(
+                "build_plugin_platform requires artifact_registry_store= "
+                "(durable RegistryStorePort, SqlArtifactRegistryStore in "
+                "production); InMemoryRegistryStore is test/dev-only"
+            )
+        return PluginArtifactRegistry(
+            store=store,
+            verifier=artifact_verifier,
+            clock=overrides.get("clock"),
+        )
+
     artifact_registry = _service(
         "artifact_registry",
         overrides,
-        lambda: PluginArtifactRegistry(
-            store=overrides.get("artifact_registry_store") or InMemoryRegistryStore(),
-            verifier=artifact_verifier,
-            clock=overrides.get("clock"),
-        ),
+        _build_artifact_registry,
     )
 
     # --- 5) зоны: tenantdb / objects / egress ------------------------------
@@ -478,7 +569,9 @@ def build_plugin_platform(settings: Any, **overrides: Any) -> PluginPlatform | N
                 ready_timeout_seconds=float(config.ready_timeout_seconds),
                 max_concurrent_wakes=int(config.max_concurrent_wakes),
             ),
-            state_store=overrides.get("activation_state_store") or InMemoryStateStore(),
+            # Обязательный durable CAS-store (ConfigMap/SQL в проде); явный
+            # InMemoryStateStore — только test/dev override, НЕ default.
+            state_store=_required_port(overrides, "activation_state_store"),
             proxy=overrides.get("activation_proxy"),
         ),
     )
@@ -490,9 +583,11 @@ def build_plugin_platform(settings: Any, **overrides: Any) -> PluginPlatform | N
             consumer=overrides.get("event_consumer"),
             topic_admin=overrides.get("event_topic_admin"),
             dlq=overrides.get("event_dlq"),
+            raw_dlq=_required_port(overrides, "event_raw_dlq"),
             subscriptions=overrides.get("event_subscriptions"),
             published_events=overrides.get("event_published_events"),
             idempotency=overrides.get("event_idempotency"),
+            delivery_claims=_event_delivery_claims(overrides),
             audit=overrides.get("event_audit"),
             handler=overrides.get("event_handler"),
             wake_hook=overrides.get("event_wake_hook"),
@@ -520,6 +615,9 @@ def build_plugin_platform(settings: Any, **overrides: Any) -> PluginPlatform | N
             backend_http=overrides.get("gateway_backend_http") or _MissingGatewayPort("backend_http"),
             audit=overrides.get("gateway_audit") or _MissingGatewayPort("audit"),
             static_http=overrides.get("gateway_static_http"),
+            static_response_policy=StaticResponsePolicy(
+                shell_origin=config.shell_origin
+            ),
         ),
     )
 

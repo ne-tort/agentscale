@@ -30,6 +30,8 @@ class FakeAdminConnection:
     databases: set[str] = field(default_factory=set)
     roles: set[str] = field(default_factory=set)
     schemas: dict[str, set[str]] = field(default_factory=dict)
+    role_login: dict[str, bool] = field(default_factory=dict)
+    connect_grants: set[tuple[str, str]] = field(default_factory=set)
     statements: list[tuple[str, dict[str, Any], AdminTarget]] = field(default_factory=list)
     # Иногда нужно сымитировать отказ драйвера (fail-closed тесты).
     fail_next: bool = False
@@ -55,7 +57,13 @@ class FakeAdminConnection:
 
         upper = text.strip().upper()
 
-        # --- SELECT 1 ... проверки существования ---
+        # --- SELECT 1 ... проверки существования и post-state ---
+        if "ACLEXPLODE" in upper and "ACL.PRIVILEGE_TYPE = 'CONNECT'" in upper:
+            key = (params["name"], params["role"])
+            return ExecuteResult(rows=((1,),) if key in self.connect_grants else ())
+        if upper.startswith("SELECT 1 FROM PG_ROLES") and "ROLCANLOGIN" in upper:
+            name = params["rolname"]
+            return ExecuteResult(rows=((1,),) if self.role_login.get(name, False) else ())
         if upper.startswith("SELECT 1 FROM PG_DATABASE"):
             name = params["name"]
             return ExecuteResult(rows=((1,),) if name in self.databases else ())
@@ -77,12 +85,18 @@ class FakeAdminConnection:
             name = _unquote_ident(text, "DROP DATABASE")
             self.databases.discard(name)
             self.schemas.pop(name, None)
+            self.connect_grants = {item for item in self.connect_grants if item[0] != name}
             return ExecuteResult()
         if upper.startswith("CREATE ROLE"):
-            self.roles.add(_unquote_ident(text, "CREATE ROLE"))
+            name = _unquote_ident(text, "CREATE ROLE")
+            self.roles.add(name)
+            self.role_login[name] = True
             return ExecuteResult()
         if upper.startswith("DROP ROLE"):
-            self.roles.discard(_unquote_ident(text, "DROP ROLE"))
+            name = _unquote_ident(text, "DROP ROLE")
+            self.roles.discard(name)
+            self.role_login.pop(name, None)
+            self.connect_grants = {item for item in self.connect_grants if item[1] != name}
             return ExecuteResult()
 
         # --- DDL в БД компании ---
@@ -95,7 +109,23 @@ class FakeAdminConnection:
             self.schemas.setdefault(target.database, set()).discard(name)
             return ExecuteResult()
 
-        # GRANT/REVOKE/ALTER/SELECT pg_terminate_backend — состояние не меняют.
+        if upper.startswith("GRANT CONNECT ON DATABASE"):
+            parts = text.split('"')
+            self.connect_grants.add((parts[1], parts[3]))
+            return ExecuteResult()
+        if upper.startswith("REVOKE CONNECT ON DATABASE"):
+            parts = text.split('"')
+            self.connect_grants.discard((parts[1], parts[3]))
+            return ExecuteResult()
+        if upper.startswith("ALTER ROLE"):
+            name = _unquote_ident(text, "ALTER ROLE")
+            if upper.endswith("NOLOGIN"):
+                self.role_login[name] = False
+            elif upper.endswith("LOGIN"):
+                self.role_login[name] = True
+            return ExecuteResult()
+
+        # SELECT pg_terminate_backend and role settings do not change this fake.
         return ExecuteResult()
 
     def texts(self, *, prefix: str | None = None) -> list[str]:
@@ -135,6 +165,13 @@ class FakeSecretStore:
     rotates: list[str] = field(default_factory=list)
     deleted: list[str] = field(default_factory=list)
     _counter: int = 0
+
+    async def get(self, *, key: str) -> Any | None:
+        from prodavan.application.plugins.tenantdb.service import StoredSecret
+
+        if key not in self.values:
+            return None
+        return StoredSecret(secret_ref=self.refs[key], value=self.values[key])
 
     async def put(self, *, key: str, value: str) -> str:
         self.puts.append(key)

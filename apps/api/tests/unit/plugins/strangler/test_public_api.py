@@ -1,6 +1,6 @@
 """Сквозная проверка публичного API зоны strangler и интеграционных контрактов.
 
-Тесты НЕ запускались (verification freeze).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 """
 
 from __future__ import annotations

@@ -1,8 +1,12 @@
 # Architecture audit
 
-Архитектурный аудит платформы Prodavan: **as-is / проблемы / target-design** по слоям.
+Датированный архитектурный аудит платформы: **as-is / проблемы / target-design**
+по слоям. Это **не продуктовые требования**, не acceptance и не замена [PRODUCT.md](../PRODUCT.md),
+кода, [текущего статуса миграции](../migration/plugin-migration-status.md) или
+[ops-ранбука](../07-infrastructure/).
 
-Это **не** продуктовые требования ([PRODUCT.md](../PRODUCT.md)), **не** as-built карточки ([target/12-layer-docs](../target/12-layer-docs/)) и **не** ops-ранбук ([07-infrastructure](../07-infrastructure/)). Здесь — разбор абстракций, изоляции, ответственности и целевого дизайна после MVP.
+[target/12-layer-docs](../target/12-layer-docs/) — устаревший исторический
+snapshot до перерасчёта, а не живая as-built карта.
 
 ## Как пользоваться
 
@@ -28,9 +32,11 @@
 ## Связь с другими канонами
 
 ```text
-PRODUCT.md          — что строим (продукт)
-12-layer-docs       — что уже в коде (as-built карточки)
-ARCHITECTURE/layers — как устроено и куда расти (этот аудит)
-07-infrastructure   — GitOps / k3s / CI
-target/06-modules   — legacy AI-канон метасинтаксиса (справка)
+PRODUCT.md              — current S1 + переходный strangler + target
+architecture-migration   — принятые и предложенные plugin ADR
+migration/               — STOP-SHIP, acceptance и безопасный cutover
+12-layer-docs            — исторический snapshot до перерасчёта
+ARCHITECTURE/layers      — датированный аудит и target design
+07-infrastructure        — актуальные GitOps / k3s / CI runbooks
+target/06-modules        — старый AI-канон метасинтаксиса (справка)
 ```

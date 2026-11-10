@@ -19,6 +19,7 @@ from prodavan.application.plugins.tenantdb.errors import (
     INVALID_IDENTIFIER,
     NOT_FOUND,
     PRIVILEGE_DENIED,
+    ROTATION_REQUIRED,
     TenantDbError,
 )
 from prodavan.application.plugins.tenantdb.naming import (
@@ -41,6 +42,7 @@ from prodavan.application.plugins.tenantdb.service import (
     AuditPort,
     ExecuteResult,
     SecretPort,
+    StoredSecret,
     TenantDatabaseService,
     TenantDsn,
 )
@@ -54,6 +56,7 @@ __all__ = [
     "ALREADY_EXISTS",
     "NOT_FOUND",
     "PRIVILEGE_DENIED",
+    "ROTATION_REQUIRED",
     # Имена
     "tenant_db_name",
     "plugin_role_name",
@@ -74,5 +77,6 @@ __all__ = [
     "AdminScope",
     "ExecuteResult",
     "SecretPort",
+    "StoredSecret",
     "AuditPort",
 ]

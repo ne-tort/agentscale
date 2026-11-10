@@ -27,7 +27,12 @@ from prodavan.domain.plugins.types import (
     ARTIFACT_DIGEST_PATTERN,
     EGRESS_REF_PATTERN,
     EMBEDDED_EGRESS_FIELDS,
+    MCP_MAX_SERVERS,
+    MCP_MAX_TOOLS_PER_SERVER,
+    MCP_SERVER_ID_PATTERN,
+    MCP_TOOL_NAME_PATTERN,
     PATH_PATTERN,
+    PUBLIC_PAGE_PATTERN,
     PLUGIN_ID_PATTERN,
     PROTOCOL_VERSION,
     SEMVER_PATTERN,
@@ -117,6 +122,26 @@ def test_schema_semver_patterns_match_types_py() -> None:
         assert schema["properties"][field_name]["pattern"] == SEMVER_PATTERN.pattern
 
 
+def test_schema_mcp_declaration_contract_matches_python() -> None:
+    schema = _read_json(schema_path())
+    assert "mcp_servers" not in schema["required"]
+    root = schema["properties"]["mcp_servers"]
+    assert root["maxItems"] == MCP_MAX_SERVERS
+    server = schema["$defs"]["mcpServer"]
+    tool = schema["$defs"]["mcpTool"]
+    assert server["additionalProperties"] is False
+    assert tool["additionalProperties"] is False
+    assert set(server["required"]) == {"server_id", "tools"}
+    assert set(tool["required"]) == {"name", "description", "version", "input_schema"}
+    assert server["properties"]["server_id"]["pattern"] == MCP_SERVER_ID_PATTERN.pattern
+    assert tool["properties"]["name"]["pattern"] == MCP_TOOL_NAME_PATTERN.pattern
+    assert tool["properties"]["version"]["pattern"] == SEMVER_PATTERN.pattern
+    assert server["properties"]["tools"]["maxItems"] == MCP_MAX_TOOLS_PER_SERVER
+    assert tool["properties"]["input_schema"]["$ref"] == "#/$defs/mcpInputSchema"
+    assert "mcpSchema7" in schema["$defs"]
+    assert "mcpSchema8" not in schema["$defs"]
+
+
 def test_schema_protocol_const_matches_types_py() -> None:
     schema = _read_json(schema_path())
     assert schema["properties"]["protocol"]["const"] == PROTOCOL_VERSION
@@ -193,11 +218,13 @@ def test_load_schema_returns_same_payload_as_file() -> None:
 
 # ───────────────────────── protocol.json ─────────────────────────
 
-def test_protocol_declares_all_four_message_types() -> None:
+def test_protocol_declares_all_six_message_types() -> None:
     protocol = _read_json(protocol_path())
     defs = protocol["$defs"]
     expected = {
+        "host.ready": defs["hostReady"],
         "plugin.ready": defs["pluginReady"],
+        "grant.ready": defs["grantReady"],
         "plugin.rpc.request": defs["pluginRpcRequest"],
         "plugin.rpc.response": defs["pluginRpcResponse"],
         "plugin.error": defs["pluginError"],
@@ -205,7 +232,7 @@ def test_protocol_declares_all_four_message_types() -> None:
     for message_type, definition in expected.items():
         assert definition["properties"]["type"]["const"] == message_type
         assert definition["additionalProperties"] is False
-    assert len(protocol["oneOf"]) == 4
+    assert len(protocol["oneOf"]) == 6
 
 
 def test_protocol_requires_plugin_id_version_and_digest() -> None:
@@ -219,20 +246,22 @@ def test_protocol_requires_plugin_id_version_and_digest() -> None:
         assert _resolve_ref(protocol, definition["properties"]["plugin_id"])["pattern"] == PLUGIN_ID_PATTERN.pattern
 
 
-def test_protocol_requires_event_origin_check() -> None:
+def test_protocol_keeps_event_origin_out_of_payload() -> None:
     protocol = _read_json(protocol_path())
-    origin = protocol["$defs"]["eventOrigin"]
-    assert "origin" in origin["required"]
-    assert origin["additionalProperties"] is False
-    assert "https://" in origin["properties"]["origin"]["pattern"]
-    assert "event" in protocol["$defs"]["pluginReady"]["properties"]
-    assert "event" in protocol["$defs"]["pluginRpcRequest"]["properties"]
+    assert "eventOrigin" not in protocol["$defs"]
+    for name in (
+        "hostReady", "pluginReady", "grantReady",
+        "pluginRpcRequest", "pluginRpcResponse", "pluginError",
+    ):
+        properties = protocol["$defs"][name]["properties"]
+        assert "event" not in properties
+        assert "origin" not in properties
 
 
 def test_protocol_handshake_requirements_documented() -> None:
     protocol = _read_json(protocol_path())
     comment = protocol["$comment"]
-    for needle in ("origin", "WindowProxy", "artifact_digest", "nonce", "timeout", "token"):
+    for needle in ("origin", "WindowProxy", "nonce", "instance_id", "digest", "capability token"):
         assert needle in comment
 
 
@@ -242,6 +271,26 @@ def test_protocol_rpc_response_error_shape_is_closed() -> None:
     assert "if" in response and "then" in response and "else" in response
     assert "error" in response["then"]["required"]
     assert protocol["$defs"]["rpcError"]["additionalProperties"] is False
+
+
+def test_public_pages_schema_and_domain_share_root_and_safe_path_contract() -> None:
+    import jsonschema
+
+    item_schema = _read_json(schema_path())["properties"]["public_pages"]["items"]
+    assert item_schema["pattern"] == PUBLIC_PAGE_PATTERN.pattern
+    validator = jsonschema.Draft202012Validator(item_schema)
+    for path in ("/", "/public", "/docs/getting-started", "/docs/"):
+        assert validator.is_valid(path), path
+    for path in (
+        "",
+        "//",
+        "/public//docs",
+        "relative",
+        "../escape",
+        "/../escape",
+        "https://example.test/public",
+    ):
+        assert not validator.is_valid(path), path
 
 
 # ───────────────────────── types.ts ─────────────────────────
@@ -312,6 +361,24 @@ def test_types_ts_manifest_fields_match_python_and_schema() -> None:
     fields = set(re.findall(r"^\s*([a-z_]+)\??:", match.group(1), flags=re.MULTILINE))
     assert fields == set(MANIFEST_ALLOWED_FIELDS)
     assert fields == set(_read_json(schema_path())["properties"])
+
+
+def test_types_ts_mcp_declarations_match_closed_schema_shape() -> None:
+    source = _read_text(types_ts_path())
+    for interface_name, fields in (
+        ("McpToolDeclaration", {"name", "description", "version", "input_schema"}),
+        ("McpServerDeclaration", {"server_id", "tools"}),
+    ):
+        match = re.search(
+            rf"export interface {interface_name}\s*\{{([\s\S]*?)\n\}}",
+            source,
+        )
+        assert match
+        assert set(re.findall(
+            r"^\s*readonly\s+([a-z_]+)\??:", match.group(1), flags=re.MULTILINE,
+        )) == fields
+    assert "readonly input_schema: McpObjectInputSchema;" in source
+    assert "mcp_servers?: readonly McpServerDeclaration[];" in source
 
 
 def test_types_ts_manifest_has_no_self_reference_or_egress_allowlist() -> None:

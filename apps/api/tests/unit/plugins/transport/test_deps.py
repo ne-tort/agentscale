@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import pytest
+
+pytestmark = pytest.mark.asyncio
 from starlette.requests import Request
 
 from prodavan.application.plugins.identity.keys import keyring_from_secret
@@ -63,7 +65,7 @@ def token() -> str:
     )
 
 
-def test_bearer_extraction() -> None:
+async def test_bearer_extraction() -> None:
     assert _bearer_token(_request("/capabilities/v1/cache/get", "abc")) == "abc"
     assert _bearer_token(_request("/capabilities/v1/cache/get", None)) is None
     assert _bearer_token(
@@ -71,21 +73,21 @@ def test_bearer_extraction() -> None:
     ) is None
 
 
-def test_valid_token_returns_claims(config, token: str) -> None:
-    claims = get_plugin_claims(_request("/capabilities/v1/cache/get", token), config)
+async def test_valid_token_returns_claims(config, token: str) -> None:
+    claims = await get_plugin_claims(_request("/capabilities/v1/cache/get", token), config)
     assert claims.typ == "plugin_capability"
     assert claims.company_id == TEST_COMPANY
     assert claims.grant_id == "grant_01"
 
 
-def test_missing_token_raises_401(config) -> None:
+async def test_missing_token_raises_401(config) -> None:
     with pytest.raises(PluginTransportError) as exc:
-        get_plugin_claims(_request("/capabilities/v1/cache/get", None), config)
+        await get_plugin_claims(_request("/capabilities/v1/cache/get", None), config)
     assert exc.value.problem.status == 401
     assert exc.value.problem.code == "UNAUTHORIZED"
 
 
-def test_assert_plugin_surface_is_called_for_agent_path(config, token: str) -> None:
+async def test_assert_plugin_surface_is_called_for_agent_path(config, token: str) -> None:
     """ОБЯЗАТЕЛЬНЫЙ вызов allowlist: agent-surface закрыт (кр. 17)."""
     for path in (
         "/agent/events",
@@ -96,29 +98,29 @@ def test_assert_plugin_surface_is_called_for_agent_path(config, token: str) -> N
         "/pluginpage/x/y/api",
     ):
         with pytest.raises(PluginTransportError) as exc:
-            get_plugin_claims(_request(path, token), config)
+            await get_plugin_claims(_request(path, token), config)
         assert exc.value.problem.status == 403
         assert exc.value.problem.code == "FORBIDDEN_SURFACE"
 
 
-def test_path_with_query_or_traversal_is_rejected(config, token: str) -> None:
+async def test_path_with_query_or_traversal_is_rejected(config, token: str) -> None:
     for path in ("/capabilities/v1/cache/get?x=1", "/capabilities/v1/../agent/events"):
         with pytest.raises(PluginTransportError):
-            get_plugin_claims(_request(path, token), config)
+            await get_plugin_claims(_request(path, token), config)
 
 
-def test_revoked_grant_raises_403(token: str) -> None:
+async def test_revoked_grant_raises_403(token: str) -> None:
     config = PluginIdentityConfig(
         keyring=keyring_from_secret(TEST_SECRET),
         revocation=GrantRevocation(InMemoryRevocation(initially_revoked=("grant_01",))),
     )
     with pytest.raises(PluginTransportError) as exc:
-        get_plugin_claims(_request("/capabilities/v1/cache/get", token), config)
+        await get_plugin_claims(_request("/capabilities/v1/cache/get", token), config)
     assert exc.value.problem.status == 403
     assert exc.value.problem.code == "GRANT_REVOKED"
 
 
-def test_untrusted_headers_are_not_read(config, token: str) -> None:
+async def test_untrusted_headers_are_not_read(config, token: str) -> None:
     """X-Plugin-* / X-Company-ID игнорируются: identity только из claims."""
     headers = {
         "X-Company-ID": "evil",
@@ -127,7 +129,7 @@ def test_untrusted_headers_are_not_read(config, token: str) -> None:
         "X-Project-ID": "evil",
         "X-Plugin-Capability-Token": "evil",
     }
-    claims = get_plugin_claims(
+    claims = await get_plugin_claims(
         _request("/capabilities/v1/cache/get", token, headers), config
     )
     assert claims.company_id == TEST_COMPANY
@@ -136,7 +138,7 @@ def test_untrusted_headers_are_not_read(config, token: str) -> None:
     assert "x-plugin-capability-token" in UNTRUSTED_PLUGIN_HEADERS
 
 
-def test_wrong_typ_token_raises_401(config) -> None:
+async def test_wrong_typ_token_raises_401(config) -> None:
     import jwt
 
     pod_token = jwt.encode(
@@ -145,18 +147,18 @@ def test_wrong_typ_token_raises_401(config) -> None:
         algorithm="HS256",
     )
     with pytest.raises(PluginTransportError) as exc:
-        get_plugin_claims(_request("/capabilities/v1/cache/get", pod_token), config)
+        await get_plugin_claims(_request("/capabilities/v1/cache/get", pod_token), config)
     assert exc.value.problem.status == 401
     assert exc.value.problem.code == "WRONG_TYP"
 
 
-def test_invalid_signature_raises_401(config, token: str) -> None:
+async def test_invalid_signature_raises_401(config, token: str) -> None:
     tampered = token[:-3] + ("aaa" if not token.endswith("aaa") else "bbb")
     with pytest.raises(PluginTransportError) as exc:
-        get_plugin_claims(_request("/capabilities/v1/cache/get", tampered), config)
+        await get_plugin_claims(_request("/capabilities/v1/cache/get", tampered), config)
     assert exc.value.problem.status == 401
 
 
-def test_health_path_is_allowed(config, token: str) -> None:
-    claims = get_plugin_claims(_request("/capabilities/v1/health", token), config)
+async def test_health_path_is_allowed(config, token: str) -> None:
+    claims = await get_plugin_claims(_request("/capabilities/v1/health", token), config)
     assert claims.company_id == TEST_COMPANY

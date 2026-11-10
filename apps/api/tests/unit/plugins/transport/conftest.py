@@ -87,7 +87,7 @@ class FakeCapabilityService:
     calls: list[dict[str, Any]] = field(default_factory=list)
     raise_exc: BaseException | None = None
 
-    def invoke(self, *, claims: Any, capability: str, operation: str, request: Any) -> Any:
+    async def invoke(self, *, claims: Any, capability: str, operation: str, request: Any) -> Any:
         self.calls.append(
             {
                 "claims": claims,

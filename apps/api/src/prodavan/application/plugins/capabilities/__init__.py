@@ -11,8 +11,8 @@
 * ``CapabilityEnvelope`` и typed Request/Response из ``contracts``;
 * совместимые имена исключений для HTTP-маппинга задачи 04.
 
-Ядро ``CapabilityGatewayService`` импортируется и вызывается, НО не
-редактируется и не копируется. ``db.direct`` здесь отсутствует: БД плагина —
+Ядро ``CapabilityGatewayService`` переиспользуется через additive async API;
+имена plugin capabilities не подменяются declarative-app возможностями. ``db.direct`` здесь отсутствует: БД плагина —
 прямой DSN к своей БД компании (§4.3, ADR-007).
 """
 
@@ -66,6 +66,8 @@ from prodavan.application.plugins.capabilities.contracts import (
     JobsGetResponse,
     JobsSubmitRequest,
     JobsSubmitResponse,
+    McpInvokeRequest,
+    McpInvokeResponse,
     McpRegisterRequest,
     McpRegisterResponse,
     McpToolDefinition,
@@ -73,11 +75,14 @@ from prodavan.application.plugins.capabilities.contracts import (
     NetworkEgressResponse,
     NetworkHttpMethod,
     ObjectPermission,
+    ObjectPresignMethod,
     ObjectRef,
     ObjectsDeleteRequest,
     ObjectsDeleteResponse,
     ObjectsListRequest,
     ObjectsListResponse,
+    ObjectsPresignRequest,
+    ObjectsPresignResponse,
     ObjectsScopedCredentialsRequest,
     ObjectsScopedCredentialsResponse,
     PluginCapabilityRequest,
@@ -130,9 +135,8 @@ from prodavan.application.plugins.capabilities.quotas import (
     quota_key_from_claims,
 )
 from prodavan.application.plugins.capabilities.service import (
-    BRIDGE_TO_PLUGIN,
-    CAPABILITY_BRIDGE,
     EgressPolicyPort,
+    GrantRecordStore,
     PluginCapabilityService,
     PluginGatewayDecision,
 )
@@ -144,8 +148,6 @@ __all__ = [
     "AuditDecision",
     "AuditEventKind",
     "AuditPort",
-    "BRIDGE_TO_PLUGIN",
-    "CAPABILITY_BRIDGE",
     "CAPABILITY_DOTTED_OPERATIONS",
     "CAPABILITY_OPERATIONS",
     "CAPABILITY_PORT",
@@ -178,6 +180,7 @@ __all__ = [
     "EventsSubscribeRequest",
     "EventsSubscribeResponse",
     "FailingAudit",
+    "GrantRecordStore",
     "GrantRevocationPort",
     "InMemoryAudit",
     "InMemoryQuota",
@@ -191,6 +194,8 @@ __all__ = [
     "JobsSubmitRequest",
     "JobsSubmitResponse",
     "McpPort",
+    "McpInvokeRequest",
+    "McpInvokeResponse",
     "McpRegisterRequest",
     "McpRegisterResponse",
     "McpToolDefinition",
@@ -200,12 +205,15 @@ __all__ = [
     "NetworkPort",
     "OPERATION_TO_CAPABILITY",
     "ObjectPermission",
+    "ObjectPresignMethod",
     "ObjectRef",
     "ObjectsDeleteRequest",
     "ObjectsDeleteResponse",
     "ObjectsListRequest",
     "ObjectsListResponse",
     "ObjectsPort",
+    "ObjectsPresignRequest",
+    "ObjectsPresignResponse",
     "ObjectsScopedCredentialsRequest",
     "ObjectsScopedCredentialsResponse",
     "PLUGIN_CAPABILITIES",

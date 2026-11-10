@@ -28,7 +28,6 @@ identity-поля берутся ТОЛЬКО из claims.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Annotated, Protocol, runtime_checkable
 
 from fastapi import Depends, Request
@@ -79,7 +78,7 @@ class KeyringLike(Protocol):
 class RevocationLike(Protocol):
     """Структурный контракт ``GrantRevocation`` / ``RevocationPort`` задачи 02."""
 
-    def check(self, claims: PluginClaims) -> PluginClaims: ...
+    async def check(self, claims: PluginClaims) -> PluginClaims: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,7 +110,7 @@ def _unavailable(detail: str, code: str) -> PluginTransportError:
     return PluginTransportError(PluginProblem(503, code, "Service Unavailable", detail))
 
 
-def resolve_identity_config(request: Request) -> PluginIdentityConfig:
+async def resolve_identity_config(request: Request) -> PluginIdentityConfig:
     """Достать keyring + revocation из ``app.state`` (родитель связывает при F11).
 
     Поддерживаются два равнозначных варианта, чтобы не навязывать родителю
@@ -147,7 +146,7 @@ def resolve_identity_config(request: Request) -> PluginIdentityConfig:
     return PluginIdentityConfig(keyring=keyring, revocation=revocation)
 
 
-def get_plugin_claims(
+async def get_plugin_claims(
     request: Request,
     identity: Annotated[PluginIdentityConfig, Depends(resolve_identity_config)],
 ) -> PluginClaims:
@@ -197,44 +196,20 @@ def get_plugin_claims(
     if claims.typ != PLUGIN_TOKEN_TYP:
         raise _unauthorized("plugin token has wrong typ", "WRONG_TYP")
 
-    # Проверка отзыва grant_id на КАЖДОМ запросе (кр. 12). Поддерживаются обе
-    # формы задачи 02: GrantRevocation.check(claims) и порт is_revoked(grant_id).
+    # Canonical async authoritative check on every request.
     try:
-        if hasattr(identity.revocation, "check"):
-            claims = identity.revocation.check(claims)  # type: ignore[union-attr]
-        elif hasattr(identity.revocation, "is_revoked"):
-            if identity.revocation.is_revoked(claims.grant_id):  # type: ignore[union-attr]
-                raise PluginTokenError(
-                    code=PluginTokenErrorCode.REVOKED,
-                    detail="capability grant is revoked",
-                )
-        elif hasattr(identity.revocation, "is_active"):
-            # Тот же порт, что ждёт PluginCapabilityService (задача 03):
-            # is_active(grant_id, now=...). Позволяет родителю привязать ОДИН
-            # объект и к middleware, и к сервису.
-            if not identity.revocation.is_active(  # type: ignore[union-attr]
-                claims.grant_id, now=datetime.now(UTC)
-            ):
-                raise PluginTokenError(
-                    code=PluginTokenErrorCode.REVOKED,
-                    detail="capability grant is not active",
-                )
-        else:
-            raise _unavailable(
-                "revocation source is not usable: check()/is_revoked()/is_active() missing",
-                "REVOCATION_NOT_CONFIGURED",
-            )
+        claims = await identity.revocation.check(claims)  # type: ignore[union-attr]
     except PluginTransportError:
         raise
     except PluginTokenError as exc:
         canonical = "GRANT_REVOKED" if exc.code == PluginTokenErrorCode.REVOKED else exc.code.value
         raise _forbidden(str(exc.detail), canonical) from exc
     except Exception as exc:
-        # Хранилище отзывов недоступно ≠ «grant активен» (fail-closed).
         raise _forbidden(
             "revocation source unavailable; refusing request",
             "GRANT_REVOKED",
         ) from exc
+
 
     # ОБЯЗАТЕЛЬНО: плагину разрешено только /capabilities/v1/*; agent-surface
     # (в т.ч. /agent/events) закрыт. Путь берём из request, НЕ из заголовков.

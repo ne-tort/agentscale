@@ -1,4 +1,4 @@
-"""Unit-тесты ``CliCosignPort`` (писать, НЕ запускать, verification freeze).
+"""Unit-тесты ``CliCosignPort``.
 
 ТЗ: ``:latest`` отклоняется ДО вызова cosign; rc=1/timeout/пустой вывод ->
 VERIFY_FAILED; digest формат; KMS fallback не отключает проверку.

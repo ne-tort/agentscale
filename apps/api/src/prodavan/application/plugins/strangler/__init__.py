@@ -1,37 +1,35 @@
-"""F10: strangler-переход с declarative-app на плагины (дизайн v4, §8).
+"""F10: strangler routing и historical compatibility inventory.
 
-Зона владеет **механизмом strangler'а и картой переноса контекстов**:
+Актуальные runtime contracts не изменяются:
 
-* ``flags``     — ``FeatureFlagStorePort`` (Protocol: ``enabled``/``set``/``list``),
-  ``InMemoryFeatureFlagStore`` и fail-closed ``EnabledModulesPolicy`` (сторона
-  чтения ``plugin_enabled_modules[]``);
-* ``routing``   — ``StranglerRouter``: ровно ОДИН handler на запрос, ``NotEnabled``
-  → legacy, ошибка plugin-пути → типизированная ``PluginRouteError`` без молчаливого
-  отката;
-* ``contexts``  — карта переноса ``mod_equipment`` по bounded context'ам
-  (offers → prices → budget → documents → tenders + ``mod_management`` последним),
-  **данными**, без правки существующего кода; ``module_*`` таблицы дропаются без
-  переноса содержимого;
-* ``cutover``   — ``CutoverPlan``: последовательность §8, ``current_step``,
-  ``advance()`` без пропуска шагов, ``final_state()`` со списком из 5 артефактов;
-* ``removal``   — ЯВНЫЙ чек-лист для родителя: какие ORM-классы/импорты/роутеры/
-  страницы/сервисы удалить ПОСЛЕ применения ревизии ``2026110802``
-  (``alembic upgrade head``). До cutover'а код остаётся: другие подсистемы ещё
-  читают ``module_*``. Данные НЕ переносим.
+* ``flags`` — ``FeatureFlagStorePort``, ``InMemoryFeatureFlagStore`` и fail-closed
+  ``EnabledModulesPolicy`` для чтения ``plugin_enabled_modules[]``;
+* ``routing`` — ``StranglerRouter``: ровно один handler на запрос, ``NotEnabled``
+  → legacy, ошибка plugin-пути → ``PluginRouteError`` без молчаливого отката;
+* ``cutover`` — compatibility state machine (``CutoverPlan``), а не разрешение на
+  schema cleanup, deploy или включение plugin platform;
+* ``contexts`` — исторические data-only records по bounded contexts. Их legacy
+  field names и slugs сохранены для поведенческой совместимости и не являются
+  исполняемым cutover планом;
+* ``removal`` — неисполняемый ``CODE_FIRST_REMOVAL_INVENTORY`` для отдельного
+  будущего S4 review, а не runbook.
 
-ЧЕГО ЗДЕСЬ НЕТ И НЕ БУДЕТ (§8, §13.1, план миграции §4): dual-read/dual-write,
-parity/метрики парности, snapshot/бэкапы, ``migrate_data``, «N недель наблюдения»,
-сравнение выходов старого и нового путей. Данные dev эфемерны; «всё под нож» —
-про КОНЕЧНОЕ СОСТОЯНИЕ, а strangler — про СПОСОБ.
+``2026110802`` — dormant/not active historical inventory. Перенос, регистрация и
+активация запрещены; никакого runtime cutover или startup/deploy удаления нет.
+Migration-only helpers (product upsert/seeds, ``mod_management_meta``,
+``seed_rows``, ``management_module_merge`` и bootstrap constants) сохраняются для
+fresh/historical upgrades и не представляются deletion entrypoints.
 
-ГРАНИЦЫ (не дублируем чужое):
-* запись флага, аудит и ``EnabledModulesReceipt`` — ``application/plugins/admin``
-  (``PluginAdminService.set_enabled_modules``, ``GrantStorePort``);
-* подключение ``EnabledModulesPolicy`` к admin-роутеру, реальные адаптеры хранилища
-  и ревизии Alembic — **родитель (F11)**. Здесь только контракты, политика чтения,
-  роутер, карта и план.
+Любая будущая destructive revision допускается только после code-first S4 и
+отдельного S5 ADR/review/acceptance, создаётся заново от тогдашней current head,
+имеет schema-only downgrade и не использует env guard. Текущий STOP-SHIP эти
+compatibility exports не снимают.
 
-Интеграция (выполняет родитель):
+Запись флага, аудит и ``EnabledModulesReceipt`` принадлежат
+``application/plugins/admin``. Реальные адаптеры хранилища и любые новые ревизии
+требуют отдельных решений и evidence.
+
+Интеграция routing остаётся прежней:
 
 .. code-block:: python
 
@@ -41,7 +39,7 @@ parity/метрики парности, snapshot/бэкапы, ``migrate_data``,
         InMemoryFeatureFlagStore,     # только для тестов; в проде — адаптер к БД
     )
 
-    policy = EnabledModulesPolicy(InMemoryFeatureFlagStore())  # F11: адаптер к GrantStore
+    policy = EnabledModulesPolicy(InMemoryFeatureFlagStore())
     router = StranglerRouter(policy)
     result = await router.route(
         company_id, "mod_equipment",

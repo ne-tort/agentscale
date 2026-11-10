@@ -1,4 +1,4 @@
-"""Unit-тесты ``build_runtime_ports`` (писать, НЕ запускать, verification freeze).
+"""Unit-тесты ``build_runtime_ports``.
 
 ТЗ: сборка без обязательного порта падает. Дополнительно: имя override'ов
 совпадает с ``PORT_OVERRIDES``, ``None`` запрещён, ``scale is readiness``,
@@ -30,7 +30,9 @@ from prodavan.infrastructure.plugins.runtime.k8s_scale import (
     K8sScalePort,
 )
 from prodavan.infrastructure.plugins.runtime.proxy import HttpProxyPort
+from prodavan.infrastructure.plugins.runtime.token_provider import ServiceAccountTokenProvider
 from tests.unit.plugins.runtime.conftest import (
+    TEST_INSTANCE,
     FakeBackendSender,
     FakeCosignRunner,
     FakeK8sApi,
@@ -40,20 +42,63 @@ from tests.unit.plugins.runtime.conftest import (
 
 
 def _build(config: RuntimeConfig, **over):  # type: ignore[no-untyped-def]
-    """Сборка БЕЗ io: все внешние зависимости подменяются фейками."""
-    api = over.pop("k8s_api", FakeK8sApi())
+    """Сборка БЕЗ io; default-путь не подменяется legacy ``k8s_api``."""
+    missing = object()
+    api = over.pop("k8s_api", missing)
     runner = over.pop("cosign_runner", FakeCosignRunner())
     backend = over.pop("backend_http", FakeBackendSender())
     probe = over.pop("http_probe", FakeProbe())
-    return build_runtime_ports(
-        object(),
+    kwargs = dict(
         config=config,
-        k8s_api=api,
         cosign_runner=runner,
         backend_http=backend,
         http_probe=probe,
         **over,
     )
+    if api is not missing:
+        kwargs["k8s_api"] = api
+    return build_runtime_ports(object(), **kwargs)
+
+
+def test_default_backend_http_is_per_instance_proxy(config) -> None:  # type: ignore[no-untyped-def]
+    ports = build_runtime_ports(
+        object(),
+        config=config,
+        k8s_api=FakeK8sApi(),
+        cosign_runner=FakeCosignRunner(),
+        http_probe=FakeProbe(),
+    )
+    assert ports.backend_http is ports.proxy
+    assert callable(ports.backend_http.send)
+
+
+def test_resource_name_resolver_is_shared_by_scale(config) -> None:  # type: ignore[no-untyped-def]
+    expected = "plugin-mod-equipment-inst-equipment-001"
+    def resolver(_instance_id: str) -> str:
+        return expected
+
+    ports = _build(config, resource_name_resolver=resolver)
+    assert ports.scale.deployment_name(TEST_INSTANCE) == expected
+    assert ports.scale.service_name(TEST_INSTANCE) == expected
+
+
+async def test_instance_store_is_durable_async_name_source(config) -> None:  # type: ignore[no-untyped-def]
+    from types import SimpleNamespace
+
+    class Store:
+        async def get_by_id(self, *, plugin_instance_id: str):
+            return SimpleNamespace(
+                plugin_instance_id=plugin_instance_id,
+                plugin_id="mod_equipment",
+            )
+
+    ports = _build(config, instance_store=Store())
+    assert await ports.scale._deployment_name_async(TEST_INSTANCE) == (
+        "plugin-mod-equipment-inst-equipment-001"
+    )
+    # Proxy keeps canonical plugin_id from verified claims; it must not stringify
+    # the async resolver used by scale/readiness.
+    assert ports.proxy._service_name_resolver is None
 
 
 def test_all_ports_present(config) -> None:  # type: ignore[no-untyped-def]
@@ -122,6 +167,8 @@ def test_in_memory_state_store_is_rejected(config) -> None:  # type: ignore[no-u
             state_store=InMemoryStateStore(),  # type: ignore[arg-type]
             proxy=built.proxy,
             backend_http=built.backend_http,
+            lifecycle_api=built.lifecycle_api,
+            token_provider=built.token_provider,
         )
 
 
@@ -168,6 +215,8 @@ def test_runtime_ports_rejects_none_in_post_init(config) -> None:  # type: ignor
             state_store=built.state_store,
             proxy=built.proxy,
             backend_http=built.backend_http,
+            lifecycle_api=built.lifecycle_api,
+            token_provider=built.token_provider,
         )
 
 
@@ -181,6 +230,50 @@ def test_injected_adapters_are_used(config) -> None:  # type: ignore[no-untyped-
     assert ports.cosign._runner is runner  # type: ignore[attr-defined]
     assert ports.scale._api is api  # type: ignore[attr-defined]
     assert ports.state_store._api is api  # type: ignore[attr-defined]
+    assert ports.lifecycle_api is not api
+
+
+def test_default_activation_and_admin_share_exact_scoped_api(config) -> None:  # type: ignore[no-untyped-def]
+    ports = _build(config)
+    assert ports.scale.scoped_identity is True
+    assert ports.state_store.scoped_identity is True
+    assert ports.lifecycle_api.scoped_identity is True
+    assert ports.scale.api is ports.readiness.api is ports.lifecycle_api
+    assert ports.state_store._api is ports.lifecycle_api
+    assert ports.lifecycle_api._token_provider is ports.token_provider
+
+
+def test_default_factory_constructs_only_scoped_lifecycle_client(
+    config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # type: ignore[no-untyped-def]
+    import prodavan.infrastructure.plugins.runtime.build as build_module
+
+    real_client = build_module.K8sApiClient
+    created = []
+
+    def recording_client(**kwargs):  # type: ignore[no-untyped-def]
+        client = real_client(**kwargs)
+        created.append((client, kwargs))
+        return client
+
+    monkeypatch.setattr(build_module, "K8sApiClient", recording_client)
+    ports = _build(config, token_request_api=FakeK8sApi())
+
+    assert len(created) == 1
+    assert created[0][0] is ports.lifecycle_api
+    assert created[0][1]["token_provider"] is ports.token_provider
+    assert ports.scale.api is ports.state_store._api is ports.lifecycle_api
+
+
+def test_unscoped_lifecycle_and_legacy_k8s_overrides_are_denied(config) -> None:  # type: ignore[no-untyped-def]
+    class MountedApi(FakeK8sApi):
+        scoped_identity = False
+
+    with pytest.raises(RuntimeConfigError, match="default_mounted_service_account_forbidden"):
+        _build(config, lifecycle_api=MountedApi())
+    with pytest.raises(RuntimeConfigError, match="default_mounted_service_account_forbidden"):
+        _build(config, k8s_api=MountedApi())
 
 
 def test_activation_proxy_forward_uses_fresh_token(config) -> None:  # type: ignore[no-untyped-def]
@@ -199,3 +292,49 @@ def test_activation_proxy_forward_uses_fresh_token(config) -> None:  # type: ign
     )
     assert request.headers["Authorization"] == "Bearer composed-token"
     assert ports.proxy is not None
+
+
+def test_factory_builds_dedicated_shared_lifecycle_identity(config) -> None:  # type: ignore[no-untyped-def]
+    token_requests = FakeK8sApi()
+    ports = _build(config, token_request_api=token_requests)
+    assert isinstance(ports.token_provider, ServiceAccountTokenProvider)
+    assert ports.token_provider._api is token_requests
+    assert ports.lifecycle_api._token_provider is ports.token_provider
+    assert ports.scale.api is ports.lifecycle_api
+    assert ports.readiness.api is ports.lifecycle_api
+    assert ports.state_store._api is ports.lifecycle_api
+
+
+async def test_runtime_close_closes_lifecycle_resources_once(config) -> None:  # type: ignore[no-untyped-def]
+    class ClosableApi(FakeK8sApi):
+        def __init__(self) -> None:
+            super().__init__()
+            self.close_calls = 0
+
+        async def aclose(self) -> None:
+            self.close_calls += 1
+
+    class ClosableProvider:
+        def __init__(self) -> None:
+            self.close_calls = 0
+
+        async def get_token(self) -> str:
+            return "short-lived"
+
+        async def aclose(self) -> None:
+            self.close_calls += 1
+
+    api = ClosableApi()
+    provider = ClosableProvider()
+    backend = FakeBackendSender()
+    ports = _build(
+        config,
+        lifecycle_api=api,
+        token_provider=provider,
+        backend_http=backend,
+    )
+    await ports.aclose()
+    await ports.aclose()
+    assert api.close_calls == 1
+    assert provider.close_calls == 1
+    assert backend.closed is True

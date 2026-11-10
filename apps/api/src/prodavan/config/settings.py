@@ -5,6 +5,8 @@ from pathlib import Path
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from prodavan.domain.plugins.origins import PluginOriginError, exact_plugin_origins
+
 
 def _default_repo_root() -> Path:
     """Local: prodavan/; Docker image: /app (src lives at /app/src)."""
@@ -18,6 +20,41 @@ def _default_repo_root() -> Path:
 
 
 _REPO_ROOT = _default_repo_root()
+
+
+def _valid_plugin_event_signing_secret_ref(value: str) -> bool:
+    """Shape-only check; secret resolution stays in the wiring layer."""
+
+    if not isinstance(value, str) or value != value.strip():
+        return False
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        return False
+    if not value:
+        return True
+    if len(value) > 2048:
+        return False
+    if value.startswith("k8s-secret://"):
+        parts = value[len("k8s-secret://"):].split("/")
+        if len(parts) != 2:
+            return False
+        name, key = parts
+        labels = name.split(".")
+        return (
+            0 < len(name) <= 253
+            and 0 < len(key) <= 253
+            and key not in {".", ".."}
+            and all(char.isalnum() or char in "._-" for char in key)
+            and all(char.isascii() for char in key)
+            and all(
+                0 < len(label) <= 63
+                and label[0].isalnum()
+                and label[-1].isalnum()
+                and label.isascii()
+                and all(char in "abcdefghijklmnopqrstuvwxyz0123456789-" for char in label)
+                for label in labels
+            )
+        )
+    return value.startswith(("vault://", "file://")) and bool(value.split("://", 1)[1])
 
 
 class Settings(BaseSettings):
@@ -110,18 +147,47 @@ class Settings(BaseSettings):
     # Plugin-платформа (дизайн v4): плагин — полноценное приложение со своей БД
     # компании. Это ОТДЕЛЬНЫЙ trust-контур, а не pod-gateway :8001 агента.
     plugin_platform_enabled: bool = False
+    # Exact verified artifacts selected for server-owned manifest job declarations.
+    # JSON list: {"plugin_id", "version", "artifact_digest"}; backend/task values
+    # are deliberately absent. Parsed only by enabled plugin-job composition.
+    plugin_job_declarations: str = ""
     # Подпись PluginClaims. Пусто = fail closed (никаких dev-фолбэков, в отличие
     # от pod_identity_bridge_secret, который в dev мог брать AUTH_TEST_SECRET).
     plugin_claims_secret: str = ""
+    # Separate HMAC key for signed plugin events; reference only, never plaintext.
+    plugin_event_signing_secret_ref: str = Field(default="", repr=False)
     plugin_claims_ttl_seconds: int = 300
     plugin_claims_issuer: str = "agentscale-plugins"
     plugin_claims_audience: str = "capability-gateway"
     # Отдельный static-origin для iframe: не agentscale.dev, без cookie/API.
     plugin_static_origin: str = ""
+    # Server-derived shell origin for bootstrap handoff and static frame-ancestors.
+    # Never inferred from request Host or from the browser window.location.
+    plugin_shell_origin: str = ""
     # Tenant PostgreSQL: отдельный Service, НЕ prodavan. DSN нужен только
     # административному контуру (создание БД/ролей), плагин получает свой DSN
     # через Secret при grant.
-    plugin_tenant_db_admin_url: str = ""
+    # Admin DSN is configuration-only: never include its password in repr/model_dump.
+    # Missing URL, unsupported sslmode=disable, or unusable TLS credentials leave
+    # the tenant lifecycle explicitly unwired; DATABASE_URL is never a fallback.
+    plugin_tenant_db_admin_url: str = Field(default="", repr=False, exclude=True)
+    plugin_tenant_db_admin_tls_mode: str = Field(
+        default="verify-full",
+        pattern="^(require|verify-ca|verify-full)$",
+    )
+    plugin_tenant_db_admin_tls_ca_file: str = ""
+    plugin_tenant_db_admin_tls_cert_file: str = ""
+    plugin_tenant_db_admin_tls_key_file: str = ""
+    plugin_tenant_db_admin_connect_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    plugin_tenant_db_admin_command_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    plugin_tenant_db_admin_close_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    plugin_tenant_db_admin_pool_min_size: int = Field(default=0, ge=0, le=20)
+    plugin_tenant_db_admin_pool_max_size: int = Field(default=4, ge=1, le=20)
+    plugin_tenant_db_admin_pool_max_inactive_lifetime_seconds: float = Field(
+        default=300.0,
+        gt=0,
+        le=86400,
+    )
     plugin_tenant_db_host: str = "tenant-postgres"
     plugin_tenant_db_port: int = 5432
     # Egress-политика читается из CapabilityGrant в БД, не из JWT.
@@ -143,6 +209,55 @@ class Settings(BaseSettings):
     # Читается wiring/keyring.py напрямую из env; здесь продублировано, чтобы
     # конфигурация платформы была видна в одном месте.
     plugin_claims_previous_secrets: str = ""
+
+    # Plugin MinIO: only SecretStore references, never plaintext credentials.
+    # sts_enabled permits the STS contour; sts_probe_enabled separately permits
+    # an async lifespan AssumeRole probe. Neither is availability evidence by itself.
+    # Probe defaults are inert; no environment is enabled by these code defaults.
+    plugin_minio_endpoint: str = ""
+    plugin_minio_public_endpoint: str = ""
+    plugin_minio_admin_access_key_ref: str = Field(default="", repr=False)
+    plugin_minio_admin_secret_key_ref: str = Field(default="", repr=False)
+    plugin_minio_presign_access_key_ref: str = Field(default="", repr=False)
+    plugin_minio_presign_secret_key_ref: str = Field(default="", repr=False)
+    plugin_minio_sts_enabled: bool = False
+    plugin_minio_sts_endpoint: str = ""
+    plugin_minio_sts_session_duration_seconds: int = Field(default=900, ge=900, le=3600)
+    plugin_minio_sts_role_arn: str = (
+        "arn:aws:iam::000000000000:role/plugin-object-access"
+    )
+    plugin_minio_sts_probe_enabled: bool = False
+    plugin_minio_sts_probe_timeout_seconds: int = Field(default=5, ge=1, le=30)
+    plugin_minio_sts_probe_revalidate_seconds: int = Field(default=300, ge=1, le=3600)
+    plugin_minio_sts_probe_retry_seconds: int = Field(default=30, ge=1, le=300)
+    plugin_minio_sts_probe_bucket: str = "tenant-sts-probe"
+    plugin_minio_sts_probe_key: str = "module-sts-probe/__authorization_canary__"
+    plugin_minio_checksum_max_bytes: int = Field(
+        default=64 * 1024 * 1024,
+        ge=1,
+        le=1024 * 1024 * 1024,
+    )
+    plugin_minio_region: str = "us-east-1"
+
+    # Managed ModuleSource provisioning. This is an independent trust contour:
+    # it neither enables the emergency-disabled plugin runtime nor CI publication.
+    # No private key, installation token, or insecure secret default is accepted;
+    # the GitHub App private key is resolved through SecretStore by secret REF.
+    plugin_module_source_enabled: bool = False
+    plugin_module_source_github_app_id: int | None = None
+    plugin_module_source_github_app_private_key_secret_ref: str = ""
+    plugin_module_source_github_app_organization: str = ""
+    plugin_module_source_github_app_installation_id: int | None = None
+    plugin_module_source_github_app_template_owner: str = ""
+    plugin_module_source_github_app_template_name: str = ""
+    plugin_module_source_github_app_template_agents_revision: str = ""
+    plugin_module_source_github_app_template_security_revision: str = ""
+    plugin_module_source_github_app_timeout_seconds: float = 10.0
+    plugin_module_source_installation_credential_ref: str = ""
+    plugin_module_source_trusted_workflow_ref: str = ""
+    plugin_module_source_default_branch: str = "main"
+    plugin_module_source_required_status_checks: str = ""
+    plugin_module_source_required_approving_review_count: int = 1
 
     # P0 object storage (C-OBJECT-STORE). local = keys under storage_root; s3 = MinIO/AWS.
     object_store_backend: str = "local"  # local | s3
@@ -641,6 +756,21 @@ class Settings(BaseSettings):
     kafka_rematerialize_via_bus: bool = False
     kafka_platform_jobs_group: str = "prodavan-platform-jobs"
 
+    # Privileged auth command provenance. No AUTH_TEST_SECRET/dev fallback:
+    # only control-plane API replicas may receive this dedicated secret.
+    auth_command_signing_secret: str = ""
+    # Registration passwords never enter Kafka. The opaque ref lives only for
+    # this short shared-Redis TTL and is consumed atomically by the auth consumer.
+    auth_registration_password_ttl_seconds: int = 60
+    # A consumed ref is never restored. Transient Keycloak failures are retried
+    # synchronously with the already-consumed password and a bounded budget.
+    auth_registration_retry_attempts: int = 3
+    auth_registration_retry_delay_seconds: float = 0.2
+    # Independent trust domain for auth_event -> identity bind. Reusing the
+    # command key is not allowed; this key also has no test/dev fallback.
+    auth_event_signing_secret: str = ""
+    auth_event_max_age_seconds: int = 300
+
     # External webhook/telegram ingress rate limit (C-CACHE); 0 = disabled.
     ingress_rate_limit_per_minute: int = 120
 
@@ -692,6 +822,29 @@ class Settings(BaseSettings):
                 "PLUGIN_PLATFORM_ENABLED=true requires PLUGIN_STATIC_ORIGIN "
                 "(отдельный origin для iframe, не agentscale.dev)"
             )
+        if self.plugin_platform_enabled and not self.plugin_shell_origin.strip():
+            raise RuntimeError(
+                "PLUGIN_PLATFORM_ENABLED=true requires PLUGIN_SHELL_ORIGIN "
+                "(exact server-derived HTTPS shell origin)"
+            )
+        if self.plugin_platform_enabled:
+            try:
+                exact_plugin_origins(
+                    static_origin=self.plugin_static_origin,
+                    shell_origin=self.plugin_shell_origin,
+                )
+            except PluginOriginError as exc:
+                raise RuntimeError(str(exc)) from exc
+        if self.plugin_platform_enabled and not self.plugin_event_signing_secret_ref.strip():
+            raise RuntimeError(
+                "PLUGIN_PLATFORM_ENABLED=true requires PLUGIN_EVENT_SIGNING_SECRET_REF; "
+                "PLUGIN_CLAIMS_SECRET and AUTH_TEST_SECRET are not fallbacks"
+            )
+        if not _valid_plugin_event_signing_secret_ref(self.plugin_event_signing_secret_ref):
+            raise RuntimeError(
+                "PLUGIN_EVENT_SIGNING_SECRET_REF must be a vault://, file://, or "
+                "k8s-secret://<secret-name>/<key> SecretStore reference"
+            )
         if self.plugin_egress_mode not in {"none", "webhooks-only", "full"}:
             raise RuntimeError(
                 f"PLUGIN_EGRESS_MODE must be none|webhooks-only|full, got {self.plugin_egress_mode!r}"
@@ -703,6 +856,28 @@ class Settings(BaseSettings):
             )
         if self.plugin_claims_ttl_seconds < 60 or self.plugin_claims_ttl_seconds > 900:
             raise RuntimeError("PLUGIN_CLAIMS_TTL_SECONDS must be within 60..900")
+        if self.kafka_consumer_enabled and len(self.auth_command_signing_secret.encode("utf-8")) < 32:
+            raise RuntimeError(
+                "KAFKA_CONSUMER_ENABLED=true requires a dedicated "
+                "AUTH_COMMAND_SIGNING_SECRET of at least 32 bytes"
+            )
+        if self.kafka_consumer_enabled and len(self.auth_event_signing_secret.encode("utf-8")) < 32:
+            raise RuntimeError(
+                "KAFKA_CONSUMER_ENABLED=true requires a dedicated "
+                "AUTH_EVENT_SIGNING_SECRET of at least 32 bytes"
+            )
+        if self.auth_event_signing_secret and (
+            self.auth_event_signing_secret == self.auth_command_signing_secret
+        ):
+            raise RuntimeError("AUTH_EVENT_SIGNING_SECRET must differ from AUTH_COMMAND_SIGNING_SECRET")
+        if not 5 <= self.auth_registration_password_ttl_seconds <= 300:
+            raise RuntimeError("AUTH_REGISTRATION_PASSWORD_TTL_SECONDS must be within 5..300")
+        if not 1 <= self.auth_registration_retry_attempts <= 5:
+            raise RuntimeError("AUTH_REGISTRATION_RETRY_ATTEMPTS must be within 1..5")
+        if not 0 <= self.auth_registration_retry_delay_seconds <= 5:
+            raise RuntimeError("AUTH_REGISTRATION_RETRY_DELAY_SECONDS must be within 0..5")
+        if not 30 <= self.auth_event_max_age_seconds <= 3600:
+            raise RuntimeError("AUTH_EVENT_MAX_AGE_SECONDS must be within 30..3600")
         return self
 
     @property

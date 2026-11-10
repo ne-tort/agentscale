@@ -28,6 +28,8 @@ export interface DynamicRegistryQuery {
   readonly routeId: string;
   readonly context: RequestContextInput;
   readonly effectiveCapabilities: ReadonlySet<string>;
+  /** Authoritative reads/writes only; undefined means the legacy UX-read mode. */
+  readonly requiresAuthoritativeScope?: boolean;
 }
 
 export interface DynamicRegistryRouteQuery {
@@ -35,6 +37,8 @@ export interface DynamicRegistryRouteQuery {
   readonly snapshotHint: SignedRegistrySnapshot | unknown;
   readonly context: RequestContextInput;
   readonly effectiveCapabilities: ReadonlySet<string>;
+  /** Authoritative reads/writes only; undefined means the legacy UX-read mode. */
+  readonly requiresAuthoritativeScope?: boolean;
 }
 
 function contextKey(context: RequestContextInput): readonly unknown[] {
@@ -57,11 +61,12 @@ function hintStamp(hint: unknown): readonly [string | null, string | null] {
 
 function queryKey(query: DynamicRegistryQuery | DynamicRegistryRouteQuery): string {
   const capabilities = [...query.effectiveCapabilities].sort();
+  const authoritative = query.requiresAuthoritativeScope === true;
   if ("appId" in query) {
-    return JSON.stringify(["app", query.appId, query.version, query.routeId, contextKey(query.context), capabilities]);
+    return JSON.stringify(["app", query.appId, query.version, query.routeId, authoritative, contextKey(query.context), capabilities]);
   }
   const pointer = routeToSnapshotPointer(query.snapshotHint, query.pathname);
-  return JSON.stringify(["route", query.pathname, pointer, hintStamp(query.snapshotHint), contextKey(query.context), capabilities]);
+  return JSON.stringify(["route", query.pathname, pointer, authoritative, hintStamp(query.snapshotHint), contextKey(query.context), capabilities]);
 }
 
 function statusOf(result: RegistryClientResolution): DynamicRegistryStatus {

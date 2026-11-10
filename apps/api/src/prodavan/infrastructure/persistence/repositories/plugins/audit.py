@@ -14,17 +14,15 @@ raw-данных). Её колонки — типизированные кано
 Реализует ТРИ ``AuditPort`` (разная сигнатура ``append``) через один
 диспетчер :meth:`AppendOnlyAuditSink.append`:
 
-* ``capabilities.audit.AuditPort`` (задача 03, SYNC):
-  ``append(event: PluginAuditEvent) -> None``;
+* ``capabilities.audit.AuditPort`` (задача 03, ASYNC):
+  ``await append(event: PluginAuditEvent) -> None``;
 * ``admin.ports.AuditPort`` (задача 12, ASYNC):
   ``await append(*, event: AdminAuditEvent) -> bool``;
 * ``events.ports.AuditPort`` (задача 10, ASYNC):
   ``await append(event_type: str, *, details: Mapping) -> None``.
 
-Диспетчер разбирает форму вызова и ДЛЯ SYNC-вызова выполняет вставку на
-выделенном фоновом loop (``AsyncSession`` нельзя await'ить из sync-кода,
-но «тихо не записать» недопустимо). Для ASYNC-вызова всё остаётся в текущем
-loop и требует ``await``.
+Диспетчер разбирает форму вызова и всегда выполняет INSERT в текущем
+running loop. Production sync-фасада и фонового thread loop больше нет.
 
 Защита criterion 11 (§4.5)
 --------------------------
@@ -42,10 +40,8 @@ Fail-closed для позитивной мутации: ЛЮБАЯ ошибка 
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
-import threading
 from datetime import UTC, datetime
 from typing import Any, Mapping, Sequence
 
@@ -232,9 +228,6 @@ class AppendOnlyAuditSink:
         self._columns = columns or ColumnMap()
         self._clock = clock or (lambda: datetime.now(UTC))
         self._rows_written = 0
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._loop_thread: threading.Thread | None = None
-        self._lock = threading.Lock()
 
     @property
     def rows_written(self) -> int:
@@ -355,7 +348,7 @@ class AppendOnlyAuditSink:
     # Диспетчер: одна точка входа для всех трёх AuditPort
     # ------------------------------------------------------------------
 
-    def append(
+    async def append(
         self,
         event_or_type: Any = None,
         *,
@@ -366,8 +359,7 @@ class AppendOnlyAuditSink:
 
         Формы:
 
-        * ``append(plugin_audit_event)`` — SYNC (задача 03) → блокирующе
-          выполняет вставку на фоновом loop, возвращает ``None``;
+        * ``await append(plugin_audit_event)`` — capabilities AuditPort;
         * ``await append(*, event=admin_audit_event)`` — ASYNC (задача 12) →
           возвращает ``True``;
         * ``await append("plugin_event_received", details={...})`` — ASYNC
@@ -378,16 +370,16 @@ class AppendOnlyAuditSink:
         """
         if event is not None:
             # admin.ports.AuditPort: async append(*, event) -> bool
-            return self._append_admin(event)
+            return await self._append_admin(event)
         if isinstance(event_or_type, str):
             # events.ports.AuditPort: async append(event_type, *, details) -> None
-            return self._append_event(event_or_type, details=details or {})
+            return await self._append_event(event_or_type, details=details or {})
         if event_or_type is None:
             raise AuditAppendError("append: не передано событие аудита")
-        # capabilities.audit.AuditPort: sync append(event) -> None
+        # capabilities.audit.AuditPort: async append(event) -> None
         projection = self._projection(event_or_type, event_type_hint="plugin_audit")
         values = self._values(projection, self._row())
-        return self._run_sync(self._insert(values))
+        await self._insert(values)
 
     async def _append_admin(self, event: Any) -> bool:
         """Подтверждённая запись → ``True``; ошибка → исключение, НЕ ``False``."""
@@ -407,64 +399,12 @@ class AppendOnlyAuditSink:
     async def append_event(self, event_type: str, *, details: Mapping[str, Any]) -> None:
         await self._append_event(event_type, details=details)
 
-    def append_sync(self, event: Any) -> None:
-        projection = self._projection(event, event_type_hint="plugin_audit")
-        values = self._values(projection, self._row())
-        self._run_sync(self._insert(values))
-
-    # ------------------------------------------------------------------
-    # Мост sync → async
-    # ------------------------------------------------------------------
-
-    def _get_loop(self) -> asyncio.AbstractEventLoop:
-        with self._lock:
-            if self._loop is not None and not self._loop.is_closed():
-                return self._loop
-            loop = asyncio.new_event_loop()
-            thread = threading.Thread(
-                target=_run_loop, args=(loop,), name="plugin-audit-sink", daemon=True
-            )
-            thread.start()
-            self._loop = loop
-            self._loop_thread = thread
-            return loop
-
-    def _run_sync(self, coro: Any) -> None:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            future = asyncio.run_coroutine_threadsafe(coro, self._get_loop())
-            future.result()  # ДОЖИДАЕМСЯ подтверждения; ошибка → AuditAppendError
-            return
-        raise AuditAppendError(
-            "append_sync вызван из работающего event loop; используйте await append(...)"
-        )
-
-    def close(self) -> None:
-        with self._lock:
-            loop, thread = self._loop, self._loop_thread
-            self._loop = None
-            self._loop_thread = None
-        if loop is not None and not loop.is_closed():
-            loop.call_soon_threadsafe(loop.stop)
-        if thread is not None:
-            thread.join(timeout=2.0)
-
-    # ------------------------------------------------------------------
-    # Вспомогательное: проверка «нет raw данных» для тестов/ревью
-    # ------------------------------------------------------------------
-
     @staticmethod
     def assert_no_raw_data(details: Mapping[str, Any], raw_values: Sequence[str]) -> None:
-        """Проверить, что ни одно сырое значение не попало в проекцию (тесты)."""
+        """Test/review helper proving that raw values never reach projection."""
         serialized = json.dumps(redact_details(details), ensure_ascii=False, sort_keys=True)
         for raw in raw_values:
-            assert str(raw) not in serialized, f"raw данные {raw!r} попали в аудит"
-
-
-def _run_loop(loop: asyncio.AbstractEventLoop) -> None:
-    asyncio.set_event_loop(loop)
-    loop.run_forever()
+            assert str(raw) not in serialized, "raw data reached audit projection"
 
 
 class _BorrowedSession:

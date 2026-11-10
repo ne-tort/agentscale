@@ -78,6 +78,7 @@ OPERATION_TO_CAPABILITY: Final[dict[str, str]] = {
     "cache.incr": "cache",
     "cache.publish": "cache",
     "objects.scoped_credentials": "objects",
+    "objects.presign": "objects",
     "objects.list": "objects",
     "objects.delete": "objects",
     "docs.query": "docs",
@@ -88,6 +89,7 @@ OPERATION_TO_CAPABILITY: Final[dict[str, str]] = {
     "jobs.cancel": "jobs",
     "pods.invoke": "pods",
     "mcp.register": "mcp",
+    "mcp.invoke": "mcp",
     "secrets.read": "secrets",
     "network.egress": "network",
 }
@@ -294,7 +296,7 @@ class CachePublishResponse(TypedResponse):
 
 
 # ---------------------------------------------------------------------------
-# objects: scoped_credentials / list / delete (§4.3, §5.4)
+# objects: scoped_credentials / presign / list / delete (§4.3, §5.4)
 # НИКАКИХ base64-байтов через API: только short-lived credentials / presigned.
 # ---------------------------------------------------------------------------
 
@@ -303,6 +305,14 @@ class ObjectPermission(StrEnum):
     READ = "read"
     WRITE = "write"
     DELETE = "delete"
+
+
+class ObjectPresignMethod(StrEnum):
+    """Exact S3 methods exposed by ``objects.presign``; LIST is not an object method."""
+
+    GET = "GET"
+    PUT = "PUT"
+    HEAD = "HEAD"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -368,6 +378,68 @@ class ObjectsScopedCredentialsRequest:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ObjectsScopedCredentialsResponse(TypedResponse):
     credentials: ScopedCredentials | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ObjectsPresignRequest:
+    """Sign one exact object key inside the server-derived tenant/plugin scope.
+
+    ``bucket`` must be ``tenant-<company>`` and ``object_key`` must already be the
+    complete ``module-<plugin>/...`` key. There is no relative-key, wildcard or
+    list form. Company, plugin, instance and project binding come only from the
+    server envelope, never from client-supplied identity fields.
+    """
+
+    bucket: str
+    object_key: str
+    method: ObjectPresignMethod
+    ttl_seconds: int
+    envelope: CapabilityEnvelope
+
+    def __post_init__(self) -> None:
+        _require_text(self.bucket, "bucket")
+        _require_text(self.object_key, "object_key")
+        if not isinstance(self.method, ObjectPresignMethod):
+            raise TypedContractError("method must be GET, PUT or HEAD")
+        _require_positive(self.ttl_seconds, "ttl_seconds")
+        if not 60 <= self.ttl_seconds <= 3600:
+            raise TypedContractError("ttl_seconds must be between 60 and 3600")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ObjectsPresignResponse(TypedResponse):
+    """Usable signed URL plus safe session metadata; never static credentials.
+
+    ``digest`` is calculated by the adapter from this metadata without the URL.
+    The URL is returned to the authorized plugin but is never copied into audit.
+    """
+
+    url: str = ""
+    bucket: str = ""
+    key_digest: str = field(default_factory=empty_digest)
+    method: ObjectPresignMethod = ObjectPresignMethod.GET
+    ttl_seconds: int = 60
+    expires_at_epoch: int = 1
+    company_id: str = ""
+    plugin_id: str = ""
+    project_id: str | None = None
+    plugin_instance_id: str = ""
+
+    def __post_init__(self) -> None:
+        TypedResponse.__post_init__(self)
+        for name in ("url", "bucket", "company_id", "plugin_id", "plugin_instance_id"):
+            _require_text(getattr(self, name), name)
+        if len(self.url) > 16384:
+            raise TypedContractError("url must not exceed 16384 characters")
+        _require_digest(self.key_digest, "key_digest")
+        if not isinstance(self.method, ObjectPresignMethod):
+            raise TypedContractError("method must be GET, PUT or HEAD")
+        _require_positive(self.ttl_seconds, "ttl_seconds")
+        if self.ttl_seconds > 3600:
+            raise TypedContractError("ttl_seconds must not exceed 3600")
+        _require_positive(self.expires_at_epoch, "expires_at_epoch")
+        if self.project_id is not None:
+            _require_text(self.project_id, "project_id")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -799,6 +871,50 @@ class McpRegisterResponse(TypedResponse):
         _require_non_negative(self.registered, "registered")
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class McpInvokeRequest:
+    """One bounded MCP call; manifest_version is server-derived and grant-checked."""
+
+    server_id: str
+    tool_name: str
+    arguments_json: str
+    arguments_digest: str
+    manifest_version: str
+    envelope: CapabilityEnvelope
+
+    def __post_init__(self) -> None:
+        _require_text(self.server_id, "server_id")
+        _require_text(self.tool_name, "tool_name")
+        _require_text(self.arguments_json, "arguments_json")
+        _require_digest(self.arguments_digest, "arguments_digest")
+        _require_text(self.manifest_version, "manifest_version")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class McpInvokeResponse(TypedResponse):
+    """Bounded canonical backend JSON, never a generic infra adapter result."""
+
+    server_id: str = ""
+    tool_name: str = ""
+    operation: str = ""
+    backend_path: str = ""
+    status_code: int = 0
+    arguments_bytes: int = 0
+    response_bytes: int = 0
+    response_json: str = "null"
+
+    def __post_init__(self) -> None:
+        TypedResponse.__post_init__(self)
+        for name in ("server_id", "tool_name", "operation", "backend_path", "response_json"):
+            _require_text(getattr(self, name), name)
+        if not self.backend_path.startswith("/api/"):
+            raise TypedContractError("backend_path must stay under /api/")
+        if not 200 <= self.status_code <= 299:
+            raise TypedContractError("status_code must be a successful backend status")
+        _require_non_negative(self.arguments_bytes, "arguments_bytes")
+        _require_non_negative(self.response_bytes, "response_bytes")
+
+
 # ---------------------------------------------------------------------------
 # secrets: read по secret_ref (§4.3). Plaintext НЕ возвращается контрактом.
 # ---------------------------------------------------------------------------
@@ -897,12 +1013,13 @@ class NetworkEgressResponse(TypedResponse):
 
 PluginCapabilityRequest = (
     CacheGetRequest | CacheSetRequest | CacheDeleteRequest | CacheIncrRequest | CachePublishRequest
-    | ObjectsScopedCredentialsRequest | ObjectsListRequest | ObjectsDeleteRequest
+    | ObjectsScopedCredentialsRequest | ObjectsPresignRequest
+    | ObjectsListRequest | ObjectsDeleteRequest
     | DocsQueryRequest
     | EventsPublishRequest | EventsSubscribeRequest
     | JobsSubmitRequest | JobsGetRequest | JobsCancelRequest
     | PodsInvokeRequest
-    | McpRegisterRequest
+    | McpRegisterRequest | McpInvokeRequest
     | SecretsReadRequest
     | NetworkEgressRequest
 )
@@ -942,6 +1059,8 @@ __all__ = [
     "JobsGetResponse",
     "JobsSubmitRequest",
     "JobsSubmitResponse",
+    "McpInvokeRequest",
+    "McpInvokeResponse",
     "McpRegisterRequest",
     "McpRegisterResponse",
     "McpToolDefinition",
@@ -949,11 +1068,14 @@ __all__ = [
     "NetworkEgressResponse",
     "NetworkHttpMethod",
     "ObjectPermission",
+    "ObjectPresignMethod",
     "ObjectRef",
     "ObjectsDeleteRequest",
     "ObjectsDeleteResponse",
     "ObjectsListRequest",
     "ObjectsListResponse",
+    "ObjectsPresignRequest",
+    "ObjectsPresignResponse",
     "ObjectsScopedCredentialsRequest",
     "ObjectsScopedCredentialsResponse",
     "OPERATION_TO_CAPABILITY",

@@ -23,10 +23,9 @@ admin (``admin/ports.py::TenantDbPort``)            tenantdb (``service.py``)
   ``SecretPort``. ``TenantDatabase.dsn_ref`` для компании, у которой ещё нет
   роли плагина, строится как служебная ссылка на БД компании (``secret_ref``
   на ключ tenantdb), а не как выдуманный DSN.
-* **``revoke`` ≠ ``uninstall``.** Admin ``revoke`` НЕ вызывает
-  ``tenantdb.revoke_plugin``: по §5.5 БД/схема/роль сохраняются, мгновенный
-  отзыв делает реестр отзывов identity + деактивация grant. Здесь реализованы
-  только три метода админского порта.
+* **``revoke`` ≠ ``uninstall``.** Admin ``revoke`` вызывает
+  ``tenantdb.revoke_plugin``: NOLOGIN/REVOKE/terminate/secret cleanup, но БД,
+  схема и роль сохраняются. Удаление схемы/роли выполняет только uninstall.
 * **Идемпотентность.** ``uninstall_plugin`` в чужом сервисе бросает
   ``TenantDbError(NOT_FOUND)``, если роли уже нет; admin-порт требует
   ``(True, True)`` для уже отсутствующих объектов. Адаптер маппит ТОЛЬКО
@@ -156,6 +155,21 @@ class TenantDbAdapter:
     async def ensure_plugin_schema(
         self, *, company_id: str, plugin_id: str, dsn_ref: str
     ) -> PluginSchema:
+        return await self._ensure_plugin_schema(
+            company_id=company_id, plugin_id=plugin_id, dsn_ref=dsn_ref, rotate=False
+        )
+
+    async def rotate_plugin_schema(
+        self, *, company_id: str, plugin_id: str, dsn_ref: str
+    ) -> PluginSchema:
+        """Явный repair/re-grant; вызывается только admin saga, не replay."""
+        return await self._ensure_plugin_schema(
+            company_id=company_id, plugin_id=plugin_id, dsn_ref=dsn_ref, rotate=True
+        )
+
+    async def _ensure_plugin_schema(
+        self, *, company_id: str, plugin_id: str, dsn_ref: str, rotate: bool
+    ) -> PluginSchema:
         """Создать роль + схему плагина, вернуть типизированный ``PluginSchema``.
 
         ``dsn_ref`` приходит от admin-сервиса как служебная ссылка НА БД
@@ -171,7 +185,10 @@ class TenantDbAdapter:
             company_id=company_id, plugin_id=plugin_id
         )
         try:
-            dsn: TenantDsn = await self._service.grant_plugin(company_id, plugin_id)
+            if rotate:
+                dsn = await self._service.rotate_plugin(company_id, plugin_id)
+            else:
+                dsn = await self._service.ensure_plugin(company_id, plugin_id)
         except TenantDbError as exc:
             raise map_tenant_db_error(
                 exc,
@@ -228,8 +245,33 @@ class TenantDbAdapter:
             role_name=role_name,
             dsn_ref=dsn.secret_ref,
             search_path=search_path,
-            created=not dsn.rotated,
+            created=dsn.created,
         )
+
+    async def revoke_plugin(self, *, company_id: str, plugin_id: str) -> bool:
+        """Подтверждённый NOLOGIN/REVOKE/terminate/secret cleanup."""
+        self._names(company_id=company_id, plugin_id=plugin_id)
+        try:
+            await self._service.revoke_plugin(company_id, plugin_id)
+            return True
+        except TenantDbError as exc:
+            raise PluginAdminError(
+                code="REVOKE_FAILED",
+                detail=f"не удалось отозвать tenant DB access: {exc.detail}",
+                status=exc.http_status,
+                extra={
+                    "tenant_db_code": exc.code,
+                    "tenant_db_operation": exc.operation,
+                    "adapter_operation": "revoke_plugin",
+                },
+            ) from None
+        except Exception as exc:  # noqa: BLE001
+            raise PluginAdminError(
+                code="REVOKE_FAILED",
+                detail=f"tenant DB revoke недоступен: {type(exc).__name__}",
+                status=503,
+                extra={"adapter_operation": "revoke_plugin"},
+            ) from None
 
     # ------------------------------------------------------------ drop схемы/роли
 

@@ -1,10 +1,11 @@
 """Admin API lifecycle плагинов (F3-admin, задача 12).
 
-``APIRouter(prefix="/admin/plugins")`` — шесть эндпоинтов из §5.5 / §8 этап 2:
+``APIRouter(prefix="/admin/plugins")`` — семь эндпоинтов из §5.5 / §8 этап 2:
 
 =========================  =============================================
 Метод + путь               Операция
 =========================  =============================================
+``POST /publication-approvals``  exact pre-approval до первой публикации
 ``POST /grant``            установка по PUBLISHED-артефакту
 ``POST /revoke``           мгновенный отзыв по ``grant_id``
 ``POST /uninstall``        полное удаление (без snapshot)
@@ -42,6 +43,7 @@ from prodavan.application.plugins.admin.contracts import (
     CapabilitySet,
     EgressMode,
     EgressPolicy,
+    EffectiveQuotasStatus,
     GrantStatus,
     IssuedPluginClaims,
     PluginRuntimeStatus,
@@ -49,8 +51,12 @@ from prodavan.application.plugins.admin.contracts import (
 )
 from prodavan.application.plugins.admin.errors import PluginAdminError
 from prodavan.application.plugins.admin.ports import PlatformAdminPort, PluginAdminPorts
-from prodavan.application.plugins.admin.service import PluginAdminService
+from prodavan.application.plugins.admin.service import (
+    EffectiveGrantReadError,
+    PluginAdminService,
+)
 from prodavan.domain.errors import AppError
+from prodavan.domain.plugins.types import SEMVER_PATTERN
 
 router = APIRouter(prefix="/admin/plugins", tags=["admin-plugins"])
 
@@ -85,12 +91,12 @@ class QuotaSetBody(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    ops_per_minute: int = Field(default=60, ge=1)
-    max_rows: int = Field(default=10_000, ge=1)
-    max_bytes: int = Field(default=10_000_000, ge=1)
-    max_keys: int = Field(default=1_000, ge=1)
-    max_object_bytes: int = Field(default=50_000_000, ge=1)
-    max_egress_bytes: int = Field(default=10_000_000, ge=1)
+    ops_per_minute: int = Field(default=60, ge=1, strict=True)
+    max_rows: int = Field(default=10_000, ge=1, strict=True)
+    max_bytes: int = Field(default=10_000_000, ge=1, strict=True)
+    max_keys: int = Field(default=1_000, ge=1, strict=True)
+    max_object_bytes: int = Field(default=50_000_000, ge=1, strict=True)
+    max_egress_bytes: int = Field(default=10_000_000, ge=1, strict=True)
 
     def to_contract(self) -> QuotaSet:
         return QuotaSet(
@@ -125,9 +131,13 @@ class GrantBody(BaseModel):
 
     company_id: str = Field(pattern=_SAFE_ID_PATTERN, max_length=64)
     plugin_id: str = Field(pattern=_SAFE_ID_PATTERN, max_length=64)
-    manifest_version: str = Field(min_length=1, max_length=64, pattern=r"^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$")
+    manifest_version: str = Field(min_length=1, max_length=128, pattern=SEMVER_PATTERN.pattern)
     artifact_digest: str = Field(pattern=_DIGEST_PATTERN)
     capabilities: CapabilitiesBody
+
+
+class PublicationApprovalBody(GrantBody):
+    """Administrative exact pre-approval; no artifact status or Deployment input."""
 
 
 class RevokeBody(BaseModel):
@@ -166,6 +176,24 @@ class ClaimsResponse(BaseModel):
     jti: str
     expires_at: str
     ttl_seconds: int
+
+
+class PublicationApprovalResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    approval_id: str
+    company_id: str
+    plugin_id: str
+    manifest_version: str
+    artifact_digest: str
+    capabilities: tuple[str, ...]
+    egress_policy: EgressPolicyBody
+    quotas: QuotaSetBody
+    created_by: str
+    created_at: str
+    consumed_at: str | None
+    created: bool
+    replayed: bool
 
 
 class GrantResponse(BaseModel):
@@ -241,6 +269,19 @@ class WakeResponse(BaseModel):
     waited_ms: int
 
 
+class EffectiveQuotasResponse(BaseModel):
+    """Шесть фактических limits из grant; без defaults и неявных coercion."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ops_per_minute: int = Field(ge=1, strict=True)
+    max_rows: int = Field(ge=1, strict=True)
+    max_bytes: int = Field(ge=1, strict=True)
+    max_keys: int = Field(ge=1, strict=True)
+    max_object_bytes: int = Field(ge=1, strict=True)
+    max_egress_bytes: int = Field(ge=1, strict=True)
+
+
 class InstalledPluginResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -254,6 +295,8 @@ class InstalledPluginResponse(BaseModel):
     enabled: bool
     capabilities: tuple[str, ...]
     egress_mode: EgressMode
+    quotas: EffectiveQuotasResponse | None
+    quotas_status: EffectiveQuotasStatus
 
 
 class PluginListResponse(BaseModel):
@@ -357,9 +400,34 @@ def _claims_response(claims: IssuedPluginClaims) -> ClaimsResponse:
     )
 
 
+def _effective_quotas_response(quotas: QuotaSet | None) -> EffectiveQuotasResponse | None:
+    if quotas is None:
+        return None
+    return EffectiveQuotasResponse(
+        ops_per_minute=quotas.ops_per_minute,
+        max_rows=quotas.max_rows,
+        max_bytes=quotas.max_bytes,
+        max_keys=quotas.max_keys,
+        max_object_bytes=quotas.max_object_bytes,
+        max_egress_bytes=quotas.max_egress_bytes,
+    )
+
+
 def _service_error(exc: Exception) -> AppError:
     """Ошибки контрактов (ValueError) → 422, всё остальное пробрасываем как есть."""
 
+    if isinstance(exc, EffectiveGrantReadError):
+        return AppError(
+            code=exc.code,
+            title="Effective grants unavailable",
+            status=503,
+            detail=str(exc),
+            extra={
+                "reason": exc.reason,
+                "company_id": exc.company_id,
+                "plugin_id": exc.plugin_id or "",
+            },
+        )
     if isinstance(exc, PluginAdminError):
         return exc
     if isinstance(exc, AppError):
@@ -375,6 +443,57 @@ def _service_error(exc: Exception) -> AppError:
 
 
 # --------------------------------------------------------------------------- endpoints
+
+
+@router.post("/publication-approvals", response_model=PublicationApprovalResponse)
+async def approve_plugin_publication(
+    body: PublicationApprovalBody,
+    request: Request,
+    actor_id: PlatformAdminActor,
+) -> PublicationApprovalResponse:
+    """Pre-approve exact bundle/policy before publication; never install or grant."""
+
+    try:
+        receipt = await _service(request).approve_publication(
+            actor_id=actor_id,
+            company_id=body.company_id,
+            plugin_id=body.plugin_id,
+            manifest_version=body.manifest_version,
+            artifact_digest=body.artifact_digest,
+            capabilities=body.capabilities.to_contract(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise _service_error(exc) from exc
+    approval = receipt.approval
+    return PublicationApprovalResponse(
+        approval_id=approval.approval_id,
+        company_id=approval.company_id,
+        plugin_id=approval.plugin_id,
+        manifest_version=approval.manifest_version,
+        artifact_digest=approval.artifact_digest,
+        capabilities=approval.capabilities,
+        egress_policy=EgressPolicyBody(
+            mode=approval.egress_policy.mode,
+            allowed_hosts=approval.egress_policy.allowed_hosts,
+            allowed_paths=approval.egress_policy.allowed_paths,
+            approved_for_full=approval.egress_policy.approved_for_full,
+        ),
+        quotas=QuotaSetBody(
+            ops_per_minute=approval.quotas.ops_per_minute,
+            max_rows=approval.quotas.max_rows,
+            max_bytes=approval.quotas.max_bytes,
+            max_keys=approval.quotas.max_keys,
+            max_object_bytes=approval.quotas.max_object_bytes,
+            max_egress_bytes=approval.quotas.max_egress_bytes,
+        ),
+        created_by=approval.created_by,
+        created_at=approval.created_at.isoformat(),
+        consumed_at=(
+            approval.consumed_at.isoformat() if approval.consumed_at is not None else None
+        ),
+        created=receipt.created,
+        replayed=receipt.replayed,
+    )
 
 
 @router.post("/grant", response_model=GrantResponse, status_code=201)
@@ -530,6 +649,8 @@ async def list_plugins(
                 enabled=item.enabled,
                 capabilities=item.capabilities,
                 egress_mode=item.egress_mode,
+                quotas=_effective_quotas_response(item.quotas),
+                quotas_status=item.quotas_status,
             )
             for item in snapshot.items
         ),

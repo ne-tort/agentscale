@@ -4,6 +4,7 @@ import type {
   ApiError,
   AdminModule,
   AdminPluginsResponse,
+  PluginBootstrapResponse,
   AdminProfile,
   AttachmentUpload,
   CabinetBoundModule,
@@ -55,6 +56,10 @@ import type {
   ToolApproval,
   ToolApprovalDecisionResponse,
   TriggerListResponse,
+  ModuleSourceResponse,
+  PluginGrantResponse,
+  PluginLifecycleResponse,
+  PluginPublicationApprovalResponse,
   UploadedModuleFile,
   WorkspaceListing,
   WorkspaceMutationResponse,
@@ -627,6 +632,47 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     // Токен идёт в заголовке (request добавляет Authorization), в query — только
     // company_id; capability-токен плагина в URL не попадает никогда (§5.2).
     listAdminPlugins: (companyId) => request<AdminPluginsResponse>(`/admin/plugins/?company_id=${encodeURIComponent(companyId)}`),
+    getPluginBootstrap: (companyId, pluginId, routePath) => request<PluginBootstrapResponse>(
+      `/companies/${encodePath(companyId)}/plugins/${encodePath(pluginId)}/bootstrap${routePath ? `?route_path=${encodeURIComponent(routePath)}` : ""}`,
+    ),
+    getPublicPluginBootstrap: (companyId, pluginId, routePath) => request<PluginBootstrapResponse>(
+      `/public/plugins/${encodePath(companyId)}/${encodePath(pluginId)}/bootstrap${routePath ? `?route_path=${encodeURIComponent(routePath)}` : ""}`,
+    ),
+    // Plugin-модуль (v4): источник создаётся из template-репозитория, затем
+    // привязывается к кабинету/проекту. Оба шага — server-side: UI отправляет
+    // только manifest и точный scope, никаких credentials/Git-токенов.
+    createPluginSource: (companyId, pluginId, manifest) => request<ModuleSourceResponse>(
+      `/companies/${encodePath(companyId)}/plugins/${encodePath(pluginId)}/source`,
+      { method: "POST", body: JSON.stringify({ manifest }) },
+    ),
+    getPluginSource: (companyId, pluginId) => request<ModuleSourceResponse>(
+      `/companies/${encodePath(companyId)}/plugins/${encodePath(pluginId)}/source`,
+    ),
+    bindPluginSourceScope: (companyId, pluginId, cabinetId, projectId) => request<ModuleSourceResponse>(
+      `/companies/${encodePath(companyId)}/plugins/${encodePath(pluginId)}/source/scope`,
+      { method: "PUT", body: JSON.stringify({ cabinet_id: cabinetId, project_id: projectId }) },
+    ),
+    // Жизненный цикл установленного plugin-модуля. Все четыре операции —
+    // admin-only и идут по (company, plugin); ни одна не принимает digest или
+    // task name от клиента: выбор артефакта делает сервер по durable grant.
+    grantPlugin: (body) => request<PluginGrantResponse>("/admin/plugins/grant", {
+      method: "POST", body: JSON.stringify(body),
+    }),
+    revokePlugin: (companyId, pluginId) => request<PluginLifecycleResponse>("/admin/plugins/revoke", {
+      method: "POST", body: JSON.stringify({ company_id: companyId, plugin_id: pluginId }),
+    }),
+    uninstallPlugin: (companyId, pluginId) => request<PluginLifecycleResponse>("/admin/plugins/uninstall", {
+      method: "POST", body: JSON.stringify({ company_id: companyId, plugin_id: pluginId }),
+    }),
+    wakePlugin: (companyId, pluginId) => request<PluginLifecycleResponse>("/admin/plugins/wake", {
+      method: "POST", body: JSON.stringify({ company_id: companyId, plugin_id: pluginId }),
+    }),
+    // Pre-approval публикации: разрешает РОВНО этот digest и эту политику до
+    // того, как артефакт появится. Не устанавливает и не выдаёт grant.
+    approvePluginPublication: (body) => request<PluginPublicationApprovalResponse>(
+      "/admin/plugins/publication-approvals",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
     createAdminModule: (name) => request<AdminModule>("/admin/modules", { method: "POST", body: JSON.stringify({ name }) }),
     getAdminModule: (moduleId) => request<AdminModule>(`/admin/modules/${encodePath(moduleId)}`),
     patchAdminModule: (moduleId, patch) => request<AdminModule>(`/admin/modules/${encodePath(moduleId)}`, { method: "PATCH", body: JSON.stringify(patch) }),

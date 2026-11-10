@@ -42,6 +42,8 @@ from .events import (
 )
 from .flags import DbFeatureFlagStore, SyncFeatureFlagStore
 from .grants import SqlCapabilityGrantRepository
+from .instances import SqlPluginInstanceRepository
+from .publication_approvals import SqlPluginPublicationApprovalRepository
 from .quotas import RedisPluginQuota
 from .revocation import DbGrantRevocation
 
@@ -56,6 +58,8 @@ class PluginRepositories:
     """
 
     grant_store: SqlCapabilityGrantRepository
+    publication_approvals: SqlPluginPublicationApprovalRepository
+    instance_store: SqlPluginInstanceRepository
     grant_revocation: DbGrantRevocation
     quota: RedisPluginQuota
     feature_flags: DbFeatureFlagStore
@@ -73,7 +77,6 @@ def build_plugin_repositories(
     redis: Any,
     *,
     columns: ColumnMap | None = None,
-    quota: Any = None,
     revocation_ttl_seconds: float | None = None,
     flags_column: str | None = None,
     flags_row: Any = None,
@@ -85,8 +88,9 @@ def build_plugin_repositories(
 ) -> PluginRepositories:
     """Собрать связку. Отсутствие session/redis = ЯВНАЯ ошибка сборки.
 
-    ``quota`` — ``PluginQuota`` (лимиты); ``columns`` — переопределения имён
-    колонок A10; ``clock`` — единые часы для всех репозиториев (тесты);
+    Лимиты здесь намеренно не настраиваются: каждый ``enforce`` получает exact
+    ``invocation.grant.quotas``. ``columns`` — переопределения имён колонок
+    A10; ``clock`` — единые часы для всех репозиториев (тесты);
     ``key_prefix`` — префикс ключей Redis; ``flags_row`` — модель 6-й таблицы
     A10 (по умолчанию разрешается лениво как ``PluginFeatureFlagRow``);
     ``created_by`` — значение обязательной NOT NULL колонки гранта.
@@ -142,6 +146,12 @@ def build_plugin_repositories(
     grant_store = SqlCapabilityGrantRepository(
         **common, now=clock, feature_flags=feature_flags, created_by=created_by
     )
+    publication_approvals = SqlPluginPublicationApprovalRepository(
+        session_factory=session_factory,
+        session=bound_session,
+        now=clock,
+    )
+    instance_store = SqlPluginInstanceRepository(**common, now=clock)
     grant_revocation = DbGrantRevocation(
         grant_store,
         **({"ttl_seconds": revocation_ttl_seconds} if revocation_ttl_seconds is not None else {}),
@@ -149,7 +159,6 @@ def build_plugin_repositories(
     )
     quota_store = RedisPluginQuota(
         redis,
-        quota=quota,
         clock=clock,
         key_prefix=key_prefix,
     )
@@ -167,6 +176,8 @@ def build_plugin_repositories(
 
     return PluginRepositories(
         grant_store=grant_store,
+        publication_approvals=publication_approvals,
+        instance_store=instance_store,
         grant_revocation=grant_revocation,
         quota=quota_store,
         feature_flags=feature_flags,

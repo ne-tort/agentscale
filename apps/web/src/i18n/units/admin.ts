@@ -15,6 +15,7 @@ export default defineStrings({
     tabCompanies: "Компании",
     tabKeys: "Ключи",
     tabModules: "Модули",
+    tabPluginModules: "Plugin-модули",
     tabDeleted: "Удалённые",
 
     companiesTitle: "Компании",
@@ -164,6 +165,7 @@ export default defineStrings({
     tabCompanies: "Companies",
     tabKeys: "Keys",
     tabModules: "Modules",
+    tabPluginModules: "Plugin modules",
     tabDeleted: "Deleted",
 
     companiesTitle: "Companies",

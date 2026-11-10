@@ -1,0 +1,50 @@
+[
+  {
+    "file": "plugin-postgres-junit.xml",
+    "sha256": "9a4b4b70ff4d66aea23522283d15de20b3f4e262ed8c271b6d44e99a407aec53",
+    "copy_check": true,
+    "scan_findings": [],
+    "counts": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 27
+    }
+  },
+  {
+    "file": "redis-plugin-acceptance-junit.xml",
+    "sha256": "406303aedd214f6f360e718048d660ef23521c16eec3f4e023ff070da92c0206",
+    "copy_check": true,
+    "scan_findings": [],
+    "counts": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 22
+    }
+  },
+  {
+    "file": "summary.md",
+    "sha256": "ba516f285a009c82732837379c6931351995e281b4b7177d5c667e0223a93e23",
+    "copy_check": true,
+    "scan_findings": []
+  },
+  {
+    "file": "plugin-postgres-atomicity-fd6-junit.xml",
+    "sha256": "8a5b7f455cc7cac093e29ff30f581a982f31e414938f7976ebe6c1882532bcd6",
+    "copy_check": true,
+    "scan_findings": [],
+    "counts": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 5
+    }
+  },
+  {
+    "file": "regrant-report.md",
+    "sha256": "71a6418d2bc8f38bc72bb74ea6d58f9d26afa93b5845f1b900fdcfda6bf5ea49",
+    "copy_check": true,
+    "scan_findings": []
+  }
+]

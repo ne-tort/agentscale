@@ -1,6 +1,6 @@
 """Тесты ``flags.py``: fail-closed политика и запрет parity-API (§8, §13.1, кр. 16).
 
-Тесты НЕ запускались (verification freeze).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 """
 
 from __future__ import annotations

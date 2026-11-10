@@ -96,6 +96,7 @@ data:
   PLUGIN_CLAIMS_ISSUER: agentscale-plugins
   PLUGIN_CLAIMS_AUDIENCE: capability-gateway
   PLUGIN_STATIC_ORIGIN: ""
+  PLUGIN_SHELL_ORIGIN: ""
   PLUGIN_TENANT_DB_HOST: tenant-postgres
   PLUGIN_TENANT_DB_PORT: "5432"
   PLUGIN_EGRESS_MODE: "none"

@@ -1,0 +1,31 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.3, pytest-8.4.1, pluggy-1.6.0 -- C:\Users\qwerty\AppData\Local\Programs\Python\Python313\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\qwerty\git\agentscale\wt-migration\.agents\worktrees\audit-plugin-modules\apps\api\tests\e2e\k8s\plugin_acceptance
+configfile: pytest.ini
+plugins: anyio-4.15.1, platformdirs-4.12.4, asyncio-1.0.0, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 19 items
+
+tests\e2e\k8s\plugin_acceptance\test_deployment_admin_acceptance.py::test_ensure_initial_projects_identity_and_readonly_delivery PASSED [  5%]
+tests\e2e\k8s\plugin_acceptance\test_deployment_admin_acceptance.py::test_owner_update_same_owner_retry_and_binding PASSED [ 10%]
+tests\e2e\k8s\plugin_acceptance\test_deployment_admin_acceptance.py::test_foreign_owner_and_stale_digest_denied_before_mutation PASSED [ 15%]
+tests\e2e\k8s\plugin_acceptance\test_deployment_admin_acceptance.py::test_rollback_restores_digest_owner_and_removes_annotation PASSED [ 21%]
+tests\e2e\k8s\plugin_acceptance\test_deployment_admin_acceptance.py::test_uninstall_is_scoped_and_preserves_sibling PASSED [ 26%]
+tests\e2e\k8s\plugin_acceptance\test_deployment_admin_acceptance.py::test_scope_is_k8s_only_and_has_no_sql_update_lock PASSED [ 31%]
+tests\e2e\k8s\plugin_acceptance\test_deployment_admin_acceptance.py::test_non_managed_volumes_survive_update_retry_deny_rollback_uninstall PASSED [ 36%]
+tests\e2e\k8s\plugin_acceptance\test_secret_projection_acceptance.py::test_exact_keys_hashed_delivery_and_no_plaintext_metadata PASSED [ 42%]
+tests\e2e\k8s\plugin_acceptance\test_secret_projection_acceptance.py::test_same_ref_rotation_uses_cas_for_lifecycle_and_delivery PASSED [ 47%]
+tests\e2e\k8s\plugin_acceptance\test_secret_projection_acceptance.py::test_drift_is_detected_and_managed_values_reconciled PASSED [ 52%]
+tests\e2e\k8s\plugin_acceptance\test_secret_projection_acceptance.py::test_delivery_drift_denied_and_repaired_with_sibling_preservation PASSED [ 57%]
+tests\e2e\k8s\plugin_acceptance\test_secret_projection_acceptance.py::test_reconcile_drops_stale_keys_and_revoke_is_scoped PASSED [ 63%]
+tests\e2e\k8s\plugin_acceptance\test_secret_projection_acceptance.py::test_suspend_revoke_cleanup_is_scoped PASSED [ 68%]
+tests\e2e\k8s\plugin_acceptance\test_secret_projection_acceptance.py::test_no_secret_values_or_tokens_in_logs PASSED [ 73%]
+tests\e2e\k8s\plugin_acceptance\test_token_request_acceptance.py::test_control_plane_mints_only_for_lifecycle_admin PASSED [ 78%]
+tests\e2e\k8s\plugin_acceptance\test_token_request_acceptance.py::test_provider_rejects_over_one_hour_and_foreign_identity PASSED [ 84%]
+tests\e2e\k8s\plugin_acceptance\test_token_request_acceptance.py::test_refresh_mints_a_new_scoped_token PASSED [ 89%]
+tests\e2e\k8s\plugin_acceptance\test_token_request_acceptance.py::test_failure_is_sanitized_and_retry_succeeds PASSED [ 94%]
+tests\e2e\k8s\plugin_acceptance\test_token_request_acceptance.py::test_shutdown_cancels_inflight_refresh_and_transport PASSED [100%]
+
+- generated xml file: C:\Temp\plugin-k8s-fix-artifacts-bd5b14e08a76\plugin-k8s-junit-fixed-rerun.xml -
+============================= 19 passed in 21.28s =============================

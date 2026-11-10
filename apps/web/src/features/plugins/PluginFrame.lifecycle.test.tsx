@@ -14,13 +14,19 @@ import { OPAQUE_ORIGIN, PLUGIN_RPC_PROTOCOL, type PluginChannel } from "./rpc";
 import { PluginFrameError } from "./errors";
 
 const SAFE_SRC = "https://plugin-origin.agentscale.dev/tenant-co_123/mod_equipment/1.2.0/index.html";
+const DIGEST = `sha256:${"a".repeat(64)}`;
+const SHELL_ORIGIN = "https://agentscale.dev";
+const INSTANCE_ID = "instance-1234567890";
+const NONCE = "nonce-1234567890";
 
 function base(overrides: Partial<PluginFrameProps> = {}): PluginFrameProps {
   return {
     pluginId: "mod_equipment",
     companyId: "co_123",
     version: "1.2.0",
+    artifactDigest: DIGEST,
     src: SAFE_SRC,
+    shellOrigin: SHELL_ORIGIN,
     ...overrides,
   };
 }
@@ -52,7 +58,13 @@ function inertChannel(expectedOrigin: string): PluginChannel {
     ready: true,
     get disposed() { return disposed; },
     handshake: () => Promise.resolve({
-      protocol: PLUGIN_RPC_PROTOCOL, type: "plugin.ready", plugin_id: "mod_equipment", version: "1.2.0",
+      protocol: PLUGIN_RPC_PROTOCOL,
+      type: "plugin.ready",
+      plugin_id: "mod_equipment",
+      version: "1.2.0",
+      artifact_digest: DIGEST,
+      instance_id: INSTANCE_ID,
+      nonce: NONCE,
     }),
     request: <T,>() => Promise.resolve(undefined as T),
     dispose: () => { disposed = true; },
@@ -89,6 +101,46 @@ describe("PluginFrame: живой рендер", () => {
     expect(iframe.getAttribute("role")).not.toBe("alert");
   });
 
+  it("устанавливает exact server-derived handoff до src, без window.location trust", async () => {
+    let handoffAtNavigation = "";
+    await mount(<PluginFrame {...base()} channelFactory={(element, origin) => {
+      const setAttribute = element.setAttribute.bind(element);
+      element.setAttribute = (name: string, value: string) => {
+        if (name === "src") handoffAtNavigation = element.name;
+        setAttribute(name, value);
+      };
+      return inertChannel(origin);
+    }} />);
+    const iframe = frame()!;
+    const handoff = JSON.parse(iframe.name) as Record<string, unknown>;
+    expect(handoffAtNavigation).toBe(iframe.name);
+    expect(handoff).toEqual({
+      protocol: "agentscale-plugin-shell/1",
+      plugin_shell_origin: SHELL_ORIGIN,
+      plugin_id: "mod_equipment",
+      manifest_version: "1.2.0",
+      artifact_digest: DIGEST,
+    });
+    expect(handoff.plugin_shell_origin).not.toBe(window.location.origin);
+    expect(iframe.name).not.toMatch(/token|secret|authorization/i);
+    expect(iframe.getAttribute("src")).toBe(SAFE_SRC);
+  });
+
+  it.each([
+    "http://agentscale.dev",
+    "https://*.agentscale.dev",
+    "https://agentscale.dev/path",
+    "https://agentscale.dev/?origin=https://evil.example",
+    SAFE_SRC,
+  ])("invalid/untrusted shellOrigin %s запрещает навигацию", async (shellOrigin) => {
+    const onError = vi.fn();
+    await mount(<PluginFrame {...base({ shellOrigin })} onError={onError} />);
+    expect(phase()).toBe("error");
+    expect(frame()?.hasAttribute("src")).toBe(false);
+    expect(frame()?.hasAttribute("name")).toBe(false);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: "originMismatch" }));
+  });
+
   it("unsafe src (?token=) → русская ошибка, iframe без src и скрыт", async () => {
     const onError = vi.fn();
     await mount(<PluginFrame {...base({ src: `${SAFE_SRC}?token=leak` })} onError={onError} />);
@@ -97,6 +149,14 @@ describe("PluginFrame: живой рендер", () => {
     expect(frame()?.hasAttribute("src")).toBe(false);
     expect(frame()?.hidden).toBe(true);
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: "unsafeSrc" }));
+  });
+
+  it("отказ по src нейтрализует документ, а не только скрывает кадр", async () => {
+    // `hidden` не останавливает исполнение: уже загруженный плагин продолжал бы
+    // жить, держать window.name-handoff и слать host-сообщения.
+    await mount(<PluginFrame {...base({ src: `${SAFE_SRC}?token=leak` })} />);
+    expect(frame()?.getAttribute("srcdoc")).toContain("Plugin blocked");
+    expect(frame()?.dataset.pluginBlocked).toBe("true");
   });
 
   it("access_token в src → отказ и retry-кнопка", async () => {
@@ -166,7 +226,15 @@ describe("PluginFrame: живой рендер", () => {
     window.dispatchEvent(new MessageEvent("message", {
       origin: "https://evil.example",
       source: frame()?.contentWindow as MessageEventSource,
-      data: { protocol: PLUGIN_RPC_PROTOCOL, type: "plugin.ready", plugin_id: "mod_equipment", version: "1.2.0" },
+      data: {
+        protocol: PLUGIN_RPC_PROTOCOL,
+        type: "plugin.ready",
+        plugin_id: "mod_equipment",
+        version: "1.2.0",
+        artifact_digest: DIGEST,
+        instance_id: INSTANCE_ID,
+        nonce: NONCE,
+      },
     }));
     expect(phase()).not.toBe("ready");
     expect(realChannel?.ready).toBe(false);

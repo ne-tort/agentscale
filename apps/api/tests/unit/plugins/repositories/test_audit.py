@@ -157,3 +157,43 @@ def test_audit_model_forbids_raw_columns() -> None:
     columns = set(PluginAuditEventRow.__table__.columns.keys())
     assert not (columns & AUDIT_FORBIDDEN_RAW_COLUMNS)
     assert "details" not in columns
+
+
+@pytest.mark.asyncio
+async def test_capability_audit_append_commits_inside_running_loop() -> None:
+    """SQL capability append is awaited on the current loop, never a thread loop."""
+    from prodavan.application.capability_gateway_service import (
+        CapabilityDecision,
+        DecisionCode,
+    )
+    from prodavan.application.plugins.capabilities.audit import authorization_event
+    from prodavan.application.plugins.capabilities.contracts import CapabilityEnvelope
+
+    session = FakeSession()
+    sink = AppendOnlyAuditSink(session_factory=FakeSessionFactory(session), clock=lambda: NOW)
+    event = authorization_event(
+        envelope=CapabilityEnvelope(
+            request_id="req_01",
+            company_id="co_123",
+            subject_id="plugin:mod:co_123:inst_01",
+            plugin_instance_id="inst_01",
+            artifact_digest=DIGEST,
+            grant_id="grant_01",
+        ),
+        capability="cache",
+        operation="cache.get",
+        resource="plugin/inst_01/cache",
+        decision=CapabilityDecision.ALLOW,
+        code=DecisionCode.ALLOWED,
+        grant_id="grant_01",
+        reason=None,
+        occurred_at=NOW,
+    )
+
+    await sink.append(event)
+
+    assert session.commits == 1
+    assert sink.rows_written == 1
+    assert not hasattr(sink, "append_sync")
+    assert not hasattr(sink, "_loop")
+    assert not hasattr(sink, "_loop_thread")

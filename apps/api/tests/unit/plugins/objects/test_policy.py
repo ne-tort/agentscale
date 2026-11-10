@@ -77,13 +77,41 @@ def test_bucket_policy_allows_only_four_actions() -> None:
 def test_bucket_policy_list_bucket_has_prefix_condition() -> None:
     """ListBucket без Condition перечислил бы соседние плагины компании."""
     policy = bucket_policy("co_123", "mod_equipment")
-    for statement in policy["Statement"]:
+    list_statements = [s for s in policy["Statement"] if "s3:ListBucket" in s["Action"]]
+    assert len(list_statements) == 1
+    for statement in list_statements:
         assert statement["Effect"] == "Allow"
         condition = statement.get("Condition")
         assert condition is not None, "Condition на префикс обязателен"
         assert condition["StringLike"]["s3:prefix"] == ["module-mod_equipment/*"]
     object_stmt = next(s for s in policy["Statement"] if "s3:GetObject" in s["Action"])
+    assert "Condition" not in object_stmt
     assert object_stmt["Resource"] == ["arn:aws:s3:::tenant-co_123/module-mod_equipment/*"]
+
+
+def test_condition_keys_match_minio_actions_without_widening_scope() -> None:
+    """MinIO принимает s3:prefix для ListBucket, не для object actions."""
+    condition_actions = {"s3:prefix": frozenset({"s3:ListBucket"})}
+    expected_resources = [
+        "arn:aws:s3:::tenant-co_123",
+        "arn:aws:s3:::tenant-co_123/module-mod_equipment/*",
+    ]
+    for policy in (
+        bucket_policy("co_123", "mod_equipment"),
+        session_policy("co_123", "mod_equipment"),
+    ):
+        assert _all_resources(policy) == expected_resources
+        for statement in policy["Statement"]:
+            actions = frozenset(statement["Action"])
+            for condition in statement.get("Condition", {}).values():
+                for key, values in condition.items():
+                    assert key in condition_actions
+                    assert actions
+                    assert actions <= condition_actions[key]
+                    assert values == ["module-mod_equipment/*"]
+        object_stmt = next(s for s in policy["Statement"] if "s3:GetObject" in s["Action"])
+        assert "Condition" not in object_stmt
+        assert object_stmt["Resource"] == [expected_resources[1]]
 
 
 def test_session_policy_is_subset_of_parent() -> None:

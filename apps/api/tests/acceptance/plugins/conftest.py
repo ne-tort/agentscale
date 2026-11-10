@@ -38,6 +38,8 @@ from typing import Any
 
 import pytest
 
+from prodavan.domain.plugins.helpers import plugin_instance_id_for
+
 # ---------------------------------------------------------------------------
 # Константы: детерминированные значения для ВСЕХ стыков
 # ---------------------------------------------------------------------------
@@ -45,15 +47,34 @@ import pytest
 TEST_SECRET = "plugin-acceptance-explicit-secret-9f3c"
 """Секрет подписи HS256. Передаётся ЯВНО (identity не имеет dev-фолбэков)."""
 
+TEST_EVENT_SECRET_REF = "vault://acceptance/plugin-events"
+TEST_EVENT_SIGNING_KEY = "acceptance-test-only-event-signing-key-32-bytes"
+"""Event HMAC живёт только в test SecretStore, отдельно от identity HS256."""
+
 TEST_DIGEST = "sha256:" + ("a1b2c3d4" * 8)
 """Канонический ``sha256:<64 lowercase hex>`` — один и тот же во всех зонах."""
 
 TEST_COMPANY = "co_alpha"
 TEST_OTHER_COMPANY = "co_beta"
 TEST_PLUGIN = "mod_equipment"
-TEST_INSTANCE = "inst_alpha_1"
+TEST_INSTANCE = plugin_instance_id_for(TEST_COMPANY, TEST_PLUGIN)
+"""Canonical ``inst_<32 hex>`` из ``(company, plugin)`` (domain.plugins.helpers).
+
+Тот же deterministic id вычисляют ``PluginAdminService._new_instance`` и
+``ModuleSource.plugin_instance_id``: source/CI/admin адресуют ОДНУ установку.
+Специальные legacy/foreign фикстуры со своими id здесь не переопределяются.
+"""
 TEST_GRANT_ID = "grant_alpha_1"
 TEST_VERSION = "1.2.0"
+TEST_QUOTA_VALUES = {
+    "ops_per_minute": 7,
+    "max_rows": 11,
+    "max_bytes": 1024,
+    "max_keys": 3,
+    "max_object_bytes": 4096,
+    "max_egress_bytes": 2048,
+}
+"""Нестандартные grant limits: acceptance не опирается на admin60/runtime120."""
 
 IDENTITY = (
     "https://github.com/ne-tort/agentscale/.github/workflows/"
@@ -219,7 +240,7 @@ class FakeRevocation:
     и в ``admin.RevocationPort`` (``revoke``/``is_revoked``). Благодаря общему
     состоянию ``revoke`` мгновенно виден и на capabilities, и на gateway.
 
-    Сигнатуры намеренно выдержаны под РАЗНЫЕ протоколы зон:
+    Все revocation-методы async; сигнатуры выдержаны под РАЗНЫЕ протоколы зон:
       * ``is_active(grant_id, *, now)`` — capabilities/ports.py::GrantRevocationPort;
       * ``is_revoked(*, grant_id)``     — admin/ports.py::RevocationPort;
       * ``revoke(grant_id)``            — identity/revocation.py::RevocationPort;
@@ -230,7 +251,7 @@ class FakeRevocation:
     revoked: set[str] = field(default_factory=set)
     calls: list[tuple[str, str]] = field(default_factory=list)
 
-    def is_active(self, grant_id: str, *, now: datetime | int | float | None = None) -> bool:
+    async def is_active(self, grant_id: str, *, now: datetime | int | float | None = None) -> bool:
         # ``now`` не используется in-memory реализацией, но сохранён ради
         # структурного соответствия порту БД (там сравнивается expires_at).
         key = (grant_id or "").strip()
@@ -238,11 +259,11 @@ class FakeRevocation:
             return False  # fail-closed: пустой grant_id не активен
         return key not in self.revoked
 
-    def is_revoked(self, grant_id: str | None = None, *, grant_id_kw: str | None = None) -> bool:
+    async def is_revoked(self, grant_id: str | None = None, *, grant_id_kw: str | None = None) -> bool:
         key = grant_id_kw if grant_id_kw is not None else grant_id
-        return not self.is_active(key or "")
+        return not await self.is_active(key or "")
 
-    def revoke(
+    async def revoke(
         self,
         grant_id: str | None = None,
         *,
@@ -266,10 +287,10 @@ class FakeRevocation:
 
     # Алиас под admin/ports.py::RevocationPort (keyword-only вызов).
     async def revoke_async(self, *, grant_id: str, reason: str) -> bool:
-        return self.revoke(grant_id_kw=grant_id, reason=reason)
+        return await self.revoke(grant_id_kw=grant_id, reason=reason)
 
     async def is_revoked_async(self, *, grant_id: str) -> bool:
-        return self.is_revoked(grant_id)
+        return await self.is_revoked(grant_id)
 
     def activate(self, grant_id: str) -> None:
         """Снять отзыв (для повторного grant в тесте изоляции компаний)."""
@@ -281,17 +302,16 @@ class FakeRevocation:
 class FakeAdminRevocation:
     """Адаптер ``admin.RevocationPort`` (async, keyword-only) поверх FakeRevocation.
 
-    Вынесен отдельно, чтобы не смешивать синхронный контракт capabilities с
-    асинхронным контрактом admin в одном методе ``revoke``.
+    Вынесен отдельно для keyword-only admin-формы поверх canonical async fake.
     """
 
     inner: FakeRevocation
 
     async def revoke(self, *, grant_id: str, reason: str) -> bool:
-        return self.inner.revoke(grant_id_kw=grant_id, reason=reason)
+        return await self.inner.revoke(grant_id_kw=grant_id, reason=reason)
 
     async def is_revoked(self, *, grant_id: str) -> bool:
-        return self.inner.is_revoked(grant_id)
+        return await self.inner.is_revoked(grant_id)
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +336,18 @@ class FakeCacheAdapter:
             ok=True,
             digest="sha256:" + "1" * 64,
             **extra,
+        )
+
+    def quota_usage(self, request: Any) -> Any:
+        quotas = _require_module("prodavan.application.plugins.capabilities.quotas")
+        value = getattr(request, "value", None)
+        return quotas.QuotaUsage(
+            ops=1,
+            rows=0,
+            bytes=len(value.encode("utf-8")) if isinstance(value, str) else 0,
+            keys=1 if isinstance(getattr(request, "key", None), str) else 0,
+            object_bytes=0,
+            egress_bytes=0,
         )
 
     def get(self, request: Any) -> Any:
@@ -363,15 +395,17 @@ class FakeQuota:
     сервис capabilities мог списать операцию и при превышении дать 429.
     """
 
-    limit_ops: int = 120
-    counters: dict[tuple[str, str, str], int] = field(default_factory=dict)
+    counters: dict[tuple[tuple[str, str, str], Any], int] = field(default_factory=dict)
     decisions: list[Any] = field(default_factory=list)
 
-    def enforce(self, key: Any, op: Any, amount: int) -> Any:
+    def enforce(self, key: Any, op: Any, amount: int, limits: Any) -> Any:
         quotas = _require_module("prodavan.application.plugins.capabilities.quotas")
-        ident = key.to_tuple()
+        if not isinstance(limits, quotas.PluginQuota):
+            raise TypeError("exact invocation.grant.quotas are required")
+        ident = (key.to_tuple(), op)
+        limit = limits.limit_for(op)
         used = self.counters.get(ident, 0)
-        allowed = used + amount <= self.limit_ops
+        allowed = used + amount <= limit
         if allowed:
             self.counters[ident] = used + amount
         decision = quotas.QuotaDecision(
@@ -384,9 +418,9 @@ class FakeQuota:
             key=key,
             op=op,
             amount=amount,
-            limit=self.limit_ops,
-            used=used,
-            remaining=max(0, self.limit_ops - used - amount),
+            limit=limit,
+            used=used + amount if allowed else used,
+            remaining=max(0, limit - used - amount),
         )
         self.decisions.append(decision)
         return decision
@@ -398,7 +432,8 @@ class FakeAudit:
 
     Подходит одновременно для ``capabilities.audit.AuditPort.append(event)``,
     ``admin.AuditPort.append(event=...)``, ``objects.AuditPort.record(event)``,
-    ``gateway.AuditPort.record(event)`` и ``events.AuditPort.append(type, details=)``.
+    ``gateway.AuditPort.record(event)``, ``events.AuditPort.append(type, details=)``
+    и ``activation.AuditPort.append_event(type, details=)``.
     Именно по ``rows`` проверяется критерий №11 (нет SQL/params/tokens/payload).
     """
 
@@ -407,14 +442,9 @@ class FakeAudit:
     typed: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     fail: bool = False
 
-    # -- СИНХРОННОЕ ядро ---------------------------------------------------
-    # Два порта зон требуют ИМЕННО синхронный вызов:
-    #   * capabilities.audit.AuditPort.append(event)      -> def append(...)
-    #   * activation.ports.AuditPort.record(event)         -> def record(...)
-    # Если сделать их async, ``PluginActivator._record`` просто создаст
-    # корутину и НИКОГДА её не выполнит: аудит «тихо» исчезнет, а проверка
-    # «append failure = deny» перестанет срабатывать. Поэтому ядро — sync,
-    # а все async-порты получают отдельные тонкие адаптеры ниже.
+    # Capabilities использует sync ``append``; async-порты получают отдельные
+    # awaitable методы/адаптеры. Activation использует ИМЕННО async
+    # ``append_event(event_type, details=...)`` и не делает fallback на record.
 
     def append(self, event: Any = None, **kwargs: Any) -> bool:
         """``capabilities.AuditPort.append`` и база для admin (через адаптер)."""
@@ -422,13 +452,14 @@ class FakeAudit:
         return self._write(event, **kwargs)
 
     def record(self, event: Any = None, **kwargs: Any) -> bool:
-        """``activation.AuditPort.record`` (синхронный контракт §4.5)."""
+        """Sync-ядро для явных адаптеров gateway/objects/tenantdb, не activation."""
 
-        if isinstance(event, str):
-            # events.AuditPort тоже зовёт append(event_type, details=...), но
-            # через async-адаптер; эта ветка — запасная для sync-вызовов.
-            return self._typed(event, dict(kwargs.get("details", {})))
         return self._write(event, **kwargs)
+
+    async def append_event(self, event_type: str, *, details: Any) -> None:
+        """``activation.AuditPort.append_event``: полноценный awaitable sink."""
+
+        self._typed(event_type, dict(details))
 
     def append_async(self, *, event: Any) -> bool:
         """Алиас для читаемости: реальный await делает _AsyncAdminAudit."""
@@ -529,9 +560,56 @@ class FakeAudit:
 
 
 # ---------------------------------------------------------------------------
-# GrantStore / TenantDb / ObjectStore / ArtifactRegistry / Routes / Activation
+# InstanceStore / GrantStore / TenantDb / ObjectStore / ArtifactRegistry / Routes
 # (admin lifecycle: полный путь установки и uninstall)
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class FakeInstanceStore:
+    """``admin.InstanceStorePort``: durable saga без fallback-записей."""
+
+    instances: dict[tuple[str, str], Any] = field(default_factory=dict)
+    created: list[Any] = field(default_factory=list)
+
+    async def create(self, *, instance: Any) -> Any:
+        key = (instance.company_id, instance.plugin_id)
+        existing = self.instances.get(key)
+        if existing is not None:
+            for name in ("plugin_instance_id", "manifest_version", "artifact_digest"):
+                if getattr(existing, name) != getattr(instance, name):
+                    raise ValueError(f"immutable plugin instance field differs: {name}")
+            return existing
+        self.instances[key] = instance
+        self.created.append(instance)
+        return instance
+
+    async def get(self, *, company_id: str, plugin_id: str) -> Any | None:
+        return self.instances.get((company_id, plugin_id))
+
+    async def get_by_id(self, *, plugin_instance_id: str) -> Any | None:
+        return next(
+            (item for item in self.instances.values()
+             if item.plugin_instance_id == plugin_instance_id),
+            None,
+        )
+
+    async def update_status(self, *, plugin_instance_id: str, status: Any) -> Any:
+        from dataclasses import replace
+
+        for key, instance in list(self.instances.items()):
+            if instance.plugin_instance_id == plugin_instance_id:
+                updated = replace(instance, status=status)
+                self.instances[key] = updated
+                return updated
+        raise KeyError(plugin_instance_id)
+
+    async def delete(self, *, company_id: str, plugin_id: str) -> bool:
+        return self.instances.pop((company_id, plugin_id), None) is not None
+
+    async def resolve(self, *, company_id: str, plugin_id: str) -> str | None:
+        instance = await self.get(company_id=company_id, plugin_id=plugin_id)
+        return instance.plugin_instance_id if instance is not None else None
 
 
 @dataclass
@@ -545,6 +623,9 @@ class FakeGrantStore:
     grants: dict[tuple[str, str], Any] = field(default_factory=dict)
     enabled_modules: dict[str, tuple[str, ...]] = field(default_factory=dict)
     created: list[Any] = field(default_factory=list)
+    #: Test-only lifecycle evidence: regrant replaces the current pointer without
+    #: rewriting the old revoked record, so acceptance can prove no resurrection.
+    history: dict[str, Any] = field(default_factory=dict)
     deleted: list[tuple[str, str]] = field(default_factory=list)
     #: Выдан ли уже детерминированный TEST_GRANT_ID основной компании.
     primary_seeded: bool = False
@@ -563,6 +644,7 @@ class FakeGrantStore:
         key = (grant.company_id, grant.plugin_id)
         existing = self.grants.get(key)
         if existing is not None:
+            self.history.setdefault(existing.grant_id, existing)
             return existing  # идемпотентно по grant_id/паре
         # Детерминированный grant_id для ОСНОВНОЙ тестовой компании: токен
         # из identity.mint несёт TEST_GRANT_ID, и revoke в admin должен
@@ -572,6 +654,28 @@ class FakeGrantStore:
             self.primary_seeded = True
         self.grants[key] = grant
         self.created.append(grant)
+        self.history[grant.grant_id] = grant
+        return grant
+
+    async def regrant(
+        self, *, previous_grant_id: str, grant: Any
+    ) -> Any:
+        key = (grant.company_id, grant.plugin_id)
+        previous = self.grants.get(key)
+        if grant.grant_id == previous_grant_id:
+            raise ValueError("regrant requires a fresh grant_id")
+        if (
+            previous is None
+            or previous.grant_id != previous_grant_id
+            or previous.is_active
+            or previous.revoked_at is None
+            or previous.plugin_instance_id != grant.plugin_instance_id
+        ):
+            raise KeyError(previous_grant_id)
+        self.history[previous.grant_id] = previous
+        self.grants[key] = grant
+        self.created.append(grant)
+        self.history[grant.grant_id] = grant
         return grant
 
     async def deactivate(self, *, grant_id: str) -> Any:
@@ -586,6 +690,7 @@ class FakeGrantStore:
                     revoked_at=FIXED_NOW,
                 )
                 self.grants[key] = updated
+                self.history[grant_id] = updated
                 return updated
         raise KeyError(f"unknown grant_id: {grant_id}")
 
@@ -617,6 +722,7 @@ class FakeGrantStore:
         capabilities: tuple[str, ...] = ("cache", "network"),
         egress_hosts: tuple[str, ...] = ("hooks.slack.com",),
         egress_paths: tuple[str, ...] = ("/services/",),
+        quotas: Any = None,
     ) -> Any:
         """Засеять активный ``CapabilityGrantRecord`` в общий grant_store.
 
@@ -626,6 +732,9 @@ class FakeGrantStore:
         """
 
         contracts = _require_module("prodavan.application.plugins.admin.contracts")
+        effective_quotas = (
+            contracts.QuotaSet(**TEST_QUOTA_VALUES) if quotas is None else quotas
+        )
         grant = contracts.CapabilityGrantRecord(
             grant_id=grant_id,
             company_id=company_id,
@@ -639,11 +748,12 @@ class FakeGrantStore:
                 allowed_hosts=egress_hosts,
                 allowed_paths=egress_paths,
             ),
-            quotas=contracts.QuotaSet(),
+            quotas=effective_quotas,
             status=contracts.GrantStatus.ACTIVE,
             created_at=FIXED_NOW,
         )
         self.grants[(company_id, plugin_id)] = grant
+        self.history[grant_id] = grant
         if grant_id == TEST_GRANT_ID:
             self.primary_seeded = True
         return grant
@@ -664,12 +774,38 @@ class FakeGrantStore:
                 "mode": grant.egress_policy.mode.value,
                 "allowed_hosts": list(grant.egress_policy.allowed_hosts),
                 "allowed_paths": list(grant.egress_policy.allowed_paths),
-                "max_egress_bytes": 1_000_000,
+                # Квота берётся из ТОГО ЖЕ durable ``grant.quotas``, который
+                # читают admin/capabilities: hardcoded default делал стык
+                # «egress enforcement из exact grant» ложно-зелёным.
+                "max_egress_bytes": grant.quotas.max_egress_bytes,
             },
         }
         if not grant.is_active:
             return resolver.GrantLookup(raw=raw, active=False, revoked_at=FIXED_NOW)
         return resolver.GrantLookup(raw=raw, active=True)
+
+
+@dataclass
+class FakeInstallationScopeStore:
+    scopes: dict[tuple[str, str], Any] = field(default_factory=dict)
+
+    async def ensure_from_source(
+        self, *, company_id: str, plugin_id: str, plugin_instance_id: str
+    ) -> Any:
+        contracts = _require_module(
+            "prodavan.application.plugins.installation_scope.contracts"
+        )
+        scope = contracts.InstallationScope(
+            company_id=company_id,
+            plugin_instance_id=plugin_instance_id,
+            cabinet_id="cab_acceptance",
+            project_id="prj_acceptance",
+        )
+        self.scopes[(company_id, plugin_instance_id)] = scope
+        return scope
+
+    async def get(self, *, company_id: str, plugin_instance_id: str) -> Any | None:
+        return self.scopes.get((company_id, plugin_instance_id))
 
 
 @dataclass
@@ -723,6 +859,35 @@ class FakeTenantDb:
         self.schemas[key] = record
         return record
 
+    async def rotate_plugin_schema(
+        self, *, company_id: str, plugin_id: str, dsn_ref: str
+    ) -> Any:
+        contracts = _require_module("prodavan.application.plugins.admin.contracts")
+        self.calls.append(("rotate_plugin_schema", company_id, plugin_id))
+        key = (company_id, plugin_id)
+        existing = self.schemas.get(key)
+        if existing is None:
+            return await self.ensure_plugin_schema(
+                company_id=company_id, plugin_id=plugin_id, dsn_ref=dsn_ref
+            )
+        db = await self.ensure_company_database(company_id=company_id)
+        rotation = 1 + sum(
+            call[0] == "rotate_plugin_schema" and call[1] == company_id and call[2] == plugin_id
+            for call in self.calls
+        )
+        record = contracts.PluginSchema(
+            company_id=company_id,
+            plugin_id=plugin_id,
+            database_name=db.database_name,
+            schema_name=existing.schema_name,
+            role_name=existing.role_name,
+            dsn_ref=f"{db.dsn_ref}/rotate-{rotation}",
+            search_path=existing.search_path,
+            created=True,
+        )
+        self.schemas[key] = record
+        return record
+
     async def drop_plugin_schema(
         self, *, company_id: str, plugin_id: str
     ) -> tuple[bool, bool]:
@@ -730,6 +895,16 @@ class FakeTenantDb:
         self.schemas.pop((company_id, plugin_id), None)
         # БД компании (и другие компании) НЕ трогаем: только роль + схема.
         return True, True
+
+    async def revoke_plugin(self, *, company_id: str, plugin_id: str) -> bool:
+        """``admin.TenantDbPort.revoke_plugin``: NOLOGIN/REVOKE только своей роли.
+
+        Вызывается forced ``admin.revoke`` ДО suspend; без этого метода фейк
+        ронял revoke-saga на ``tenant_db_revoke`` (stale constructor).
+        """
+
+        self.calls.append(("revoke_plugin", company_id, plugin_id))
+        return True
 
     async def grant_plugin(self, company_id: str, plugin_id: str) -> Any:
         """Прямой стык с ``TenantDatabaseService.grant_plugin`` (задача 05)."""
@@ -833,6 +1008,95 @@ class FakeArtifactRegistryPort:
 
 
 @dataclass
+class FakePublicationApprovalStore:
+    """``admin.PublicationApprovalStorePort``: exact binding + CAS consumption.
+
+    Ключ — ПОЛНЫЙ ``(company, plugin, SemVer, bundle_digest)``: approval для
+    другого артефакта/компании здесь не находится, поэтому стык
+    ``approve → CI publish → grant`` проверяет exact binding, а не наличие
+    «какого-нибудь» approval. ``create`` идемпотентен (INSERT-if-absent),
+    ``mark_consumed`` — CAS NULL→timestamp: повтор сохраняет ПЕРВЫЙ timestamp,
+    как ``SqlPluginPublicationApprovalRepository`` в production.
+    """
+
+    records: dict[tuple[str, str, str, str], Any] = field(default_factory=dict)
+    created: list[Any] = field(default_factory=list)
+    consumed: list[tuple[str, Any]] = field(default_factory=list)
+
+    @staticmethod
+    def _key(
+        company_id: str, plugin_id: str, manifest_version: str, artifact_digest: str
+    ) -> tuple[str, str, str, str]:
+        return (company_id, plugin_id, manifest_version, artifact_digest)
+
+    async def get(
+        self,
+        *,
+        company_id: str,
+        plugin_id: str,
+        manifest_version: str,
+        artifact_digest: str,
+    ) -> Any | None:
+        return self.records.get(
+            self._key(company_id, plugin_id, manifest_version, artifact_digest)
+        )
+
+    async def create(self, *, approval: Any) -> Any:
+        key = self._key(
+            approval.company_id,
+            approval.plugin_id,
+            approval.manifest_version,
+            approval.artifact_digest,
+        )
+        existing = self.records.get(key)
+        if existing is not None:
+            return existing
+        self.records[key] = approval
+        self.created.append(approval)
+        return approval
+
+    async def mark_consumed(self, *, approval_id: str, consumed_at: Any) -> Any | None:
+        from dataclasses import replace
+
+        for key, approval in list(self.records.items()):
+            if approval.approval_id != approval_id:
+                continue
+            if approval.consumed_at is not None:
+                # Повтор НЕ перезаписывает первый timestamp (SQL CAS NULL→ts).
+                return approval
+            updated = replace(approval, consumed_at=consumed_at)
+            self.records[key] = updated
+            self.consumed.append((approval_id, consumed_at))
+            return updated
+        return None
+
+
+@dataclass
+class FakeSecretDeliveryControl:
+    """Scoped ``admin.SecretDeliveryControlPort`` для acceptance-манифестов.
+
+    Acceptance-артефакты НЕ объявляют ``secret_delivery.allowlist``, поэтому
+    approved control-plane фаза возвращает ПУСТОЙ tuple receipts — это валидный
+    ответ ``ControlPlaneSecretDelivery`` для пустого allowlist, а не «заглушка
+    успеха». Порт подключён ЯВНО: каждый вызов фиксируется, и тест видит, что
+    pre-delivery/pre-revoke действительно входят в grant/revoke/uninstall saga.
+    Манифесты с declared secrets обязаны собирать реальный
+    ``ControlPlaneSecretDelivery`` + projection, а не этот scoped fake.
+    """
+
+    pre_deliver_calls: list[Any] = field(default_factory=list)
+    pre_revoke_calls: list[Any] = field(default_factory=list)
+
+    async def pre_deliver(self, request: Any) -> tuple[Any, ...]:
+        self.pre_deliver_calls.append(request)
+        return ()
+
+    async def pre_revoke(self, request: Any) -> tuple[Any, ...]:
+        self.pre_revoke_calls.append(request)
+        return ()
+
+
+@dataclass
 class FakeRoutes:
     """``admin.RouteRegistryPort``: маршруты + egress-правила из grant."""
 
@@ -863,10 +1127,76 @@ class FakeRoutes:
 
 
 @dataclass
+class FakeWebhookSecretStore:
+    records: dict[str, Any] = field(default_factory=dict)
+
+    async def get(self, *, key: str) -> Any | None:
+        return self.records.get(key)
+
+    async def put(self, *, key: str, value: str) -> str:
+        contracts = _require_module("prodavan.application.plugins.tenantdb.service")
+        ref = f"file://ai_keys/{key}.secret"
+        self.records[key] = contracts.StoredSecret(secret_ref=ref, value=value)
+        return ref
+
+    async def rotate(self, *, key: str, value: str) -> str:
+        return await self.put(key=key, value=value)
+
+    async def delete(self, *, secret_ref: str) -> None:
+        for key, stored in list(self.records.items()):
+            if stored.secret_ref == secret_ref:
+                del self.records[key]
+
+
+@dataclass
+class FakeUpdateLock:
+    """Stateful owner-bound update lock; contention never succeeds silently."""
+
+    held: dict[tuple[str, str, str], Any] = field(default_factory=dict)
+    released: list[Any] = field(default_factory=list)
+    counter: int = 0
+
+    async def acquire(
+        self,
+        *,
+        company_id: str,
+        plugin_id: str,
+        plugin_instance_id: str,
+        expected_manifest_version: str,
+        expected_artifact_digest: str,
+    ) -> Any | None:
+        key = (company_id, plugin_id, plugin_instance_id)
+        if key in self.held:
+            return None
+        contracts = _require_module("prodavan.application.plugins.admin.contracts")
+        self.counter += 1
+        lease = contracts.PluginUpdateLockLease(
+            company_id=company_id,
+            plugin_id=plugin_id,
+            plugin_instance_id=plugin_instance_id,
+            expected_manifest_version=expected_manifest_version,
+            expected_artifact_digest=expected_artifact_digest,
+            owner_token=f"acceptance-update-owner-{self.counter}",
+        )
+        self.held[key] = lease
+        return lease
+
+    async def release(self, lease: Any) -> None:
+        key = (lease.company_id, lease.plugin_id, lease.plugin_instance_id)
+        if self.held.get(key) is not lease:
+            raise RuntimeError("update lock release owner/binding mismatch")
+        del self.held[key]
+        self.released.append(lease)
+
+
+@dataclass
 class FakeActivationPort:
-    """``admin.ActivationPort``: Deployment ``replicas: 0`` + wake/suspend/purge."""
+    """Owner-aware admin ActivationPort with live artifact/binding state."""
 
     deployments: dict[tuple[str, str], str] = field(default_factory=dict)
+    deployment_instance_ids: dict[tuple[str, str], str] = field(default_factory=dict)
+    artifact_pins: dict[tuple[str, str], str] = field(default_factory=dict)
+    update_owner_pins: dict[tuple[str, str], str | None] = field(default_factory=dict)
     wakes: list[tuple[str, str]] = field(default_factory=list)
     suspended: list[tuple[str, str]] = field(default_factory=list)
     purged: list[tuple[str, str]] = field(default_factory=list)
@@ -879,9 +1209,55 @@ class FakeActivationPort:
         plugin_instance_id: str,
         artifact_digest: str,
         dsn_ref: str,
+        webhook_secret_ref: str,
     ) -> str:
         name = f"plugin-{plugin_id}-{company_id}"
-        self.deployments[(company_id, plugin_id)] = name
+        key = (company_id, plugin_id)
+        self.deployments[key] = name
+        self.deployment_instance_ids[key] = plugin_instance_id
+        self.artifact_pins[key] = artifact_digest
+        self.update_owner_pins.setdefault(key, None)
+        return name
+
+    async def update_deployment(
+        self,
+        *,
+        company_id: str,
+        plugin_id: str,
+        plugin_instance_id: str,
+        artifact_digest: str,
+        expected_current_artifact_digest: str,
+        update_owner_token: str | None,
+        expected_current_update_owner_token: str | None,
+        dsn_ref: str,
+        webhook_secret_ref: str,
+    ) -> str:
+        key = (company_id, plugin_id)
+        live_digest = self.artifact_pins.get(key)
+        live_owner = self.update_owner_pins.get(key)
+        same_owner_replay = (
+            live_digest == artifact_digest and live_owner == update_owner_token
+        )
+        if not same_owner_replay:
+            if (
+                live_digest != expected_current_artifact_digest
+                or (
+                    expected_current_update_owner_token is not None
+                    and live_owner != expected_current_update_owner_token
+                )
+            ):
+                errors = _require_module("prodavan.application.plugins.admin.errors")
+                raise errors.PluginAdminError(
+                    code="PLUGIN_UPDATE_CONFLICT",
+                    detail="live artifact digest or update owner changed",
+                    status=409,
+                    extra={"patch_attempted": False},
+                )
+            self.artifact_pins[key] = artifact_digest
+            self.update_owner_pins[key] = update_owner_token
+        name = f"plugin-{plugin_id}-{company_id}"
+        self.deployments[key] = name
+        self.deployment_instance_ids[key] = plugin_instance_id
         return name
 
     async def suspend(self, *, company_id: str, plugin_id: str) -> bool:
@@ -897,9 +1273,24 @@ class FakeActivationPort:
         contracts = _require_module("prodavan.application.plugins.admin.contracts")
         return contracts.PluginRuntimeStatus.IDLE
 
+    async def runtime_binding(self, *, company_id: str, plugin_id: str) -> Any:
+        contracts = _require_module("prodavan.application.plugins.admin.contracts")
+        key = (company_id, plugin_id)
+        if key not in self.deployments or key not in self.artifact_pins:
+            raise RuntimeError("live Deployment binding is absent")
+        return contracts.PluginRuntimeBinding(
+            plugin_instance_id=self.deployment_instance_ids[key],
+            artifact_digest=self.artifact_pins[key],
+            update_owner_token=self.update_owner_pins.get(key),
+        )
+
     async def purge_infra(self, *, company_id: str, plugin_id: str) -> bool:
         self.purged.append((company_id, plugin_id))
-        self.deployments.pop((company_id, plugin_id), None)
+        key = (company_id, plugin_id)
+        self.deployments.pop(key, None)
+        self.deployment_instance_ids.pop(key, None)
+        self.artifact_pins.pop(key, None)
+        self.update_owner_pins.pop(key, None)
         return True
 
 
@@ -1191,13 +1582,14 @@ class FakeProducer:
 
 @dataclass
 class FakeRecord:
-    """``events.ConsumedRecord``: wire-событие + offset."""
+    """``events.ConsumedRecord``: signed wire либо исходные malformed bytes."""
 
-    value: dict[str, Any]
+    value: Any
     topic: str = "agentscale.plugin.events"
     partition: int = 0
     offset: int = 17
     key: bytes | None = b"co_alpha"
+    raw_value: bytes | None = None
 
 
 @dataclass
@@ -1213,6 +1605,16 @@ class FakeConsumer:
     commits: list[int] = field(default_factory=list)
     seeks: list[int] = field(default_factory=list)
     polls: int = 0
+    ownership: bool = True
+
+    def delivery_ownership(self, record: Any) -> Any:
+        from prodavan.application.plugins.events.contracts import ConsumerAssignment
+        return ConsumerAssignment(
+            topic=record.topic,
+            partition=record.partition,
+            owned=self.ownership,
+            offset=record.offset,
+        )
 
     async def poll(self, *, timeout_ms: int = 1000) -> Any | None:
         self.polls += 1
@@ -1241,17 +1643,59 @@ class FakeDlq:
 
 
 @dataclass
-class FakeSubscriptions:
-    """``events.SubscriptionStorePort``: активная подписка."""
+class FakeEventSecretStore:
+    """Минимальный read-only SecretStore для test-only event signer."""
 
-    subscription: Any | None = None
-    active: bool = True
+    values: dict[str, str] = field(
+        default_factory=lambda: {TEST_EVENT_SECRET_REF: TEST_EVENT_SIGNING_KEY}
+    )
+
+    def get(self, ref: str) -> str:
+        if ref not in self.values:
+            raise KeyError(ref)
+        return self.values[ref]
+
+
+@dataclass
+class FakeRawDlq:
+    """Durable RawDlq double: bool ack и идемпотентность по natural key."""
+
+    records: list[Any] = field(default_factory=list)
+    publish_calls: list[Any] = field(default_factory=list)
+    seen_keys: set[Any] = field(default_factory=set)
+    fail: bool = False
+    fail_after_write: bool = False
+
+    async def publish(self, record: Any) -> bool:
+        self.publish_calls.append(record)
+        if self.fail:
+            raise RuntimeError("raw dlq down")
+        key = record.idempotency_key
+        if key in self.seen_keys:
+            return False
+        self.seen_keys.add(key)
+        self.records.append(record)
+        if self.fail_after_write:
+            raise RuntimeError("raw dlq acknowledgement lost")
+        return True
+
+
+@dataclass
+class FakeSubscriptions:
+    """Подписки и active флаги строго keyed by id, без cross-id fallback."""
+
+    records: dict[str, Any] = field(default_factory=dict)
+    active: dict[str, bool] = field(default_factory=dict)
+
+    def register(self, subscription: Any, *, active: bool = True) -> None:
+        self.records[subscription.id] = subscription
+        self.active[subscription.id] = active
 
     async def get(self, subscription_id: str) -> Any | None:
-        return self.subscription
+        return self.records.get(subscription_id)
 
     async def is_active(self, subscription_id: str) -> bool:
-        return self.active
+        return self.active.get(subscription_id, False)
 
 
 @dataclass
@@ -1327,16 +1771,28 @@ class FakeGatewayGrants:
     """
 
     revocation: FakeRevocation
+    plugin_instance_id: str
     grant_id: str = TEST_GRANT_ID
     declared_public_pages: frozenset[str] = frozenset()
+    #: Exact deterministic bundle identity shared with the durable FakeGrant.
+    artifact_digest: str = TEST_DIGEST
+    published_artifact_digest: str = TEST_DIGEST
 
     async def active_grant(
         self, *, plugin_id: str, company_id: str
     ) -> Any | None:
         ports = _require_module("prodavan.application.plugins.gateway.ports")
-        if not self.revocation.is_active(self.grant_id):
+        if not await self.revocation.is_active(self.grant_id):
             return None
-        return ports.GatewayGrant(grant_id=self.grant_id, active=True)
+        return ports.GatewayGrant(
+            grant_id=self.grant_id,
+            plugin_instance_id=self.plugin_instance_id,
+            artifact_digest=self.artifact_digest,
+            published_artifact_digest=self.published_artifact_digest,
+            active=True,
+            # Acceptance models public/static evidence, never backend authority.
+            capability_token="",
+        )
 
     async def public_pages(
         self, *, plugin_id: str, company_id: str
@@ -1358,27 +1814,64 @@ class FakeGatewaySecrets:
 
 @dataclass
 class FakeRateLimit:
-    """``gateway.RateLimitPort``: allow + атомарный claim delivery-id."""
+    """Production-shaped delivery lease/commit/release, без legacy fallback."""
 
     allowed: bool = True
-    claims: dict[str, str] = field(default_factory=dict)
+    processing: dict[str, str] = field(default_factory=dict)
+    done: dict[str, str] = field(default_factory=dict)
+    claim_calls: list[dict[str, Any]] = field(default_factory=list)
+    commit_calls: list[dict[str, Any]] = field(default_factory=list)
+    release_calls: list[dict[str, Any]] = field(default_factory=list)
 
     async def allow(
         self, *, bucket: str, limit: int, window_seconds: int
     ) -> bool:
         return self.allowed
 
-    async def claim_delivery(
-        self, *, key: str, ttl_seconds: int, token: str | None = None
+    async def claim_delivery_lease(
+        self, *, key: str, ttl_seconds: int, lease_seconds: int, token: str
     ) -> Any:
+        if not key or ttl_seconds < 1 or lease_seconds < 1 or not token:
+            raise ValueError("invalid delivery lease arguments")
+        self.claim_calls.append({
+            "key": key,
+            "ttl_seconds": ttl_seconds,
+            "lease_seconds": lease_seconds,
+            "token": token,
+        })
         ports = _require_module("prodavan.application.plugins.gateway.ports")
-        if key in self.claims:
+        if key in self.done:
             return ports.DeliveryVerdict(
                 status=ports.DeliveryStatus.DUPLICATE,
-                previous_token=self.claims[key],
+                previous_token=self.done[key],
             )
-        self.claims[key] = token or ""
+        if key in self.processing:
+            return ports.DeliveryVerdict(
+                status=ports.DeliveryStatus.IN_PROGRESS,
+                previous_token=self.processing[key],
+                retry_after_seconds=lease_seconds,
+            )
+        self.processing[key] = token
         return ports.DeliveryVerdict(status=ports.DeliveryStatus.FIRST)
+
+    async def commit_delivery(self, *, key: str, ttl_seconds: int, token: str) -> bool:
+        if not key or ttl_seconds < 1 or not token:
+            raise ValueError("invalid delivery commit arguments")
+        self.commit_calls.append({"key": key, "ttl_seconds": ttl_seconds, "token": token})
+        if self.done.get(key) == token:
+            return True
+        if self.processing.get(key) != token:
+            return False
+        self.processing.pop(key)
+        self.done[key] = token
+        return True
+
+    async def release_delivery(self, *, key: str, token: str) -> None:
+        if not key or not token:
+            raise ValueError("invalid delivery release arguments")
+        self.release_calls.append({"key": key, "token": token})
+        if self.processing.get(key) == token:
+            self.processing.pop(key)
 
 
 # ---------------------------------------------------------------------------
@@ -1399,12 +1892,18 @@ class Platform:
     audit: FakeAudit
     quota: FakeQuota
     cache_adapter: FakeCacheAdapter
+    instance_store: FakeInstanceStore
     grant_store: FakeGrantStore
+    installation_scopes: FakeInstallationScopeStore
+    webhook_secrets: FakeWebhookSecretStore
+    publication_approvals: FakePublicationApprovalStore
+    secret_delivery: FakeSecretDeliveryControl
     tenant_db: FakeTenantDb
     objects_admin: FakeObjectStorePort
     artifact_admin: FakeArtifactRegistryPort
     routes: FakeRoutes
     activation_admin: FakeActivationPort
+    update_lock: FakeUpdateLock
     mint_admin: FakeMintPort
     platform_admin: FakePlatformAdmin
     scale: FakeScale
@@ -1419,6 +1918,8 @@ class Platform:
     producer: FakeProducer
     consumer: FakeConsumer
     dlq: FakeDlq
+    raw_dlq: FakeRawDlq
+    event_secrets: FakeEventSecretStore
     subscriptions: FakeSubscriptions
     published_events: FakeSeenStore
     idempotency: FakeSeenStore
@@ -1428,6 +1929,7 @@ class Platform:
     gateway_grants: FakeGatewayGrants
     gateway_secrets: FakeGatewaySecrets
     rate_limit: FakeRateLimit
+    _event_signer: Any = field(default=None, init=False, repr=False)
 
     # --- ленивые сборщики сервисов ----------------------------------------
 
@@ -1439,27 +1941,41 @@ class Platform:
         registry.register("cache", self.cache_adapter)
         return caps.PluginCapabilityService(
             registry=registry,
+            grant_store=self.grant_store,
             quota=self.quota,
             audit=self.audit,
             revocation=self.revocation,
         )
 
-    def admin_service(self) -> Any:
-        """``PluginAdminService`` со всеми портами (fail-closed по конструкции)."""
+    def admin_service(self, *, artifact_registry: Any = None) -> Any:
+        """``PluginAdminService`` со всеми портами (fail-closed по конструкции).
+
+        ``artifact_registry`` позволяет подключить production
+        ``ArtifactRegistryAdapter`` поверх РЕАЛЬНОГО CI-реестра вместо legacy
+        ``seed_published()``-фейка (полный CI approval/publish/grant contract).
+        """
 
         ports_mod = _require_module("prodavan.application.plugins.admin.ports")
         service_mod = _require_module("prodavan.application.plugins.admin.service")
         ports = ports_mod.PluginAdminPorts(
             tenant_db=self.tenant_db,
             object_store=self.objects_admin,
-            artifact_registry=self.artifact_admin,
+            artifact_registry=(
+                self.artifact_admin if artifact_registry is None else artifact_registry
+            ),
+            instance_store=self.instance_store,
             grant_store=self.grant_store,
+            webhook_secrets=self.webhook_secrets,
             revocation=FakeAdminRevocation(self.revocation),
             mint=self.mint_admin,
             activation=self.activation_admin,
             routes=self.routes,
             audit=_AsyncAdminAudit(self.audit),
             platform_admin=self.platform_admin,
+            publication_approvals=self.publication_approvals,
+            secret_delivery=self.secret_delivery,
+            installation_scopes=self.installation_scopes,
+            update_lock=self.update_lock,
         )
         return service_mod.PluginAdminService(
             ports,
@@ -1478,6 +1994,8 @@ class Platform:
             mint=self.mint_activation,
             audit=self.audit,
             policy=activation.IdlePolicy.defaults(),
+            # Явный test/dev double: InMemoryStateStore больше НЕ production default.
+            state_store=activation.InMemoryStateStore(),
             proxy=self.proxy,
         )
 
@@ -1499,6 +2017,19 @@ class Platform:
             clock=lambda: self.clock.now(),
         )
 
+    def event_signer(self) -> Any:
+        """Ленивый HMAC signer с ключом только из test SecretStore ref."""
+
+        if self._event_signer is None:
+            dispatch = _require_module(
+                "prodavan.application.plugins.events.dispatch"
+            )
+            self._event_signer = dispatch.HmacPluginEventSigner(
+                secret_store=self.event_secrets,
+                secret_ref=TEST_EVENT_SECRET_REF,
+            )
+        return self._event_signer
+
     def event_dispatcher(self) -> Any:
         """``PluginEventDispatcher`` со всеми обязательными портами."""
 
@@ -1508,12 +2039,15 @@ class Platform:
             consumer=self.consumer,
             topic_admin=self.topic_admin,
             dlq=self.dlq,
+            raw_dlq=self.raw_dlq,
             subscriptions=self.subscriptions,
             published_events=self.published_events,
             idempotency=self.idempotency,
+            delivery_claims=_EventDeliveryClaimFake(),
             audit=_AsyncEventsAudit(self.audit),
             handler=self.handler,
             wake_hook=self.wake_hook,
+            signer=self.event_signer(),
         )
 
     def egress_resolver(self) -> Any:
@@ -1580,10 +2114,9 @@ class Platform:
         )
 
 
-# --- Тонкие async-адаптеры: один СИНХРОННЫЙ sink на РАЗНЫЕ контракты портов --
-# Все async-порты зон зовут sync-ядро FakeAudit БЕЗ ``await``: сами адаптеры
-# уже корутины. activation/gateway/objects/events/tenantdb различаются только
-# сигнатурой, поэтому каждый получает свой двухстрочный мост.
+# --- Тонкие async-адаптеры для портов с record/append -----------------------
+# Activation НЕ входит сюда: FakeAudit.append_event сам awaitable и совпадает
+# с production AuditPort без fallback на старый sync record.
 
 
 @dataclass
@@ -1594,6 +2127,45 @@ class _AsyncAdminAudit:
 
     async def append(self, *, event: Any) -> bool:
         return self.inner.append(event)
+
+
+class _EventDeliveryClaimFake:
+    """Test-only lease fake; production uses the Redis claim adapter."""
+
+    def __init__(self) -> None:
+        self.active: dict[Any, Any] = {}
+        self.completed: set[Any] = set()
+        self.generation = 0
+
+    async def acquire(self, key: Any, *, lease_seconds: float) -> Any:
+        if key in self.active and key not in self.completed:
+            return None
+        self.generation += 1
+        contracts = _require_module("prodavan.application.plugins.events.contracts")
+        claim = contracts.DeliveryClaim(
+            key=key,
+            owner_token=f"acceptance-owner-{self.generation}",
+            generation=self.generation,
+            lease_seconds=lease_seconds,
+            completed=key in self.completed,
+        )
+        self.active[key] = claim
+        return claim
+
+    async def renew(self, claim: Any) -> bool:
+        return self.active.get(claim.key) == claim
+
+    async def complete(self, claim: Any) -> bool:
+        if self.active.get(claim.key) != claim:
+            return False
+        self.completed.add(claim.key)
+        return True
+
+    async def release(self, claim: Any) -> bool:
+        if self.active.get(claim.key) != claim:
+            return False
+        self.active.pop(claim.key, None)
+        return True
 
 
 @dataclass
@@ -1673,22 +2245,27 @@ class _AsyncSecretStore:
 
 @dataclass
 class _AsyncAdminConnection:
-    """``tenantdb.AdminConnectionPort``: DDL НЕ выполняется, только фиксируется.
+    """Stateful ``tenantdb.AdminConnectionPort`` с журналом вызовов.
 
-    Возвращает ``ExecuteResult`` с пустыми строками для ``SELECT 1 ...``:
-    сервис tenantdb сам решит, что объекта нет, и отправит CREATE. Стык нужен
-    для проверки «uninstall не трогает другую компанию» на уровне имён.
+    Общий unit fake применяет DDL к in-memory объектам, поэтому post-state
+    probes видят реальное для fake состояние; ``executed`` сохраняет имена и
+    target для проверки изоляции uninstall между компаниями.
     """
 
     tenant_db: FakeTenantDb
     executed: list[tuple[str, Any]] = field(default_factory=list)
+    _state: Any = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        from tests.unit.plugins.tenantdb.conftest import FakeAdminConnection
+
+        self._state = FakeAdminConnection()
 
     async def execute(
         self, text: str, params: Any = None, *, target: Any
     ) -> Any:
-        tenantdb = _require_module("prodavan.application.plugins.tenantdb")
         self.executed.append((text, getattr(target, "database", "")))
-        return tenantdb.ExecuteResult(rows=())
+        return await self._state.execute(text, params, target=target)
 
 
 # ---------------------------------------------------------------------------
@@ -1796,12 +2373,18 @@ def platform(clock: FakeClock, revocation: FakeRevocation, audit: FakeAudit) -> 
         audit=audit,
         quota=FakeQuota(),
         cache_adapter=FakeCacheAdapter(),
+        instance_store=FakeInstanceStore(),
         grant_store=FakeGrantStore(),
+        installation_scopes=FakeInstallationScopeStore(),
+        webhook_secrets=FakeWebhookSecretStore(),
+        publication_approvals=FakePublicationApprovalStore(),
+        secret_delivery=FakeSecretDeliveryControl(),
         tenant_db=FakeTenantDb(),
         objects_admin=FakeObjectStorePort(),
         artifact_admin=FakeArtifactRegistryPort(),
         routes=FakeRoutes(),
         activation_admin=FakeActivationPort(),
+        update_lock=FakeUpdateLock(),
         mint_admin=FakeMintPort(),
         platform_admin=FakePlatformAdmin(),
         scale=FakeScale(),
@@ -1816,13 +2399,17 @@ def platform(clock: FakeClock, revocation: FakeRevocation, audit: FakeAudit) -> 
         producer=FakeProducer(),
         consumer=FakeConsumer(),
         dlq=FakeDlq(),
+        raw_dlq=FakeRawDlq(),
+        event_secrets=FakeEventSecretStore(),
         subscriptions=FakeSubscriptions(),
         published_events=FakeSeenStore(),
         idempotency=FakeSeenStore(),
         handler=FakeEventHandler(),
         wake_hook=FakeWakeHook(),
         gateway_sessions=FakeGatewaySessions(),
-        gateway_grants=FakeGatewayGrants(revocation),
+        gateway_grants=FakeGatewayGrants(
+            revocation, plugin_instance_id=TEST_INSTANCE
+        ),
         gateway_secrets=FakeGatewaySecrets(),
         rate_limit=FakeRateLimit(),
     )
@@ -1896,10 +2483,12 @@ __all__ = [
     "Platform",
     "TEST_COMPANY",
     "TEST_DIGEST",
+    "TEST_EVENT_SECRET_REF",
     "TEST_GRANT_ID",
     "TEST_INSTANCE",
     "TEST_OTHER_COMPANY",
     "TEST_PLUGIN",
+    "TEST_QUOTA_VALUES",
     "TEST_SECRET",
     "TEST_VERSION",
     "FakeActivationPort",
@@ -1913,12 +2502,15 @@ __all__ = [
     "FakeCosign",
     "FakeDlq",
     "FakeEventHandler",
+    "FakeEventSecretStore",
     "FakeGatewayGrants",
     "FakeGatewaySecrets",
     "FakeGatewaySessions",
     "FakeGrant",
     "FakeGrantStore",
+    "FakeInstallationScopeStore",
     "FakeInstance",
+    "FakeInstanceStore",
     "FakeManifestValidator",
     "FakeMint",
     "FakeMintPort",
@@ -1926,13 +2518,16 @@ __all__ = [
     "FakePlatformAdmin",
     "FakeProducer",
     "FakeProxy",
+    "FakePublicationApprovalStore",
     "FakeQuota",
     "FakeRateLimit",
+    "FakeRawDlq",
     "FakeReadiness",
     "FakeRecord",
     "FakeRevocation",
     "FakeRoutes",
     "FakeScale",
+    "FakeSecretDeliveryControl",
     "FakeSeenStore",
     "FakeSts",
     "FakeSubscriptions",

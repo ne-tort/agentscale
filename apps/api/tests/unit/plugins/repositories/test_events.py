@@ -113,6 +113,39 @@ async def test_remember_error_raises_so_offset_is_not_committed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_idempotency_seen_db_failure_raises_without_commit() -> None:
+    """SQL failure is RETRY/exception, never a false duplicate + offset commit."""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from prodavan.infrastructure.persistence.repositories.plugins._schema import (
+        PluginRepositoryUnavailable,
+    )
+
+    session = FakeSession()
+    session.fail_on_execute = SQLAlchemyError("db down")
+    store = DbIdempotencyStore(session_factory=FakeSessionFactory(session))
+    with pytest.raises(PluginRepositoryUnavailable):
+        await store.seen(IdempotencyKey("sub_01", "evt_src_01"))
+    assert session.commits == 0
+
+
+@pytest.mark.asyncio
+async def test_published_seen_db_failure_raises_without_commit() -> None:
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from prodavan.infrastructure.persistence.repositories.plugins._schema import (
+        PluginRepositoryUnavailable,
+    )
+
+    session = FakeSession()
+    session.fail_on_execute = SQLAlchemyError("db down")
+    store = DbPublishedEventStore(session_factory=FakeSessionFactory(session))
+    with pytest.raises(PluginRepositoryUnavailable):
+        await store.seen("evt_platform_01")
+    assert session.commits == 0
+
+
+@pytest.mark.asyncio
 async def test_unknown_subscription_is_fail_closed() -> None:
     store = DbSubscriptionStore(session_factory=_factory(rows=[]))
     assert await store.get("ghost") is None

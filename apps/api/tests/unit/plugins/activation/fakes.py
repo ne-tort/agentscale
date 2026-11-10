@@ -147,10 +147,20 @@ class FakeAudit:
         self.events: list[ActivationAuditEvent] = []
         self.fail = fail
 
-    def record(self, event: ActivationAuditEvent) -> None:
+    async def append_event(self, event_type: str, *, details: dict[str, Any]) -> None:
         if self.fail:
             raise RuntimeError("audit sink unavailable")
-        self.events.append(event)
+        self.events.append(
+            ActivationAuditEvent(
+                event_type=event_type,
+                plugin_instance_id=str(details["plugin_instance_id"]),
+                occurred_at=details["occurred_at"],
+                outcome="allowed" if details.get("decision") == "allow" else "denied",
+                code=details.get("code"),
+                reason=details.get("reason"),
+                resource=details.get("resource"),
+            )
+        )
 
     def denied(self) -> list[ActivationAuditEvent]:
         return [e for e in self.events if e.outcome == "denied"]

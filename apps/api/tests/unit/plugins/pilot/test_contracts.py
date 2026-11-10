@@ -10,10 +10,12 @@ from __future__ import annotations
 import re
 
 import pytest
+from fastapi import HTTPException
 
 from .conftest import (
     APP_JS_PATH,
     APP_PATH,
+    CONTRACT_PATH,
     DOCKERFILE_PATH,
     ENTRYPOINT_PATH,
     INDEX_HTML_PATH,
@@ -21,6 +23,7 @@ from .conftest import (
     MANIFEST_PATH,
     PROTOCOL,
     README_PATH,
+    fake_introspection,
     load_app_module,
     read_text,
 )
@@ -54,50 +57,82 @@ def test_entrypoint_and_helper_have_no_agent_surface() -> None:
         assert "main_pod" not in raw
 
 
-def test_backend_uses_gateway_url_from_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """GATEWAY_URL/PLUGIN_ID/TENANT_DB_DSN/PLUGIN_CLAIMS — всё из env (Secret)."""
+def test_backend_uses_only_static_config_from_secret() -> None:
     raw = read_text(APP_PATH)
-    for name in ("GATEWAY_URL", "PLUGIN_ID", "TENANT_DB_DSN", "PLUGIN_CLAIMS", "PLUGIN_WEBHOOK_SECRET"):
+    for name in ("GATEWAY_URL", "PLUGIN_ID", "TENANT_DB_DSN", "WEBHOOK_SECRET"):
         assert f'os.environ.get("{name}"' in raw, f"{name} должен читаться из окружения/Secret"
     assert "TENANT_DB_DSN" in raw
     assert "postgresql://" in raw or "DSN" in raw
-    # Никаких dev-фолбэков с секретами.
     assert 'os.environ.get("TENANT_DB_DSN", "postgresql://' not in raw
-    assert 'os.environ.get("PLUGIN_CLAIMS", "ey' not in raw
+
+
+def test_no_static_plugin_claims_or_local_base64_validation() -> None:
+    """Request token не живёт в env и не принимается после base64 decode."""
+    for path in (APP_PATH, ENTRYPOINT_PATH):
+        raw = read_text(path)
+        assert "PLUGIN_CLAIMS" not in raw
+        assert "PLUGIN_CLAIMS_RAW" not in raw
+    raw = read_text(APP_PATH)
+    assert "verify_plugin_claims" not in raw
+    assert "_b64url_decode" not in raw
+    assert "base64" not in raw
+    assert "PLUGIN_CLAIMS_SECRET" not in raw
+
+
+def test_startup_does_not_require_legacy_static_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    module = load_app_module(monkeypatch)
+    assert not hasattr(module, "PLUGIN_CLAIMS_RAW")
+    asyncio.run(module._startup())
 
 
 def test_missing_secret_env_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail-closed: пустой обязательный env => RuntimeError, а не тихий успех."""
     module = load_app_module(monkeypatch)
     monkeypatch.setattr(module, "GATEWAY_URL", "")
     with pytest.raises(RuntimeError, match="не заданы обязательные переменные"):
         module._require_secret_env()
 
 
-def test_plugin_claims_are_verified_before_gateway_call(monkeypatch: pytest.MonkeyPatch) -> None:
-    """§7.2: backend обязан проверить JWT, а не доверять Gateway «по умолчанию»."""
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda payload: payload.update(status="ok"),
+        lambda payload: payload.pop("grant_id"),
+        lambda payload: payload.update(scopes="cache"),
+        lambda payload: payload.update(scopes=["cache", "cache"]),
+        lambda payload: payload.update(exp=True),
+        lambda payload: payload.update(exp=float("nan")),
+        lambda payload: payload.update(artifact_digest="sha256:not-a-digest"),
+        lambda payload: payload.update(company_id="  "),
+        lambda payload: payload.update(project_id=""),
+    ),
+)
+def test_invalid_introspection_contract_is_503(
+    monkeypatch: pytest.MonkeyPatch,
+    mutation,
+) -> None:
     module = load_app_module(monkeypatch)
-    module._authorized_gateway_call()  # валидный claims -> без исключения
-
-    monkeypatch.setattr(module, "PLUGIN_CLAIMS_RAW", "")
-    with pytest.raises(ValueError):
-        module._authorized_gateway_call()
-
-
-def test_plugin_claims_rejects_wrong_plugin(monkeypatch: pytest.MonkeyPatch) -> None:
-    from .conftest import fake_plugin_claims
-
-    module = load_app_module(monkeypatch)
-    with pytest.raises(ValueError, match="не совпадает"):
-        module.verify_plugin_claims(fake_plugin_claims(plugin_id="чужой_плагин"))
+    payload = fake_introspection()
+    mutation(payload)
+    with pytest.raises(HTTPException) as exc:
+        module._parse_introspection(payload)
+    assert exc.value.status_code == 503
 
 
-def test_plugin_claims_rejects_expired(monkeypatch: pytest.MonkeyPatch) -> None:
-    from .conftest import fake_plugin_claims
-
-    module = load_app_module(monkeypatch)
-    with pytest.raises(ValueError, match="просрочен"):
-        module.verify_plugin_claims(fake_plugin_claims(exp=1.0))
+def test_security_contract_documents_gateway_dependencies() -> None:
+    raw = read_text(CONTRACT_PATH)
+    for required in (
+        "X-Plugin-Capability-Token",
+        "/capabilities/v1/health",
+        "trust_env=False",
+        "follow_redirects=False",
+        "raw_body",
+        "X-Prodavan-Signature",
+        "НЕ является",
+        "durable",
+    ):
+        assert required in raw
 
 
 # --- SQL: полный, к своим typed-таблицам -------------------------------------
@@ -154,11 +189,13 @@ def test_entrypoint_has_no_infrastructure_shell_logic() -> None:
 
 def test_dockerfile_nonroot_distroless_practices() -> None:
     raw = read_text(DOCKERFILE_PATH)
-    assert "FROM python:3.13-slim" in raw
+    assert "FROM ${PYTHON_BASE_IMAGE} AS python-base" in raw
+    assert not re.search(r"^FROM python:", raw, re.MULTILINE)
     assert "USER 10001:10001" in raw
     assert "HEALTHCHECK" in raw
     assert "COPY --from=builder" in raw
-    assert "chmod" in raw and "chown -R plugin:plugin" in raw
+    assert "chmod" in raw and "chmod -R a-w /app /opt/liquibase /opt/venv" in raw
+    assert "chown -R plugin:plugin" not in raw
     # Политика задаётся в k8s Deployment (§7.4), а не директивой Dockerfile;
     # упоминание в поясняющем комментарии допустимо.
     assert not re.search(r"^\s*(?:ENV|LABEL)\s+imagePullPolicy", raw, re.MULTILINE)
@@ -207,13 +244,16 @@ def test_frontend_has_no_token_in_url() -> None:
     for path in (INDEX_HTML_PATH, APP_JS_PATH):
         raw = read_text(path)
         # Проверяем именно конструкции URL/query, а не упоминания в комментариях.
-        assert not re.search(r"[?&]token\s*=", raw, re.IGNORECASE), (
+        code = "\n".join(
+            line for line in raw.splitlines() if not line.lstrip().startswith("//")
+        )
+        assert not re.search(r"[?&]token\s*=", code, re.IGNORECASE), (
             f"{path.name}: токен в query-параметре URL"
         )
-        assert "location.search" not in raw
-        assert "URLSearchParams" not in raw
-        assert "window.location" not in raw
-        assert "document.cookie" not in raw
+        assert "location.search" not in code
+        assert "URLSearchParams" not in code
+        assert "window.location" not in code
+        assert "document.cookie" not in code
 
 
 def test_frontend_has_no_allow_same_origin() -> None:
@@ -237,20 +277,21 @@ def test_frontend_has_no_shared_api_calls() -> None:
         assert forbidden not in js, f"прямой вызов shared API: {forbidden}"
 
 
-def test_manifest_has_no_artifact_digest_in_frontend_or_backend() -> None:
+def test_manifest_digest_is_host_supplied_not_hardcoded() -> None:
     """Запрет самореференции: digest приходит от хоста, не хранится в коде."""
     import json
 
     manifest = json.loads(read_text(MANIFEST_PATH))
     assert "artifact_digest" not in manifest
     assert "signature" not in manifest
-    # В app.js digest — поле host.ready, а не захардкоженная константа плагина.
+    # Protocol reads обязаны сверяться с host.ready, а не с литералом плагина.
     js = read_text(APP_JS_PATH)
-    assert "data.artifact_digest" not in js
-    assert "data.digest" in js
+    assert "data.artifact_digest === handshake.artifact_digest" in js
+    assert "data.digest" not in js
+    assert not re.search(r"sha256:[0-9a-f]{64}", js)
 
 
-def test_readme_explains_all_four_integration_points() -> None:
+def test_readme_documents_integration_points_and_stop_ship() -> None:
     raw = read_text(README_PATH).lower()
-    for topic in ("oci", "dsn", "wake", "подпис", "strangler", "эфемерн"):
+    for topic in ("oci", "dsn", "wake", "подпис", "rollback", "live unverified", "stop-ship"):
         assert topic in raw, f"README не раскрывает тему: {topic}"

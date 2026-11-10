@@ -3,11 +3,11 @@
 Стык (обе стороны прочитаны):
 
 ===========================================  =========================================
-admin (задача 12, ``admin/ports.py``)        identity (задача 02)
+admin (задача 12, ``admin/ports.py``)        identity (canonical async)
 ===========================================  =========================================
 ``RevocationPort.revoke(*, grant_id,          ``GrantRevocation.revoke(grant_id)`` /
-  reason) -> bool`` (async)                   ``InMemoryRevocation.revoke`` (sync)
-``RevocationPort.is_revoked(*, grant_id)``    ``is_active(grant_id, *, now)`` (sync)
+  reason) -> bool`` (async)                   ``DbGrantRevocation.revoke`` (async)
+``RevocationPort.is_revoked(*, grant_id)``    ``is_active(grant_id, *, now)`` (async)
   -> bool`` (async)
 ``MintPort.mint(*, request: MintRequest)``    ``mint_plugin_claims(grant=..., 
   -> IssuedPluginClaims`` (async)              instance=..., secret=..., 
@@ -16,16 +16,15 @@ admin (задача 12, ``admin/ports.py``)        identity (задача 02)
 
 Правила стыка
 -------------
-* **Синхронное ядро оборачивается, а не переписывается.** Чужой каталог не
-  редактируется: async-обёртка просто вызывает sync-метод в текущем event loop
-  (операция in-memory/CPU-only, без IO). Для будущей БД-реализации порта
-  родитель может передать sync-обёртку с ``run_in_executor`` — контракт
-  адаптера от этого не меняется.
+* **Canonical async identity вызывается только через ``await``.** Это относится
+  и к in-memory реализации, и к ``DbGrantRevocation``: адаптер не приводит
+  coroutine к ``bool`` и не содержит синхронного fallback. Исключения и typed
+  ``bool`` источника сохраняются; неподтверждённая запись не становится успехом.
 * **bool = подтверждение записи, а не «вызов не упал».** ``revoke`` возвращает
   ``True`` только если после записи реестр действительно показывает отзыв
   (перепроверка через ``is_active``/``is_revoked``). Это ровно семантика
   ``REVOKE_FAILED`` в ``PluginAdminService``: нет подтверждения → отказ.
-* **``reason`` не теряется.** У identity нет поля ``reason``; адаптер пишет его
+* **``reason`` не теряется.** Общий identity-порт не принимает ``reason``; адаптер пишет его
   в свой append-only журнал ``reasons`` (только идентификатор grant_id и сам
   текст причины, без PII/токенов), чтобы аудит admin-слоя мог сослаться на
   причину. В токен и в DSN reason не попадает.
@@ -79,16 +78,20 @@ from prodavan.application.plugins.admin.ports import (
 
 
 @runtime_checkable
-class SyncRevocationSource(Protocol):
-    """Минимальный structural-контракт источника отзывов, который мы оборачиваем.
+class AsyncRevocationSource(Protocol):
+    """Canonical async structural-контракт источника отзывов.
 
-    Подходят и ``InMemoryRevocation`` (есть ``is_revoked``/``revoke``), и
-    ``GrantRevocation`` (есть ``is_active``/``revoke``), и любая будущая
-    БД-реализация ``identity.RevocationPort`` (достаточно ``is_active``).
+    Подходят ``InMemoryRevocation``, ``GrantRevocation`` и
+    ``DbGrantRevocation``. ``DbGrantRevocation.revoke`` дополнительно принимает
+    опциональный ``reason``, что совместимо с этим минимальным контрактом.
     """
 
-    def revoke(self, grant_id: str) -> None: ...
-    def is_active(self, grant_id: str, *, now: datetime | None = None) -> bool: ...
+    async def revoke(self, grant_id: str) -> bool: ...
+    async def is_active(self, grant_id: str, *, now: datetime | None = None) -> bool: ...
+
+
+# Сохраняем старое публичное имя для существующего re-export; методы уже async.
+SyncRevocationSource = AsyncRevocationSource
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,17 +142,17 @@ class _MintInstanceView:
 
 
 class IdentityRevocationAdapter:
-    """``admin.RevocationPort`` поверх синхронного реестра отзывов identity.
+    """``admin.RevocationPort`` поверх canonical async identity revocation.
 
-    Принимает ``GrantRevocation`` (обёртка с fail-closed ``is_active``),
-    ``InMemoryRevocation`` или любую реализацию ``identity.RevocationPort``.
+    Принимает ``GrantRevocation``, ``InMemoryRevocation``,
+    ``DbGrantRevocation`` или другую реализацию ``identity.RevocationPort``.
     ``GrantRevocation`` с НЕподключённым портом даёт ``is_active=False`` для
     любого grant — адаптер честно вернёт ``is_revoked() is True`` (доступ
     закрыт), но ``revoke`` бросит ``PluginTokenError``: «записать отзыв» без
     хранилища невозможно, и это не маскируется успехом.
     """
 
-    def __init__(self, source: SyncRevocationSource | IdentityRevocationPort) -> None:
+    def __init__(self, source: AsyncRevocationSource | IdentityRevocationPort) -> None:
         if source is None:
             # Fail-closed: без реестра отзывов адаптер не существует.
             raise ValueError("IdentityRevocationAdapter: источник отзывов обязателен")
@@ -157,7 +160,7 @@ class IdentityRevocationAdapter:
         self._reasons: dict[str, str] = {}
 
     @property
-    def source(self) -> SyncRevocationSource | IdentityRevocationPort:
+    def source(self) -> AsyncRevocationSource | IdentityRevocationPort:
         return self._source
 
     @property
@@ -166,11 +169,20 @@ class IdentityRevocationAdapter:
 
         return dict(self._reasons)
 
-    async def revoke(self, *, grant_id: str, reason: str) -> bool:
-        """Записать отзыв и ПОДТВЕРДИТЬ запись (async-обёртка над sync-ядром).
+    async def _is_revoked(self, key: str) -> bool:
+        """Прочитать состояние через async ``is_revoked`` или canonical ``is_active``."""
 
-        ``True`` = после вызова реестр показывает, что grant неактивен.
-        Идемпотентно: повторный отзыв того же ``grant_id`` тоже даёт ``True``.
+        is_revoked = getattr(self._source, "is_revoked", None)
+        if callable(is_revoked):
+            return bool(await is_revoked(key))
+        return not bool(await self._source.is_active(key, now=datetime.now(UTC)))
+
+    async def revoke(self, *, grant_id: str, reason: str) -> bool:
+        """Await durable revoke и отдельно подтвердить отозванное состояние.
+
+        ``True`` требует и typed-подтверждения записи источником, и неактивного
+        состояния после неё. Повторный отзыв остаётся идемпотентным для canonical
+        реализаций, которые сами подтверждают повторную запись.
         """
 
         key = (grant_id or "").strip()
@@ -178,21 +190,14 @@ class IdentityRevocationAdapter:
             # Пустой grant_id нельзя «отозвать» — это была бы тихая победа.
             raise ValueError("IdentityRevocationAdapter.revoke: grant_id не должен быть пустым")
 
-        # Синхронное ядро identity: revoke(grant_id) -> None, без bool и reason.
-        self._source.revoke(key)
+        # Общий identity.RevocationPort не принимает reason; DbGrantRevocation
+        # совместим с этим вызовом, а reason сохраняется в admin-аудите адаптера.
+        write_confirmed = bool(await self._source.revoke(key))
         self._reasons[key] = (reason or "").strip()
 
-        # Перепроверка: подтверждение записи, а не «исключения не было».
-        # У InMemoryRevocation есть is_revoked(); у GrantRevocation —
-        # is_active(); у «голого» identity.RevocationPort — только is_active().
-        is_revoked = getattr(self._source, "is_revoked", None)
-        if callable(is_revoked):
-            confirmed = bool(is_revoked(key))
-        else:
-            confirmed = not bool(
-                self._source.is_active(key, now=datetime.now(UTC))  # type: ignore[call-arg]
-            )
-        return confirmed
+        # Не превращаем отсутствие исключения или одно только состояние в успех.
+        state_confirmed = await self._is_revoked(key)
+        return write_confirmed and state_confirmed
 
     async def is_revoked(self, *, grant_id: str) -> bool:
         """Проверка для ``wake``: отозванный grant нельзя разбудить."""
@@ -201,12 +206,7 @@ class IdentityRevocationAdapter:
         if not key:
             # Fail-closed: пустой grant_id считается отозванным.
             return True
-        is_revoked = getattr(self._source, "is_revoked", None)
-        if callable(is_revoked):
-            return bool(is_revoked(key))
-        return not bool(
-            self._source.is_active(key, now=datetime.now(UTC))  # type: ignore[call-arg]
-        )
+        return await self._is_revoked(key)
 
 
 class IdentityMintAdapter:
@@ -272,5 +272,6 @@ __all__ = [
     # Адаптеры.
     "IdentityMintAdapter",
     "IdentityRevocationAdapter",
+    "AsyncRevocationSource",
     "SyncRevocationSource",
 ]

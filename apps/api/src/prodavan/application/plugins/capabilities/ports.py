@@ -17,8 +17,9 @@
 
 from __future__ import annotations
 
+import inspect
 from datetime import datetime
-from typing import Final, Protocol, runtime_checkable
+from typing import Awaitable, Final, Protocol, runtime_checkable
 
 from prodavan.application.plugins.capabilities.contracts import (
     CacheDeleteRequest,
@@ -45,6 +46,8 @@ from prodavan.application.plugins.capabilities.contracts import (
     JobsGetResponse,
     JobsSubmitRequest,
     JobsSubmitResponse,
+    McpInvokeRequest,
+    McpInvokeResponse,
     McpRegisterRequest,
     McpRegisterResponse,
     NetworkEgressRequest,
@@ -53,15 +56,20 @@ from prodavan.application.plugins.capabilities.contracts import (
     ObjectsDeleteResponse,
     ObjectsListRequest,
     ObjectsListResponse,
+    ObjectsPresignRequest,
+    ObjectsPresignResponse,
     ObjectsScopedCredentialsRequest,
     ObjectsScopedCredentialsResponse,
     OPERATION_TO_CAPABILITY,
     PodsInvokeRequest,
     PodsInvokeResponse,
+    PluginCapabilityRequest,
     SecretsReadRequest,
     SecretsReadResponse,
+    TypedContractError,
     TypedResponse,
 )
+from prodavan.application.plugins.capabilities.quotas import QuotaUsage
 
 
 class AdapterMissingError(LookupError):
@@ -132,7 +140,7 @@ class GrantRevocationPort(Protocol):
     порта трактуется сервисом как «не активен» → отказ, а не allow.
     """
 
-    def is_active(self, grant_id: str, *, now: datetime) -> bool: ...
+    async def is_active(self, grant_id: str, *, now: datetime) -> bool: ...
 
 
 # ---------------------------------------------------------------------------
@@ -140,73 +148,94 @@ class GrantRevocationPort(Protocol):
 # ---------------------------------------------------------------------------
 
 
+class QuotaMeterPort(Protocol):
+    """Read-only pre-invoke hook реального адаптера или его decorator'а.
+
+    Вызывается один раз до reserve и до side effect. Реализация обязана вернуть
+    все шесть явно измеренных единиц; ``ops`` всегда равен 1. Единицы:
+    ``ROWS`` — строки результата (или bound из typed limit), ``BYTES`` — октеты
+    typed payload, ``KEYS`` — distinct touched keys, ``OBJECT_BYTES`` — октеты
+    объектного содержимого, ``EGRESS_BYTES`` — request + response octets.
+    Для заранее неизвестных ROWS/OBJECT_BYTES/EGRESS_BYTES возвращается точный
+    или консервативный server-side reservation bound из metadata/typed limit,
+    а не fabricated zero. Ноль разрешён только для действительно неприменимой
+    единицы. Отсутствие hook, исключение или неверный тип = deny до reserve.
+    """
+
+    def quota_usage(
+        self, request: PluginCapabilityRequest
+    ) -> QuotaUsage | Awaitable[QuotaUsage]: ...
+
+
 class CachePort(Protocol):
     """get/set/delete/incr/publish с key-rewrite (§4.3)."""
 
-    def get(self, request: CacheGetRequest) -> CacheGetResponse: ...
-    def set(self, request: CacheSetRequest) -> CacheSetResponse: ...
-    def delete(self, request: CacheDeleteRequest) -> CacheDeleteResponse: ...
-    def incr(self, request: CacheIncrRequest) -> CacheIncrResponse: ...
-    def publish(self, request: CachePublishRequest) -> CachePublishResponse: ...
+    async def get(self, request: CacheGetRequest) -> CacheGetResponse: ...
+    async def set(self, request: CacheSetRequest) -> CacheSetResponse: ...
+    async def delete(self, request: CacheDeleteRequest) -> CacheDeleteResponse: ...
+    async def incr(self, request: CacheIncrRequest) -> CacheIncrResponse: ...
+    async def publish(self, request: CachePublishRequest) -> CachePublishResponse: ...
 
 
 class ObjectsPort(Protocol):
-    """scoped credentials / list / delete.
+    """scoped credentials / exact-key presign / list / delete.
 
     Содержимое объекта (base64-байты) через API НЕ передаётся: только
     short-lived scoped credentials, presigned-ссылки и метаданные (§4.3, §5.4).
     """
 
-    def scoped_credentials(
+    async def scoped_credentials(
         self, request: ObjectsScopedCredentialsRequest
     ) -> ObjectsScopedCredentialsResponse: ...
-    def list(self, request: ObjectsListRequest) -> ObjectsListResponse: ...
-    def delete(self, request: ObjectsDeleteRequest) -> ObjectsDeleteResponse: ...
+    async def presign(self, request: ObjectsPresignRequest) -> ObjectsPresignResponse: ...
+    async def list(self, request: ObjectsListRequest) -> ObjectsListResponse: ...
+    async def delete(self, request: ObjectsDeleteRequest) -> ObjectsDeleteResponse: ...
 
 
 class DocsPort(Protocol):
     """Mongo namespace per tenant, строго типизированный запрос (§4.3)."""
 
-    def query(self, request: DocsQueryRequest) -> DocsQueryResponse: ...
+    async def query(self, request: DocsQueryRequest) -> DocsQueryResponse: ...
 
 
 class EventsPort(Protocol):
     """publish/subscribe через Redpanda consumer groups (§4.3, §7.3)."""
 
-    def publish(self, request: EventsPublishRequest) -> EventsPublishResponse: ...
-    def subscribe(self, request: EventsSubscribeRequest) -> EventsSubscribeResponse: ...
+    async def publish(self, request: EventsPublishRequest) -> EventsPublishResponse: ...
+    async def subscribe(self, request: EventsSubscribeRequest) -> EventsSubscribeResponse: ...
 
 
 class JobsPort(Protocol):
     """submit/get/cancel с ``job_id``, ``run_id`` и lease (§4.3, §7.3)."""
 
-    def submit(self, request: JobsSubmitRequest) -> JobsSubmitResponse: ...
-    def get(self, request: JobsGetRequest) -> JobsGetResponse: ...
-    def cancel(self, request: JobsCancelRequest) -> JobsCancelResponse: ...
+    async def submit(self, request: JobsSubmitRequest) -> JobsSubmitResponse: ...
+    async def get(self, request: JobsGetRequest) -> JobsGetResponse: ...
+    async def cancel(self, request: JobsCancelRequest) -> JobsCancelResponse: ...
 
 
 class PodsPort(Protocol):
     """invoke typed action; плагин НЕ имеет k8s API (§4.3)."""
 
-    def invoke(self, request: PodsInvokeRequest) -> PodsInvokeResponse: ...
+    async def invoke(self, request: PodsInvokeRequest) -> PodsInvokeResponse: ...
 
 
 class McpPort(Protocol):
-    """register typed tools; MCP = адаптер к gateway, не обходной канал (§4.3)."""
+    """Register and invoke through the typed backend broker, never generic infra dispatch."""
 
-    def register(self, request: McpRegisterRequest) -> McpRegisterResponse: ...
+    async def register(self, request: McpRegisterRequest) -> McpRegisterResponse: ...
+    async def invoke(self, request: McpInvokeRequest) -> McpInvokeResponse: ...
 
 
 class SecretsPort(Protocol):
     """read по ``secret_ref``; plaintext не покидает защищённый контур (§4.3)."""
 
-    def read(self, request: SecretsReadRequest) -> SecretsReadResponse: ...
+    async def read(self, request: SecretsReadRequest) -> SecretsReadResponse: ...
 
 
 class NetworkPort(Protocol):
     """egress-прокси; allowed_hosts разрешаются из grant'а в БД (§6, §13.3)."""
 
-    def egress(self, request: NetworkEgressRequest) -> NetworkEgressResponse: ...
+    async def egress(self, request: NetworkEgressRequest) -> NetworkEgressResponse: ...
 
 
 #: Имя capability -> протокол адаптера. Используется для проверки register().
@@ -229,12 +258,12 @@ CAPABILITY_PORT: Final[dict[str, type]] = {
 #: передачей сюда. Оба формата допустимы в ``dispatch`` ради совместимости.
 CAPABILITY_OPERATIONS: Final[dict[str, frozenset[str]]] = {
     CapabilityName.CACHE.value: frozenset({"get", "set", "delete", "incr", "publish"}),
-    CapabilityName.OBJECTS.value: frozenset({"scoped_credentials", "list", "delete"}),
+    CapabilityName.OBJECTS.value: frozenset({"scoped_credentials", "presign", "list", "delete"}),
     CapabilityName.DOCS.value: frozenset({"query"}),
     CapabilityName.EVENTS.value: frozenset({"publish", "subscribe"}),
     CapabilityName.JOBS.value: frozenset({"submit", "get", "cancel"}),
     CapabilityName.PODS.value: frozenset({"invoke"}),
-    CapabilityName.MCP.value: frozenset({"register"}),
+    CapabilityName.MCP.value: frozenset({"register", "invoke"}),
     CapabilityName.SECRETS.value: frozenset({"read"}),
     CapabilityName.NETWORK.value: frozenset({"egress"}),
 }
@@ -244,6 +273,31 @@ CAPABILITY_DOTTED_OPERATIONS: Final[dict[str, frozenset[str]]] = {
     name: frozenset(f"{name}.{op}" for op in ops)
     for name, ops in CAPABILITY_OPERATIONS.items()
 }
+
+
+OPERATION_REQUEST_TYPES: Final[dict[str, type]] = {
+    "cache.get": CacheGetRequest,
+    "cache.set": CacheSetRequest,
+    "cache.delete": CacheDeleteRequest,
+    "cache.incr": CacheIncrRequest,
+    "cache.publish": CachePublishRequest,
+    "objects.scoped_credentials": ObjectsScopedCredentialsRequest,
+    "objects.presign": ObjectsPresignRequest,
+    "objects.list": ObjectsListRequest,
+    "objects.delete": ObjectsDeleteRequest,
+    "docs.query": DocsQueryRequest,
+    "events.publish": EventsPublishRequest,
+    "events.subscribe": EventsSubscribeRequest,
+    "jobs.submit": JobsSubmitRequest,
+    "jobs.get": JobsGetRequest,
+    "jobs.cancel": JobsCancelRequest,
+    "pods.invoke": PodsInvokeRequest,
+    "mcp.register": McpRegisterRequest,
+    "mcp.invoke": McpInvokeRequest,
+    "secrets.read": SecretsReadRequest,
+    "network.egress": NetworkEgressRequest,
+}
+
 
 
 class AdapterRegistry:
@@ -292,7 +346,7 @@ class AdapterRegistry:
         return frozenset(self._adapters)
 
 
-def dispatch(adapter: object, capability: str, operation: str, request: object) -> TypedResponse:
+async def dispatch(adapter: object, capability: str, operation: str, request: object) -> TypedResponse:
     """Единственная точка typed dispatch: capability + operation + Request.
 
     КАНОНИЧЕСКИЙ ФОРМАТ ОПЕРАЦИИ — ТОЧЕЧНЫЙ (``cache.get``, реестр
@@ -312,11 +366,18 @@ def dispatch(adapter: object, capability: str, operation: str, request: object) 
         or operation not in allowed
     ):
         raise UnknownCapabilityError(f"{capability}/{operation}")
+    expected_request = OPERATION_REQUEST_TYPES[dotted]
+    if not isinstance(request, expected_request):
+        raise TypedContractError(
+            f"{dotted} requires {expected_request.__name__}, got {type(request).__name__}"
+        )
     method_name = dotted.split(".", 1)[-1]
     method = getattr(adapter, method_name, None)
     if not callable(method):
         raise AdapterMissingError(capability)
     response = method(request)
+    if inspect.isawaitable(response):
+        response = await response
     if not isinstance(response, TypedResponse):
         # Адаптер вернул «что угодно» — не публикуем как успех (fail-closed).
         raise TypeError(f"adapter {capability!r} returned a non-typed response")
@@ -329,6 +390,7 @@ __all__ = [
     "CAPABILITY_DOTTED_OPERATIONS",
     "CAPABILITY_OPERATIONS",
     "CAPABILITY_PORT",
+    "OPERATION_REQUEST_TYPES",
     "CachePort",
     "DocsPort",
     "EventsPort",
@@ -339,6 +401,7 @@ __all__ = [
     "ObjectsPort",
     "PodsPort",
     "PluginClaims",
+    "QuotaMeterPort",
     "SecretsPort",
     "UnknownCapabilityError",
     "dispatch",

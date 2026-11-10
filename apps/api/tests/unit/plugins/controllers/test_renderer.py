@@ -8,7 +8,7 @@ Acceptance-критерии задачи:
   * ``render_envoy_config`` — через генератор задачи 08, БЕЗ статического
     ``webhooks.example.com``, с 403-fallback, кластеры из allowlist.
 
-Тесты НАПИСАНЫ, НО НЕ ЗАПУСКАЛИСЬ (verification freeze, план миграции §0.2).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 """
 
 from __future__ import annotations

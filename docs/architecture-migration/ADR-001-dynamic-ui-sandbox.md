@@ -1,7 +1,14 @@
 # ADR-001: Dynamic UI sandbox
 
-- **Статус:** Принято
+- **Статус:** Принято; **Superseded where applicable** ADR-006/ADR-008 для подписанной динамической доставки plugin app. Для build-time declarative UI и запрета произвольного кода из tenant data остаётся действующим.
 - **Дата:** 2026-11-01
+
+## Границы supersede
+
+ADR-006 разрешает подписанные OCI-артефакты plugin app, а ADR-008 заменяет trust
+и lifecycle агентов на отдельные `PluginClaims`, Plugin Gateway и activator.
+Это не отменяет принцип ADR-001: без подписи/digest/compatibility/CSP произвольный
+код из БД, Pod или неподписанного пакета по-прежнему не доставляется.
 
 ## Контекст
 
@@ -19,3 +26,5 @@ UI capability packages поставляются как версионируем�
 - Backend manifest и frontend package должны согласовываться по capability version.
 - Изменение состава функций не требует загрузки исполняемого кода из tenant data.
 - DSL может использоваться для authoring/import, но не является runtime API.
+- Для подписанной plugin-доставки supersede-границу определяют ADR-006/ADR-008;
+  ADR-009, пока он в статусе «Предложено», авторинг и trusted CI не закрепляет.

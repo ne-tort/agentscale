@@ -19,10 +19,9 @@ set -eu
 : "${GATEWAY_URL:?GATEWAY_URL не задан в Secret}"
 : "${PLUGIN_ID:?PLUGIN_ID не задан в Secret}"
 : "${TENANT_DB_DSN:?TENANT_DB_DSN не задан в Secret}"
-: "${PLUGIN_CLAIMS:?PLUGIN_CLAIMS не задан в Secret}"
 
-# JDBC-URL считает Python-хелпер (секрет не попадает в аргументы процесса и логи:
-# значение попадает в переменную окружения дочернего liquibase через export).
+# JDBC-URL считает Python-хелпер. Секрет передаётся ТОЛЬКО через env дочернего
+# liquibase: --url в argv запрещён, значение и исключения не печатаются в логи.
 LIQUIBASE_COMMAND_URL="$(python -c 'from liquibase_url import jdbc_url; print(jdbc_url())')"
 export LIQUIBASE_COMMAND_URL
 
@@ -33,10 +32,9 @@ export LIQUIBASE_ALLOW_EXECUTE_COMMAND=false
 # Не/debug: Liquibase не должен печатать URL с credentials в логи пода.
 export LIQUIBASE_LOG_LEVEL=WARNING
 
-liquibase \
-  --url="$LIQUIBASE_COMMAND_URL" \
-  --changelog-file="$LIQUIBASE_COMMAND_CHANGELOG_FILE" \
-  update
+# URL и changelog уже заданы через LIQUIBASE_COMMAND_* env. Не дублируй их
+# в командной строке: argv с credentials доступен через process inspection.
+liquibase update
 
 # Только после успешного update помечаем готовность для /health.
 export LIQUIBASE_UPDATE_OK=1

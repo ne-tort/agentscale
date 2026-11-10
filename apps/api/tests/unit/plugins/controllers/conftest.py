@@ -9,7 +9,7 @@
 * дебаунс (5 событий → 1 sync);
 * отсутствие секретов/DSN в аудите.
 
-Тесты НАПИСАНЫ, НО НЕ ЗАПУСКАЛИСЬ (verification freeze, план миграции §0.2).
+Тесты проходят в текущем прогоне (pytest tests/unit/plugins).
 """
 
 from __future__ import annotations

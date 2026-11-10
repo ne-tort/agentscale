@@ -218,8 +218,10 @@ async def test_unlink_installation_is_idempotent_and_keeps_global_digest() -> No
         company_id=COMPANY, plugin_id=PLUGIN, artifact_digest=DIGEST
     ) is True
     assert adapter.installations == frozenset()
-    # Глобальный immutable digest в реестре НЕ удалён.
-    assert store.by_digest(DIGEST) is record
+    # Глобальный immutable digest в реестре НЕ удалён. set_current лишь
+    # увеличивает lifecycle generation и заменяет immutable dataclass record.
+    from dataclasses import replace
+    assert store.by_digest(DIGEST) == replace(record, lifecycle_version=1)
     # Повтор — идемпотентный успех.
     assert await adapter.unlink_installation(
         company_id=COMPANY, plugin_id=PLUGIN, artifact_digest=DIGEST
@@ -239,3 +241,32 @@ def test_register_installation_requires_verified_digest() -> None:
         adapter.register_installation(
             company_id=COMPANY, plugin_id=PLUGIN, artifact_digest="latest"
         )
+
+
+class _AsyncReadStore:
+    def __init__(self, store: InMemoryRegistryStore) -> None:
+        self.store = store
+        self.digest_calls: list[str] = []
+        self.version_calls: list[tuple[str, str]] = []
+
+    async def by_digest_async(self, digest: str):
+        self.digest_calls.append(digest)
+        return self.store.by_digest(digest)
+
+    async def get_async(self, plugin_id: str, version: str):
+        self.version_calls.append((plugin_id, version))
+        return self.store.get(plugin_id, version)
+
+
+async def test_get_awaits_both_digest_and_version_reads() -> None:
+    registry, store = _registry(make_artifact_record())
+    reads = _AsyncReadStore(store)
+    adapter = ArtifactRegistryAdapter(registry=registry, store=reads)
+
+    result = await adapter.get(
+        plugin_id=PLUGIN, manifest_version="1.2.0", artifact_digest=DIGEST
+    )
+
+    assert result is not None
+    assert reads.digest_calls == [DIGEST]
+    assert reads.version_calls == [(PLUGIN, "1.2.0")]

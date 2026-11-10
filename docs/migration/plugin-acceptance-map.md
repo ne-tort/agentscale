@@ -1,99 +1,182 @@
-# Acceptance-карта миграции plugin-модулей (v4)
+# Acceptance-карта plugin v4 — live evidence only
 
-**Источник:** [`docs/ARCHITECTURE/plugin-architecture-complete.md`](../ARCHITECTURE/plugin-architecture-complete.md) §11.  
-**Правило:** тесты пишутся вместе с кодом, но НЕ запускаются до явного решения о верификации. Родитель ведёт эту карту; субагент отмечает готовность в своём отчёте, родитель — здесь.
+**Текущий вердикт:** **STOP-SHIP до реальных integration checks и live
+acceptance.** Код после historical audited HEAD `6ee720dd` существенно
+изменился; новых production/live evidence нет. Отдельные disposable K8s и
+Kafka/Redpanda результаты задокументированы ниже, но **ни один сквозной
+production scenario не отмечен как подтверждённый.**
 
-Легенда: `[ ]` не начато · `[~]` код написан, тесты есть, не проверено · `[x]` подтверждено.
+Канон критериев — [v4 target с errata](../ARCHITECTURE/plugin-architecture-complete.md).
+Текущая сводка — [STOP-SHIP status](plugin-migration-status.md).
 
-## F0 — Контракты
+## Правило отметок
 
-| # | Критерий | Владелец | Состояние |
-|---|---|---|---|
-| 1 | Роль плагина владеет **своей** схемой, но `NOCREATEDB NOCREATEROLE NOSUPERUSER` | задача 05 | [~] |
-| 2 | Роль не может подключиться к `prodavan` или чужой `tenant_*` БД | задача 05 + 14 | [~] |
-| 3 | Плагин сам применяет Liquibase changelog; повторный запуск не меняет схему | задача 05 (+ пилот F10) | [ ] |
-| 4 | `/health` не становится Ready при ошибке миграции / checksum mismatch | задача 14 | [~] |
-| 5 | `pgaudit` содержит DDL плагина | задача 14 | [~] |
+- `[ ]` — **live не подтверждено**, проверка не выполнялась или evidence
+  недостаточно.
+- `[x]` — только воспроизводимый **live** результат с HEAD, окружением, датой
+  и ссылкой на evidence; написанный код, unit/integration test, stateful fake
+  adapter или прошлый отчёт недостаточны.
+- `[~]` не используется: «statically implemented» не является промежуточным
+  acceptance или pass.
+- Реестр содержит только отдельные disposable PostgreSQL/Redis/K8s/Kafka/MinIO evidence;
+  остальные применимые проверки `[ ]`. Static implementation inventory ниже не меняет отметки.
 
-## F1 — Identity
+## Static implementation inventory — НЕ acceptance
 
-| # | Критерий | Владелец | Состояние |
-|---|---|---|---|
-| 6 | Анонимный `/pluginpage/{plugin}/{company}/api/*` без сессии → `401` | задача 11 | [~] |
-| 7 | Webhook без/с неверной `X-Prodavan-Signature` → `401`; повтор `X-Prodavan-Delivery` не дублирует обработку | задача 11 | [~] |
-| 8 | Egress на хост вне `allowed_hosts` → `403` + событие аудита | задача 08 | [~] |
-| 9 | `/webhook/` и `/pluginpage/` не уезжают в SPA | задачи 14, 15 | [~] |
-| 10 | Превышение `ops_per_minute` → `429` + `QUOTA_EXCEEDED` | задача 03 | [~] |
-| 11 | Audit-событие не содержит raw SQL, параметров, токенов, payload | задача 03 | [~] |
-| 12 | `revoke` деактивирует `CapabilityGrant`; старый `PluginClaims` отклоняется по `grant_id` | задачи 02, 12 | [~] |
+| Область | Static status | Verification status |
+|---|---|---|
+| PublicationApproval + exact capability/egress/quota binding | Statically implemented | Live unverified |
+| ModuleSource pre-provider SQL reservation + attempt fencing | Statically implemented | Live unverified |
+| Durable scope resolver: deterministic id only for empty grant+instance pair; persisted pair (including revoked legacy) remains authoritative; partial/mismatch/read failure before writes | Real disposable PostgreSQL: **27 collected / 27 passed / 0 skipped** ([PG JUnit](../../reports/module-audit/postgres-redis/plugin-postgres-junit.xml), [summary](../../reports/module-audit/postgres-redis/summary.md)) | Deterministic READY source/no-backfill подтверждены; concurrent pair changes/publication/live unverified |
+| Neutral shared `validate_plugin_instance_scopes` + durable resolver and pre-approval/verifier/registry publication gates | Statically implemented, tests not run | No-writes/concurrency/live unverified |
+| Fresh `grant_id` on revoke→re-grant/uninstall→reinstall + REVOKED/scope/RETURNING fences | Portable UPDATE RETURNING fix 2026-11-10: returned rows через scalars().all() exactly-one-row вместо rowcount (SQLite ChunkedIteratorResult), zero/multiple => typed unavailable; real disposable PG SUCCESS + ZERO_ROW typed failure + rollback ([regrant-report](../../reports/module-audit/postgres-redis/regrant-report.md)); real-SQLite regression 2/2 + unit 4/4, full integration/plugins 27/27 | Live concurrency/crash/freshness production unverified |
+| Durable `plugin_routes` revision `2026110905` + exact `SqlRouteRegistry` replay/conflict | Real disposable PostgreSQL migrations: **27 collected / 27 passed / 0 skipped** ([PG JUnit](../../reports/module-audit/postgres-redis/plugin-postgres-junit.xml), [summary](../../reports/module-audit/postgres-redis/summary.md)) | Fresh/historical/repeat constraints подтверждены; revoke/unregister и production caller/live unverified |
+| Rollback source lifecycle generation/current-target replay + additive `2026110908` nullable `command_fingerprint`, ORM model parity and full normalized command semantics in SQL/InMemory | Real disposable PostgreSQL: **27 collected / 27 passed / 0 skipped** ([PG JUnit](../../reports/module-audit/postgres-redis/plugin-postgres-junit.xml), [summary](../../reports/module-audit/postgres-redis/summary.md)) | Migration/no-backfill, rollback cycle/lost-response replay подтверждены; extended-cycle production caller/live unverified |
+| Concurrent first-INSERT fresh re-read + exact artifact/evidence/current/lifecycle replay with authoritative stored timestamps and typed semantic conflict | Real disposable PostgreSQL: **27 collected / 27 passed / 0 skipped** ([PG JUnit](../../reports/module-audit/postgres-redis/plugin-postgres-junit.xml), [summary](../../reports/module-audit/postgres-redis/summary.md)) | Concurrent exact replay/semantic mismatch подтверждены; production caller/live unverified |
+| Registry publish/promote stored-record replay + async `get_async` in `GrantAdapter` and SQL grant→manifest consumers | Statically implemented | Integration/live unverified |
+| Asyncpg TenantDB admin lifecycle | Statically implemented | Live unverified |
+| Scoped TokenRequest provider and one shared lifecycle client for scale/readiness/state store/admin | Statically implemented | Live unverified |
+| Unified `install_api_plugin_platform` composition for `main` and `main_plugin_gateway` | Statically implemented, cold entrypoint tests not run | Live unverified |
+| SecretProjection с exact four managed keys | Statically implemented | Live unverified |
+| Transaction-scoped `SqlPluginUpdateLock` + rollback/close cleanup, connection invalidate/detach on failure and retry on new physical connection; update owner/digest annotation fences and foreign-owner no-quarantine | Real disposable PostgreSQL: **27 collected / 27 passed / 0 skipped** ([PG JUnit](../../reports/module-audit/postgres-redis/plugin-postgres-junit.xml), [summary](../../reports/module-audit/postgres-redis/summary.md)); targeted runtime units — **101 passed** | Xact contention/cancellation, invalidate/detach/new physical connection подтверждены; two-production-process/live unverified; disposable K8s adapter evidence — [JUnit](../../reports/module-audit/k8s/plugin-k8s-junit-fixed-rerun.xml) |
+| Exact six-field quotas + anonymous read-only API/static: public GET/HEAD scenarios, private deny, exact grant/company/plugin/instance/version/artifact and published bundle binding without fallback or capability token | Statically implemented, production scenarios not run | Public/private identity/live unverified |
+| Shell-origin/CSP handoff: server-derived bootstrap origin, bounded agentscale-plugin-shell/1 iframe.name DTO and exact frame-ancestors policy | Statically implemented, tests not run | New signed bundle + real API/Gateway/static-origin/browser/live unverified |
+| Installation-parent scope `2026110909`: migration/model/source/admin/bootstrap path, READY deterministic source + exact ProjectRow binding, no backfill; private missing/mismatch fail-closed, public company-only | Real disposable PostgreSQL: **27 collected / 27 passed / 0 skipped** ([PG JUnit](../../reports/module-audit/postgres-redis/plugin-postgres-junit.xml), [summary](../../reports/module-audit/postgres-redis/summary.md)) | Migration/source/private-public scope evidence подтверждено; two-entrypoint HTTP/live unverified |
+| Removed in-memory defaults for audit/quota/activation-state/grant/artifact/admin ports; explicit `install_plugin_platform_for_tests`/constructor doubles remain separate from production | Statically implemented, doubles not run | Real durable composition/live unverified |
+| Real nine-adapter composition requirements | Statically implemented | Real registry/integration pending |
+| Legacy dynamic host cleanup | **Static cleanup completed**, guards present | Guards/browser/live not accepted |
+| Dormant 2026110802 + CODE_FIRST_REMOVAL_INVENTORY/cutover.py metadata-only compatibility and inert FinalState; S4/S5 barriers | Statically present, no executable cutover | S4/S5 review/evidence/live unverified |
+| Hello `hello.greetings@1.0`, unique list/greet, `WEBHOOK_SECRET` | Statically implemented | Live unverified |
+| Jobs: exact verified declarations + Redis NX `None` re-read, owner/binding CAS renewal through post-validation, uncertain no-retry; production declarations remain configuration blocker | Real disposable Redis: **22 collected / 22 passed / 0 skipped** ([Redis JUnit](../../reports/module-audit/postgres-redis/redis-plugin-acceptance-junit.xml), [summary](../../reports/module-audit/postgres-redis/summary.md)) | NX/CAS/renewal/uncertain/cancel подтверждены; production worker/config/live unverified |
+| MCP: Redis NX True create, None/False miss + mandatory re-read, exact replay/conflict without overwrite; registration not privilege selector; mcp/mcp.invoke signed resolver, ACTIVE/timestamps/digest binding and sanitized typed errors | Real disposable Redis: **22 collected / 22 passed / 0 skipped** ([Redis JUnit](../../reports/module-audit/postgres-redis/redis-plugin-acceptance-junit.xml), [summary](../../reports/module-audit/postgres-redis/summary.md)) | NX/replay/conflict/signed mapping подтверждены; live SQL/JWT/backend/quota/audit и оба entrypoints unverified |
+| Runtime identity projection + exact grant/company/plugin/instance/artifact checks across claims/grant/resolver/activator/WakeResult/lease without resolver/backend-digest fallback; fresh-wake fixed headers | Statically implemented, scenarios not run | Exact binding/no-fallback/live unverified |
+| Trusted fixed runtime provider routes on both entrypoints + zero-arg fail-closed dependency, per-app production override from scoped platform ports and `max_result_bytes`→413 | Statically implemented, tests not run; pod status/logs/messages remain 503 | Per-app isolation/dependency/live unverified |
+| Typed event signing ref/mounts + signed fixtures; real `plugin-event-signing.sealed.yaml` absent from dev resources and remains production configuration blocker | Disposable Kafka/Redpanda fixtures выполнены: independent test refs/keys, sign/verify и fail-closed cases в составе **16 collected / 16 passed / 0 skipped** ([JUnit](../../reports/module-audit/kafka/junit-final.xml), [summary](../../reports/module-audit/kafka/acceptance-summary.json)) | Real SealedSecret/key rotation/two-entrypoint evidence absent |
+| Event delivery claims composition + typed ConsumerAssignment checks after wake, before handler, during heartbeat/renew and before completion/commit; mandatory after-wake rebalance scenario without xfail | Real disposable Redpanda/PostgreSQL/Redis/localhost backend: **16 collected / 16 passed / 0 skipped** ([JUnit](../../reports/module-audit/kafka/junit-final.xml)); targeted units — **23 passed** ([JUnit](../../reports/module-audit/kafka/unit-kafka-adapters.xml)) | Mandatory after-wake stale denial с zero backend/commit/DLQ и owner-only recovery с ровно одним real 2xx/commit подтверждены ([rebalance evidence](../../reports/module-audit/kafka/rebalance-evidence.log)); production/live configuration unverified |
+| MinIO STS default-disabled + bounded async post-probe/singleflight/freshness/retry/lifespan revalidation + dedicated canary: provisioned HeadBucket=200, fixed zero-byte HEAD=200, missing 403/404 unwired, foreign HEAD/ListBucket=403 | Real disposable MinIO: **29/29 passed, 0 skipped** ([JUnit](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/minio-plugin-acceptance-junit.xml), [summary](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/summary.json)); targeted units — **230 passed**. Canary-only HeadBucket/fixed HEAD и foreign denial подтверждены; API/Gateway/live unverified |
+| MinIO `objects.presign` exact full key + GET/PUT/HEAD + TTL 60..3600; strict six-field SigV4 validation and `X-Amz-Secret-Key`/`AWSAccessKeyId` rejection; STS-only `scoped_credentials` unchanged | Real disposable MinIO/SigV4: **29/29 passed, 0 skipped** ([JUnit](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/minio-plugin-acceptance-junit.xml)); production/live revocation unverified |
+| Protected CI publication + release Trivy/CSP/digest + OIDC POST ordering | Statically implemented | Live inputs/run evidence absent |
+| Real PostgreSQL/Redis/Kafka/MinIO/K8s/two-entrypoint acceptance harnesses with exact package confcutdir, early -p where required and [invocation contracts](plugin-migration-status.md#real-harness-invocation-contracts--не-acceptance) | PostgreSQL/Redis/K8s/Kafka/MinIO harnesses выполнены; entrypoint harness code present, not run | PostgreSQL: **27/27 passed, 0 skipped** ([PG JUnit](../../reports/module-audit/postgres-redis/plugin-postgres-junit.xml)); Redis: **22/22 passed, 0 skipped** ([Redis JUnit](../../reports/module-audit/postgres-redis/redis-plugin-acceptance-junit.xml)); [summary](../../reports/module-audit/postgres-redis/summary.md). K8s: fresh disposable kind v1.37.0, **19 collected / 19 passed / 0 skipped** ([fix-report](../../reports/module-audit/k8s/fix-report.md), [JUnit](../../reports/module-audit/k8s/plugin-k8s-junit-fixed-rerun.xml)); targeted runtime units — **101 passed**. Kafka: **16 collected / 16 passed / 0 skipped** ([JUnit](../../reports/module-audit/kafka/junit-final.xml), [summary](../../reports/module-audit/kafka/acceptance-summary.json)); targeted units — **23 passed** ([JUnit](../../reports/module-audit/kafka/unit-kafka-adapters.xml)). MinIO: **29 collected / 29 passed / 0 skipped** ([JUnit](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/minio-plugin-acceptance-junit.xml), [summary](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/summary.json)); targeted units — **230 passed**. Entrypoint collected>0/skipped=0/live evidence absent |
+| `pods`/`secret_delivery` schema + separate delivery Secret lifecycle | Statically implemented | Disposable K8s delivery lifecycle verified ([JUnit](../../reports/module-audit/k8s/plugin-k8s-junit-fixed-rerun.xml)); production/live и pods execution unverified |
 
-## F2 — Capability / HTTP
+## F0 — Tenant DB и plugin-owned migrations
 
-| # | Критерий | Владелец | Состояние |
-|---|---|---|---|
-| 17 | Плагин с `PluginClaims` не имеет доступа к agent-surface `:8001` | задачи 02, 04 | [~] |
-| 21 | Один плагин не может исчерпать квоту компании (per-instance/digest) | задача 03 | [~] |
-| 22 | Egress-политика не зависит от срока жизни JWT | задача 08 | [~] |
+| # | Критерий | Live |
+|---|---|---|
+| 1 | Plugin role владеет только своей схемой и имеет `NOCREATEDB NOCREATEROLE NOSUPERUSER` | [ ] |
+| 2 | Роль не может подключиться к platform БД или чужой tenant БД | [ ] |
+| 3 | Плагин сам применяет собственный changelog под своей ролью; повторный запуск не меняет схему | [ ] |
+| 4 | Readiness не наступает при ошибке миграции или checksum mismatch | [ ] |
+| 5 | `pgaudit` содержит DDL плагина; DDL не выполняется доверенной платформенной ролью | [ ] |
 
-## F3 — Данные и объекты
+## F1/F2 — Identity, gateway и HTTP
 
-| # | Критерий | Владелец | Состояние |
-|---|---|---|---|
-| 15 | Uninstall дропает схему/роль и bucket/prefix, не трогая чужие БД | задачи 05, 06, 12 | [~] |
-| 19 | STS creds плагина не видят объекты чужого bucket/префикса | задача 06 | [~] |
+| # | Критерий | Live |
+|---|---|---|
+| 6 | Приватный `/pluginpage/{plugin}/{company}/api/*` без сессии → `401` | [ ] |
+| 7 | Webhook без/с неверной подписью → `401`; повтор delivery не дублирует durable обработку; доказан путь **Gateway → hello backend** с verified headers | [ ] |
+| 8 | Egress вне grant allowlist → `403` + audit без секретов | [ ] |
+| 9 | `/webhook/` и `/pluginpage/` не перехватываются SPA | [ ] |
+| 10 | Exact durable `ops_per_minute` применяется на реальном metered path; превышение → `429 QUOTA_EXCEEDED` | [ ] |
+| 11 | Audit не содержит raw SQL, параметры, токены, секреты и payload | [ ] |
+| 12 | `revoke` деактивирует grant; старая per-request/lease identity отклоняется по `grant_id` | [ ] |
+| 17 | Plugin identity не получает agent-surface `:8001`; `PluginClaims` принимается только в Plugin Gateway | [ ] |
+| 21 | Один plugin instance/digest не может исчерпать квоту компании | [ ] |
+| 22 | Egress-политика читается из grant и не зависит от срока жизни JWT | [ ] |
+| 22a | **Порядок per-hop проверки:** адаптер передаёт политике РЕАЛЬНЫЙ `resolved_host`/`hops`, но проверка выполняется ПОСЛЕ запроса к backend. Отказ политики — типизированный `network_per_hop_policy_denied`, а падение политики — fail-closed (`egress_per_hop_policy_failed`); сам адаптер хост не сравнивает, SSRF-защита живёт в политике. Закреплено тестами `tests/unit/plugins/capabilities/test_egress_denials.py`. Post-hoc характер проверки (запрос уже ушёл) остаётся открытым вопросом безопасности | [ ] |
+| 24 | Lifecycle TokenRequest ограничен fixed ServiceAccount/audience/TTL; refresh, failure и shutdown работают на реальном K8s API без static mounted token. Fresh disposable kind v1.37.0: **19 passed / 0 skipped** ([fix-report](../../reports/module-audit/k8s/fix-report.md), [JUnit](../../reports/module-audit/k8s/plugin-k8s-junit-fixed-rerun.xml)); это не production/live acceptance | [x] |
+| 25 | Revoke→re-grant и uninstall→reinstall сохраняют authoritative persisted `plugin_instance_id` (deterministic для новых installations, legacy random для существующих), выдают fresh distinct `grant_id`, не воскрешают старый grant/token/lease; partial/mismatched scope pair и same-id re-grant отклонены до writes/saga mutation, а concurrent/rollback fences подтверждены на реальной БД | [ ] |
 
-## F4 — Артефакты
+## F3/F4 — Objects и artifacts
 
-| # | Критерий | Владелец | Состояние |
-|---|---|---|---|
-| 18 | `cosign verify` до деплоя; неподписанный digest → `QUARANTINED`, деплой по digest, не `:latest` | задачи 07, 16 | [~] |
+| # | Критерий | Live |
+|---|---|---|
+| 15 | Uninstall удаляет только собственные schema/role и bucket/prefix, не трогая чужие данные | [ ] |
+| 19 | `objects.scoped_credentials` по умолчанию typed-unwired и включается только после real async post-probe: dedicated provisioned bucket `HeadBucket=200`, fixed zero-byte object `HEAD=200` + `ContentLength=0`; `NoSuchBucket`/`NoSuchKey`/ambiguous `404` остаются unwired, foreign `HEAD` и foreign `ListBucket` дают `403`. Singleflight/freshness/revalidation/error invalidation и scoped AssumeRole/policy/TTL подтверждены на MinIO; operation не подменяется presign/static fallback, credentials/signature не попадают в логи/аудит. Real disposable MinIO: **29/29 passed, 0 skipped** ([JUnit](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/minio-plugin-acceptance-junit.xml)); canary-only probe, STS TTL 900..3600 и tenant unscoped-list denial подтверждены, API/Gateway live pending | [ ] |
+| 18 | Signature/provenance проверяются до деплоя; неподписанный digest → quarantine; deploy только по immutable digest | [ ] |
+| 23 | **После принятия ADR-009:** backend+bundle digest pair проверяется атомарно, OIDC `repository/ref/sha/job_workflow_ref` соответствует trusted pinned reusable workflow | [ ] |
+| 26 | `objects.presign` подписывает только exact full key в своём tenant/plugin scope методом GET/PUT/HEAD с TTL 60..3600; URL содержит ровно шесть валидных однозначных SigV4 fields, unknown/repeated/session-token и `X-Amz-Secret-Key`/`AWSAccessKeyId` отклоняются; реальный MinIO отклоняет cross-scope/wildcard/list/неверный method/expiry, URL/signature/secrets не попадают в audit, а `objects.scoped_credentials` остаётся STS-only | [ ] |
 
-## F7/F8 — События и засыпание
+## F7/F8 — Events, activator и strangler
 
-| # | Критерий | Владелец | Состояние |
-|---|---|---|---|
-| 13 | Wake-up из `replicas: 0` удерживает запрос до Ready и выдаёт новый короткий токен | задачи 09, 11, 15 | [~] |
-| 14 | Активный `job_id` блокирует усыпление backend | задача 09 (`activation/state.py`) | [~] |
-| 16 | Фича-флаг `plugin_enabled_modules[]` переключает путь без миграции данных | задача 12 | [~] |
-| 20 | Redpanda consumer не теряет событие при простое (ручной commit, `earliest`, DLQ) | задача 10 | [~] |
+| # | Критерий | Live |
+|---|---|---|
+| 13 | Wake `0→1` удерживает запрос до Ready и передаёт новую короткую identity, не статический env token | [ ] |
+| 14 | Активный `job_id`/lease блокирует усыпление **plugin activator**, без изменения `ProjectIdlePauseService` | [ ] |
+| 16 | Strangler flag переключает только отдельно проверенный контекст; S1 остаётся работоспособным | [ ] |
+| 20 | Redpanda consumer не теряет событие при простое: ручной commit, `earliest`, retry/DLQ. Disposable real-service acceptance: **16 collected / 16 passed / 0 skipped** ([JUnit](../../reports/module-audit/kafka/junit-final.xml), [summary](../../reports/module-audit/kafka/acceptance-summary.json)); targeted bounded poll/timeout/record/cancellation units — **23 passed** ([JUnit](../../reports/module-audit/kafka/unit-kafka-adapters.xml)). Это не production/live acceptance | [x] |
 
----
+## Интеграционные gates
 
-## Родительская интеграция (Fa)
+Это **не чек-лист наличия файлов**. Каждый пункт требует выполнения реальной
+интеграционной проверки и/или нового live evidence; production composition со
+stateful IO doubles сам по себе не закрывает gate.
 
-| # | Что сделать | Файлы | Состояние |
-|---|---|---|---|
-| A1 | Зарегистрировать `/capabilities/v1` и `/admin/plugins`, `/webhook`, `/pluginpage` роутеры | `api/v1/router.py` | [ ] |
-| A2 | Подключить plugin-ветку allowlist в middleware | `core/middleware.py` | [ ] |
-| A3 | Настройки + guard'ы | `config/settings.py` | [x] |
-| A4 | Env в ConfigMap (секреты — отдельным Secret) | `infra/k3s/base/agentscale-api/configmap.yaml` | [x] |
-| A5 | Включить provenance/sbom в CI платформенных образов | `.github/workflows/ci-images.yml` | [x] |
-| A6 | kustomization: подключить `base/plugins` и `overlays/dev/plugins` | `infra/k3s/base/kustomization.yaml`, `overlays/dev/kustomization.yaml` | [ ] |
-| A7 | ~~Реестр активных `job_id` в `ProjectIdlePauseService`~~ | — | [x] не требуется |
-| A8 | Зарегистрировать i18n-юнит `plugins` в каталоге | `apps/web/src/i18n/catalogue.ts` | [ ] |
-| A9 | Добавить маршрут pluginpage в роутер web | `apps/web/src/app/router.tsx` | [ ] |
-| A10 | Модели БД для `CapabilityGrant`/`PluginInstance` + Alembic-ревизия | `infrastructure/persistence/models/**`, `alembic/versions/**` | [ ] |
-| A11 | Общий коммит и Verify Dev | — | [ ] |
+| # | Gate | Live |
+|---|---|---|
+| A1 | Capability/admin/webhook/pluginpage routes доказаны в составе сквозного сценария | [ ] |
+| A2 | Middleware отличает agent и plugin trust без bypass | [ ] |
+| A3 | Settings и fail-closed guards доказаны на реальном составе | [ ] |
+| A4 | ConfigMap/Secret wiring не даёт статических identity tokens и не раскрывает секреты | [ ] |
+| A5 | Trusted artifact CI проверен end-to-end; старый workflow diff сам по себе не acceptance | [ ] |
+| A6 | GitOps overlays применяются и не включают emergency-disabled контур самовольно | [ ] |
+| A8 | Web i18n/plugin navigation проверены в браузере после успешного deploy | [ ] |
+| A9 | **Pluginpage + shell-origin/CSP handoff:** в браузере проверены pluginpage route, sandbox/static-origin и exact server-derived `plugin_shell_origin`. `agentscale-plugin-shell/1` DTO в `iframe.name` содержит только bounded plugin/version/digest/origin и валидируется frontend без `window.location` fallback; static responses имеют server-owned `frame-ancestors` ровно на тот же origin, wildcard/shared shell-static origin отклоняются. Проверка требует новый signed bundle с handoff consumer и digest-matching protected static-origin/CI evidence; старый bundle не засчитывается. Выполняется через API/Gateway и оба entrypoints | [ ] |
+| A10 | DB models/migrations проверены fresh/historical/repeat upgrade и live wiring | [ ] |
+| A11 | Отдельное интеграционное ревью + Verify Dev + человеческое решение о включении | [ ] |
+| A12 | **Fresh/historical 0901→0909:** fresh DB проходит `2026110901 → 2026110909`; historical pre-0901 state обновляется тем же путём; repeat upgrade, constraints, defaults, reservation/approval/webhook_secret_ref, durable `plugin_routes`, `plugin_artifact_lifecycle` и `command_fingerprint` проверены на реальной БД без перезаписи existing rows/artifact/current state. `2026110909` model/migration parity для `plugin_installation_scopes` и nullable source/reservation parent pairs, composite tenant/cabinet/project FK/unique checks и no-backfill проверены: historical NULL не exact replay evidence, missing/ambiguous scope не backfill'ится и сохраняет private bootstrap fail-closed. Real disposable PostgreSQL: **27 collected / 27 passed / 0 skipped** ([PG JUnit](../../reports/module-audit/postgres-redis/plugin-postgres-junit.xml), [summary](../../reports/module-audit/postgres-redis/summary.md)); fresh/historical/repeat/no-backfill/paired-scope constraints подтверждены. HTTP two-entrypoint/live evidence отсутствует | [ ] |
+| A13 | **First-ever publication:** пустые artifact/grant state, exact PublicationApproval, denial/quarantine, failed Deployment, retry/replay; нет частичного ACTIVE grant или преждевременного `consumed_at` | [ ] |
+| A14 | **Grant/update + xact ownership:** initial grant, exact replay и deployment-first update сохраняют digest/backend pair и все шесть quotas. Реальный PostgreSQL подтверждает per-install xact lock contention, rollback/close cleanup, cancellation и отсутствие pool lock leak; rollback/close failure вызывает invalidate, invalidate failure — реальный detach, retry использует новую physical connection. На реальном K8s update owner присутствует в Deployment metadata и pod template, digest/owner fences предшествуют PATCH/compensation, rollback восстанавливает digest и удаляет transient annotation; foreign SQL/runtime owner не compensates и не quarantines. Health/CAS/failure injection проверены. Disposable plugin_postgres: **27 collected / 27 passed / 0 skipped** ([PG JUnit](../../reports/module-audit/postgres-redis/plugin-postgres-junit.xml), [summary](../../reports/module-audit/postgres-redis/summary.md)); production two-process/live evidence остаётся pending | [ ] |
+| A15 | **Secret rotation:** DSN и webhook rotation при unchanged ref, exact four keys, ownership/drift refusal, resourceVersion CAS, no plaintext logs; старое значение не остаётся в runtime | [ ] |
+| A16 | **Public/private bootstrap identity + parent scope:** public GET/HEAD с пустым body возвращают 200 на exact public operation/page, private/POST/non-public отклонены без wake/session downgrade/backend forward. GrantAdapter повторно проверяет active grant и digest-verified published bundle по exact company/plugin/instance/version/artifact; static требует совпадения claims, durable grant и stored bundle без resolver/backend-digest/client fallback. Anonymous/static не получают capability token/Authorization. Public bootstrap остаётся company-only; private использует `2026110909` binding от READY deterministic source с exact cabinet/project/ProjectRow и снова fail-closed при missing/mismatched/deleted row, без legacy backfill. Поведение доказано на обоих entrypoints | [ ] |
+| A17 | **Реальный adapter registry и durable ports:** cold production composition содержит все девять typed implementations и quota hooks; missing/stub/unwired required port fail-closed. Audit/quota/activation-state/grant/artifact/admin работают на PostgreSQL/Redis/K8s без in-memory defaults; explicit test doubles отсутствуют в enabled production composition. Каждый adapter и `429 QUOTA_EXCEEDED` проверены против реального backend | [ ] |
+| A18 | **Legacy host cleanup + dormant cutover barrier:** import-graph guards выполнены, removed hosts/imports не возвращаются, current plugin path и preserved renderer проходят browser regression. `2026110802` не скопирован/зарегистрирован/применён; `CODE_FIRST_REMOVAL_INVENTORY` не исполняется, `cutover.py` меняет только metadata cursor/flags, REMOVAL/`declarative_app_removed=True` не evidence. S4 code-first cleanup и отдельный S5 ADR/review/acceptance остаются обязательными перед новой schema-only-downgrade revision от будущей current head | [ ] |
+| A19 | **Real backend/entrypoint harnesses + isolated invocation:** после снятия freeze выполнены production composition scenarios, затем `tests/migration/plugin_postgres`, `redis_plugin_acceptance`, `kafka_plugin_acceptance`, `minio_plugin_acceptance`, `tests/e2e/k8s/plugin_acceptance` и `entrypoint_acceptance` против disposable real backends с collected>0/skipped=0 и сохранённым JUnit/summary. [Точные команды и required env](plugin-migration-status.md#real-harness-invocation-contracts--не-acceptance) обязательны: exact package confcutdir/package path, early `-p` для Kafka/entrypoint, local fixtures без parent probes и ambient proxy. PostgreSQL: **27 collected / 27 passed / 0 skipped** ([PG JUnit](../../reports/module-audit/postgres-redis/plugin-postgres-junit.xml)), включая `2026110909`, no-backfill, rollback cycle и xact invalidate/detach/new physical connection; Redis: **22 collected / 22 passed / 0 skipped** ([Redis JUnit](../../reports/module-audit/postgres-redis/redis-plugin-acceptance-junit.xml)), MCP/jobs/quota; [summary](../../reports/module-audit/postgres-redis/summary.md); Kafka — typed ConsumerAssignment/heartbeat/commit fence и mandatory after-wake rebalance: **16 collected / 16 passed / 0 skipped** ([JUnit](../../reports/module-audit/kafka/junit-final.xml), [rebalance evidence](../../reports/module-audit/kafka/rebalance-evidence.log)); targeted units — **23 passed** ([JUnit](../../reports/module-audit/kafka/unit-kafka-adapters.xml)); MinIO — **29 collected / 29 passed / 0 skipped** ([JUnit](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/minio-plugin-acceptance-junit.xml), [summary](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/summary.json)), targeted units — **230 passed**; K8s выполнен на fresh disposable kind v1.37.0: **19 collected / 19 passed / 0 skipped** ([fix-report](../../reports/module-audit/k8s/fix-report.md), [JUnit](../../reports/module-audit/k8s/plugin-k8s-junit-fixed-rerun.xml)), targeted runtime units — **101 passed**; entrypoint — real adapters, tokens и два uvicorn + worker. Harnesses не закрывают `PLUGIN_JOB_DECLARATIONS`, real SealedSecret, CI/hello build/new signed bundle или live STS | [ ] |
+| A20 | **Jobs + Redis execution fencing:** production non-empty exact `PLUGIN_JOB_DECLARATIONS` выбирают только verified `(plugin_id, version, artifact_digest)` и являются configuration gate, test declarations не засчитываются. API typed hook, оба entrypoints и standalone deferred factory регистрируют согласованный scoped `ManifestJobTasks`. На реальном Redis `NX=None` является miss с последующим re-read exact binding/completed record, неподтверждённый response не success; owner/binding Lua CAS renew/complete остаётся активным через async post-validation/final CAS. Только pre-side-effect conflict автоматически retry; uncertain/cancel/post-validation mismatch не release/no-retry. Grant/artifact/backend revalidation, fresh wake и digest fences доказаны на реальном worker. Disposable Redis: **22 collected / 22 passed / 0 skipped** ([Redis JUnit](../../reports/module-audit/postgres-redis/redis-plugin-acceptance-junit.xml), [summary](../../reports/module-audit/postgres-redis/summary.md)); production declarations gate и live worker/entrypoints остаются pending | [ ] |
+| A21 | **MCP signed-RPC + real NX replay:** Real disposable Redis: **22 collected / 22 passed / 0 skipped** ([Redis JUnit](../../reports/module-audit/postgres-redis/redis-plugin-acceptance-junit.xml), [summary](../../reports/module-audit/postgres-redis/summary.md)); подтверждены `SET NX=True` create, фактический `None`→`False` miss и обязательный re-read; concurrent exact replay оставляет один canonical entry, foreign definitions дают `mcp_registration_conflict` без overwrite, unexpected response не success. Live SQL/JWT подтверждает explicit ACTIVE/is_active/revoked_at/timestamps без fallback и exact grant/company/plugin/instance/version/artifact/manifest binding. Registration не выбирает privilege/backend path; enforced `mcp/mcp.invoke` и один signed resolver обязательны. Sanitized typed errors, missing/raw/mismatch rejection, revoke, quota/audit и cross-tenant denial проверены на обоих entrypoints | [ ] |
+| A22 | **Runtime/infrastructure identity:** pod annotations проецируют фактические `plugin_instance_id`/`backend_digest` только через read-only `downwardAPI`; absence/spoofed/mismatched projection отклоняются. Claims, durable grant, activation resolver, activator result, WakeResult claims и lease проверяются по exact company/plugin/instance/artifact/grant fields без resolver/backend-digest fallback. Service proxy делает fresh wake и передаёт ровно fixed identity headers; pod status/logs/messages без independent data source возвращают 503 и не создают synthetic result | [ ] |
+| A23 | **Events + assignment fence + real configuration:** enabled composition требует typed `PLUGIN_EVENT_SIGNING_SECRET_REF` и реальный `plugin-event-signing.sealed.yaml` (не `.example`/fixture), кластерный SealedSecret→Secret и read-only mounts. Shared `event_redis`/`redis_client` composition и typed ConsumerAssignment fence after wake/before handler/heartbeat/renew/commit statically implemented. Disposable complete run с `KAFKA_PLUGIN_ACCEPTANCE_REQUIRE_COMPLETE=1`: **16 collected / 16 passed / 0 skipped** ([JUnit](../../reports/module-audit/kafka/junit-final.xml), [summary](../../reports/module-audit/kafka/acceptance-summary.json)); mandatory after-wake доказывает stale denial после wake без handler/backend/commit/DLQ, owner-only real-2xx completion/commit и recovery ровно с одним backend side effect ([rebalance evidence](../../reports/module-audit/kafka/rebalance-evidence.log)); targeted units — **23 passed** ([JUnit](../../reports/module-audit/kafka/unit-kafka-adapters.xml)). Sign/verify, independent key rotation, missing-key fail-closed и оба entrypoints проверяются | [ ] |
+| A24 | **MinIO STS post-probe + dedicated canary:** canary-only policy validated on real disposable MinIO: **29/29 passed, 0 skipped** ([JUnit](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/minio-plugin-acceptance-junit.xml), [summary](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/summary.json)). С реальными endpoint/version/credentials/policy и provisioned fixtures подтверждены default-disabled/unwired и отсутствие availability из config flag. Dedicated bucket даёт `HeadBucket=200`, fixed zero-byte object — `HEAD=200` + `ContentLength=0`; `NoSuchBucket`, `NoSuchKey`, ambiguous `404`/response не повышают availability. Foreign-key `HEAD` и foreign `ListBucket` обязаны вернуть `403`. Bounded async AssumeRole probe отбрасывает credentials; singleflight/freshness/retry/lifespan revalidation/error-close invalidation проверены на API/Gateway. Scoped bucket/prefix/policy/TTL соблюдаются без presign/static/admin fallback/plaintext logs. Standalone worker не evidence | [ ] |
+| A25 | **CI publication + signed shell bundle:** protected `PLUGIN_PLATFORM_PUBLICATION_CONFIG` и exact ModuleSource mapping валидируются до writes; release refs/referrers повторно проверены, pinned Trivy report относится к actual release backend, static-origin HEAD возвращает required CSP/security headers и exact `X-AgentScale-Bundle-Digest`. Shell handoff требует новый signed hello bundle с handoff consumer и matching bundle/backend digests; старый artifact/hello build без него не evidence. Фактический OIDC `POST /internal/plugin-artifacts` происходит только после этих gates и возвращает exact matching PUBLISHED; отсутствующие live inputs зафиксированы как blockers | [ ] |
+| A26 | **Pods/secret delivery:** `pods.allowlist` допускает только exact instance/project/job tuples, omitted declaration не даёт access. Reference-only `secret_delivery` создаёт отдельный owned delivery Secret с hashed keys/version digests, exact-set CAS reconcile и read-only `0400` mount; rotation удаляет stale values, revoke/uninstall очищает только разрешённые refs/Secret, source SecretStore не удаляется, plaintext отсутствует в manifests/logs | [ ] |
+| A27 | **Durable legacy scope resolver:** на реальной publication/PostgreSQL path empty grant+instance pair даёт deterministic `plugin_instance_id_for`, а persisted pair (включая revoked legacy и re-grant/uninstall-reinstall) сохраняет authoritative instance id. Partial/invalid/tenant/instance mismatch и read failure не выполняют approval/verifier/registry writes и дают typed `SCOPE_MISMATCH`/`SCOPE_RESOLUTION_UNAVAILABLE`; concurrent pair changes, exact signed `pods`/`secret_delivery` binding и replay проверены | [ ] |
+| A28 | **Scoped activation + real K8s lifecycle:** через [K8s harness](plugin-migration-status.md#real-harness-invocation-contracts--не-acceptance) с exact `python -m pytest -c tests/e2e/k8s/plugin_acceptance/pytest.ini --confcutdir=tests/e2e/k8s/plugin_acceptance tests/e2e/k8s/plugin_acceptance -v` и disposable kubeconfig/namespace подтверждены TokenRequest exact SA/audience/TTL≤3600 для одного lifecycle client, scoped RBAC deny для unrelated/mismatched identity, refresh/failure/shutdown и data path без mounted/static token. Deployment owner/digest/update-owner fences, rollback annotation removal и non-managed sibling volumes/mounts проверены. Lifecycle+delivery Secret exact-set CAS/stale-409, rotation/drift/stale-key cleanup, readOnly 0400 и scoped uninstall подтверждены; логи digest/id/status-only, без DSN/secrets/tokens. Shared-contour guards и owned TTL cleanup обязательны и подтверждены. Fresh disposable kind v1.37.0: **19 collected / 19 passed / 0 skipped** ([fix-report](../../reports/module-audit/k8s/fix-report.md), [JUnit](../../reports/module-audit/k8s/plugin-k8s-junit-fixed-rerun.xml)); targeted runtime units — **101 passed** ([unit JUnit](../../reports/module-audit/k8s/unit-targeted-junit.xml)). Это disposable K8s evidence, не production/live acceptance | [x] |
+| A29 | **Unified entrypoints:** enabled `prodavan.main` и `prodavan.main_plugin_gateway` на реальном составе используют согласованные declarations/repositories/stores/`ManifestJobTasks`/worker registration/MCP signed-RPC/event/provider composition без per-process divergence и in-memory defaults. Production `PLUGIN_JOB_DECLARATIONS` и real SealedSecret inputs присутствуют, Redis jobs/MCP и PostgreSQL update locks работают между процессами; disabled entrypoints остаются fail-closed | [ ] |
+| A30 | **Signed event fixtures:** enabled composition использует resolved отдельный key; signed fixture ACK и delivery, unsigned/tampered/unknown-topic идут в raw DLQ/fail-closed, duplicate ACK не повторяет handler, wake/handler body signature/topic binding, rotation/missing key fail-closed и нет fallback/plaintext logs. Disposable Kafka/Redpanda fixtures выполнены в составе **16 collected / 16 passed / 0 skipped** ([JUnit](../../reports/module-audit/kafka/junit-final.xml)); independent test signing refs/keys и no-plaintext logs подтверждены ([secret scan](../../reports/module-audit/kafka/secret-scan.json)). Rotation, real SealedSecret inputs и оба entrypoints остаются pending; fixtures не закрывают production configuration gate | [ ] |
+| A31 | **Independent identity review:** отдельный ревьюер воспроизводит deterministic initial/persisted legacy instance identity, fresh grant-id rotation, scoped lifecycle TokenRequest и runtime identity projection invariants по коду/evidence на финальном HEAD; self-tests и human enablement это ревью не заменяют | [ ] |
+| A32 | **Shared scope validation:** один neutral `validate_plugin_instance_scopes` реально используется ModuleSource и CI publication после read-only durable grant+instance resolution. Source mismatch отклоняется до SQL reservation/provider mutation с `MODULE_SOURCE_INSTANCE_SCOPE_MISMATCH`; partial/mismatch/read failure и canonical-manifest mismatch — до approval consumption/verifier/registry writes с typed errors; omitted declarations не дают доступа, foreign pods/secret refs не оставляют partial state | [ ] |
+| A33 | **Fresh grant ids:** revoke→re-grant и uninstall→reinstall с новой approval/publication выдают distinct fresh `grant_id` при stable authoritative persisted instance (deterministic для новых, preserved random для legacy). Partial/mismatched scope pair и same-id candidate отклоняются до writes/saga mutation; SQL REVOKED lock, exact company/plugin/instance fence, `UPDATE RETURNING`, rollback и concurrent revoke/re-grant подтверждены; старый grant/token/lease не accepted | [ ] |
+| A34 | **Rollback full-command replay + extended cycles:** `2026110908`, model, SQL и InMemory fingerprint semantics проверены на disposable PostgreSQL: **27 collected / 27 passed / 0 skipped** ([PG JUnit](../../reports/module-audit/postgres-redis/plugin-postgres-junit.xml), [summary](../../reports/module-audit/postgres-redis/summary.md)), включая rollback cycle/lost-response replay. Далее на PostgreSQL проверить fresh/historical/repeat migration, no-backfill и historical NULL rejection, затем A→B→A→B→A cycles. Каждый replay сравнивает полный stored `PluginArtifactRecord` (identity/digest/manifest/evidence/publication/status/timestamps) и durable lifecycle fields; lost response возвращает тот же full record без второго fact/нового timestamp, concurrent same rollback создаёт один fact. Reason/`command.actor` mismatch, stale/wrong generation/source и semantic mismatch дают typed conflict. Rollback сохраняет artifact/current CAS + lifecycle row в одной UoW без process-local state; unique token, borrowed-session и production caller доказаны | [ ] |
+| A35 | **Exact-key presign + strict SigV4 validation:** реальный MinIO подтверждает full key/bucket и отдельный presigner principal, только GET/PUT/HEAD, TTL 60..3600 и exact `X-Amz-Expires`. Query содержит ровно шесть однозначных fields (`Algorithm`, `Credential`, `Date`, `Expires`, `SignedHeaders`, `Signature`) с валидными algorithm/date/credential scope/signature; unknown/case-variant/repeated/session-token fields, `X-Amz-Secret-Key` и `AWSAccessKeyId` отклонены. Cross-tenant/plugin, wildcard/list/traversal/encoded escape, wrong method/expiry и admin signing отклонены; URL/signature/secrets отсутствуют в audit. Authorization проверяется на реально provisioned exact object: generic `404`, `NoSuchBucket`, `NoSuchKey` и ambiguous responses не засчитываются как success и оставляют operation unwired. Независимый STS gate `objects.scoped_credentials` не заменяется presign fallback. Real disposable MinIO: **29/29 passed, 0 skipped** ([JUnit](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/minio-plugin-acceptance-junit.xml), [summary](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/summary.json)); production/live unverified | [x] |
+| A36 | **Trusted provider dependency/route:** zero-arg `get_scoped_runtime_provider` без trusted composition даёт 503 и не трактует request annotation как tenant-controlled query. Production один раз строит provider из scoped platform ports и устанавливает изолированный per-app override без request/global `app.state` lookup; два apps не разделяют override. Fixed `/capabilities/v1/runtime/*` реально доступны на обоих enabled entrypoints через shared router и остаются fail-closed при disabled composition. Verified claims, strict body/response budgets, no query identity/generic exec, per-call active-grant/canonical-backend/artifact/backend-digest binding и cross-tenant denial проверены. Egress declaration использует durable grant, artifact metadata — digest-verified OCI, secret metadata — digest-only SecretStore; `max_result_bytes` ограничивает fetch/result и превышение возвращает `413 ARTIFACT_RESULT_BYTE_LIMIT_EXCEEDED`; pod status/logs/messages остаются 503 | [ ] |
+| A37 | **Stored-record replay + async gateway registry reads:** publish/promote replay возвращает persisted record с authoritative timestamps, а не локальный candidate; exact replay не меняет stored evidence/timestamps, semantic mismatch отклоняется. `GrantAdapter` и SQL grant→manifest composition реально используют `get_async` без sync SQL bridge на event loop; exact grant/plugin/version/digest binding, unavailable/mismatch fail-closed и поведение обоих enabled entrypoints подтверждены integration/live evidence | [ ] |
+| A7 | **Отменено ADR-008:** не изменять `ProjectIdlePauseService` для plugin jobs. Это N/A, **не completed acceptance** | N/A |
 
-## Известные архитектурные долги (не блокеры F0–F9)
+## ADR-009 self-service — только после принятия
 
-1. **Проекция `AppVersion`:** плагинный манифест `plugin-rpc/1` не проходит legacy
-   `validate_manifest` (`protocol == "1.0"`). Реестр хранит нормализованную обёртку +
-   исходный подписанный manifest под `plugin_manifest`. `AppVersion` НЕ ослаблять.
-2. **MinIO STS** — требуется подтверждение официальной документацией
-   `AssumeRole` / policy variables; fallback — scoped presigned с явным префиксом.
-3. **Keyless cosign на self-hosted runners** — проверить OIDC `id-token: write` и
-   приватный ghcr; fallback — cosign с KMS-ключом и зафиксированным trust root.
-4. **Wildcard subdomain** — отложен до публичного домена + cert-manager DNS-01
-   (in-tree солвера для reg.ru нет; делегирование `_acme-challenge` на Cloudflare/acme-dns).
-5. **KEDA HTTP Add-on** — целевой вариант после снятия ограничений whitelist kinds
-   и бюджета ноды; в v4 собственный activator.
+ADR-009 сейчас **«Предложено»**. Наличие ModuleSource/reservation, GitHub App,
+OIDC и saga кода не меняет этот статус и не даёт live evidence:
 
----
+| # | Target acceptance после принятия | Live |
+|---|---|---|
+| B1 | Agent получает source snapshot без Git credentials и возвращает patch; push из pod невозможен | [ ] |
+| B2 | SQL reservation предотвращает cross-worker/cross-tenant conflicts; GitHub App создаёт protected PR; human review и default-branch protection подтверждены | [ ] |
+| B3 | Trusted reusable workflow pinned SHA; OIDC repository/ref/sha/job_workflow_ref проверены | [ ] |
+| B4 | Deploy/rollback saga не оставляет частично активные menu/public и возвращает согласованную digest pair. Меню не реализовано (см. FINAL-REPORT §6): критерий проверяет только public, а menu ждёт решения о версии схемы манифеста | [ ] |
+| B5 | Rollback кода не выполняет автоматический destructive rollback БД | [ ] |
 
-**A7 снят:** `ProjectIdlePauseService` (`application/project_service/idle_pause.py`)
-принадлежит **агентским проектам** и считает idle по `AgentSessionRow`/`AgentEventRow`.
-Плагины company-scoped и усыпляются собственным activator'ом (задача 09), где
-`ActivationState.active_job_ids` уже блокирует `should_suspend`. Править агентский
-сервис ради плагинов — ровно та ошибка «унификации разных lifecycle», которую
-отверг ADR-008.
+## История и пересмотр
+
+Прежние `[x]` в A3/A4/A5/A7, `[~]` в остальных критериях и исторические
+**4225 / 785 / 106** не являются live evidence. Они сохранены только как
+unverified historical claims в [migration status](plugin-migration-status.md).
+Завершённый static legacy host cleanup, написанные production composition tests
+и полный approve→CI publication→grant acceptance doubles также не превращают эту
+карту в pass.
+
+Offline verification started; formal runs limited to listed evidence
+(dated baseline 2026-11-10 в [migration status](plugin-migration-status.md)).
+Эта документная правка **не запускала** tests, build, lint, compile, git
+status/diff или live cluster checks; live/prod не использовались, commit/push
+не выполнялись. Отдельные disposable pass-отметки не снимают STOP-SHIP и не
+являются production enablement.

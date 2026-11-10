@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,6 +18,11 @@ def _id(prefix: str) -> str:
 
 class ProjectRow(Base):
     __tablename__ = "projects"
+    __table_args__ = (
+        UniqueConstraint(
+            "id", "company_id", "cabinet_id", name="uq_project_tenant_cabinet_anchor"
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     company_id: Mapped[str] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)

@@ -37,7 +37,6 @@ from prodavan.application.plugins.activation.errors import (
     WakeTimeout,
 )
 from prodavan.application.plugins.activation.ports import (
-    ActivationAuditEvent,
     AuditPort,
     ClockPort,
     MintPort,
@@ -54,7 +53,6 @@ from prodavan.application.plugins.activation.state import (
     JobLease,
     WakeResult,
 )
-from prodavan.application.plugins.activation.state_store import InMemoryStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +67,12 @@ class PluginActivator:
     внутри процесса. Ожидание Ready НЕ держит блокировку: иначе второй wake
     не смог бы ни узнать о пробуждении, ни дождаться его (взаимный дедлок).
 
-    ``state_store`` можно не передавать: тогда используется in-process
-    ``InMemoryStateStore`` (dev/тесты). В проде родитель обязан передать
-    реализацию на БД/ConfigMap с настоящим CAS — см. ``state_store.py``.
+    ``state_store`` — ОБЯЗАТЕЛЬНЫЙ порт без default: молчаливый in-process
+    ``InMemoryStateStore`` как production default удалён. В проде родитель
+    передаёт реализацию на БД/ConfigMap с настоящим CAS — см. ``state_store.py``.
+    ``InMemoryStateStore`` допустим ТОЛЬКО как явно переданный test/dev
+    constructor override; отсутствие порта = ``TypeError`` при construction,
+    до любого service use (fail-closed).
     """
 
     def __init__(
@@ -83,7 +84,7 @@ class PluginActivator:
         mint: MintPort,
         audit: AuditPort,
         policy: IdlePolicy,
-        state_store: StateStorePort | None = None,
+        state_store: StateStorePort,
         proxy: ProxyPort | None = None,
     ) -> None:
         self._scale = scale
@@ -92,7 +93,7 @@ class PluginActivator:
         self._mint = mint
         self._audit = audit
         self._policy = policy
-        self._store = state_store or InMemoryStateStore()
+        self._store = state_store
         self._proxy = proxy
 
         self._locks: dict[str, asyncio.Lock] = {}
@@ -192,7 +193,7 @@ class PluginActivator:
         # от зависшего владельца слота, а не бизнес-бюджет готовности.
         remaining = budget - (self._now() - started_at).total_seconds()
         if remaining <= 0:
-            self._record(
+            await self._record(
                 "plugin_wake_up",
                 instance_id,
                 outcome="denied",
@@ -203,7 +204,7 @@ class PluginActivator:
         try:
             await asyncio.wait_for(self._wake_semaphore.acquire(), timeout=remaining)
         except TimeoutError as exc:
-            self._record(
+            await self._record(
                 "plugin_wake_up",
                 instance_id,
                 outcome="denied",
@@ -231,7 +232,7 @@ class PluginActivator:
 
             # Аудит успеха — ДО мутации: append failure для позитивной
             # мутации = system failure (§4.5), а не «уже подняли, ладно».
-            self._record(
+            await self._record(
                 "plugin_wake_up",
                 instance_id,
                 outcome="allowed",
@@ -265,7 +266,7 @@ class PluginActivator:
             logger.exception("plugin wake failed instance_id=%s", instance_id)
             if scaled_up:
                 await self._restore_zero(instance_id, previous_replicas)
-            self._record(
+            await self._record(
                 "plugin_wake_up",
                 instance_id,
                 outcome="denied",
@@ -376,7 +377,7 @@ class PluginActivator:
             if pruned.desired is DesiredState.SUSPENDED:
                 return False
             if pruned.wake_in_flight or pruned.has_active_jobs(now=now):
-                self._record(
+                await self._record(
                     "plugin_suspend",
                     instance_id,
                     outcome="denied",
@@ -389,7 +390,7 @@ class PluginActivator:
 
             # Решение об усыплении пишется ДО мутации: если append-only sink
             # недоступен, до scale дело вообще не доходит (§4.5).
-            self._record(
+            await self._record(
                 "plugin_suspend",
                 instance_id,
                 outcome="allowed",
@@ -405,12 +406,44 @@ class PluginActivator:
             # Факт исполнения — отдельное событие. Откатывать 0→1 здесь было
             # бы опаснее, чем сообщить о сбое аудита: состояние уже честно
             # SUSPENDED, а сбой записи виден оператору.
-            self._record(
+            await self._record(
                 "plugin_suspend",
                 instance_id,
                 outcome="allowed",
                 code=ActivationErrorCode.ALLOWED.value,
                 reason="replicas 1->0",
+                resource=f"deployment/{instance_id}",
+            )
+            return True
+
+    async def force_suspend(self, instance_id: str) -> bool:
+        """Admin revoke: scale=0 независимо от idle TTL/jobs/wake и фактическая проверка."""
+        async with self._lock_for(instance_id):
+            await self._record(
+                "plugin_suspend",
+                instance_id,
+                outcome="allowed",
+                code=ActivationErrorCode.ALLOWED.value,
+                reason="forced admin revoke; idle TTL and jobs bypassed",
+                resource=f"deployment/{instance_id}",
+            )
+            await self._scale_down(instance_id)
+            replicas = await self._read_replicas(instance_id)
+            if replicas != 0:
+                raise ScaleUnavailable(
+                    plugin_instance_id=instance_id,
+                    detail=f"forced suspend: ожидалось replicas=0, фактически {replicas}",
+                )
+            await self._mutate_state(
+                instance_id,
+                lambda st: st.with_desired(DesiredState.SUSPENDED).with_wake_in_flight(False),
+            )
+            await self._record(
+                "plugin_suspend",
+                instance_id,
+                outcome="allowed",
+                code=ActivationErrorCode.ALLOWED.value,
+                reason="forced revoke confirmed replicas=0",
                 resource=f"deployment/{instance_id}",
             )
             return True
@@ -567,7 +600,7 @@ class PluginActivator:
             # Потеря Ready у «живого» пода: честный отказ, не «успех по флагу».
             raise NotReady(plugin_instance_id=instance_id)
         claims = await self._mint_fresh(instance_id)
-        self._record(
+        await self._record(
             "plugin_wake_up",
             instance_id,
             outcome="allowed",
@@ -730,7 +763,7 @@ class PluginActivator:
     async def _fail_ready_timeout(self, instance_id: str, *, reason: str) -> None:
         """Откат 1→0 + append-only аудит отказа. Исключения аудита не глушатся."""
         await self._restore_zero(instance_id, previous_replicas=0)
-        self._record(
+        await self._record(
             "plugin_wake_up",
             instance_id,
             outcome="denied",
@@ -749,7 +782,7 @@ class PluginActivator:
         try:
             await self._scale.scale_to(instance_id, replicas)
         except Exception as exc:
-            self._record(
+            await self._record(
                 "plugin_scale",
                 instance_id,
                 outcome="denied",
@@ -869,7 +902,7 @@ class PluginActivator:
 
     async def _record_wake_started(self, instance_id: str, *, previous_replicas: int) -> None:
         """Записать НАМЕРЕНИЕ 0→1 до ожидания Ready (§4.5: решение ≠ факт)."""
-        self._record(
+        await self._record(
             "plugin_wake_up",
             instance_id,
             outcome="allowed",
@@ -878,7 +911,7 @@ class PluginActivator:
             resource=f"deployment/{instance_id}",
         )
 
-    def _record(
+    async def _record(
         self,
         event_type: str,
         instance_id: str,
@@ -894,16 +927,17 @@ class PluginActivator:
         DSN, ни тел запросов, ни PII (§4.5 v4, критерий 11).
         """
         try:
-            self._audit.record(
-                ActivationAuditEvent(
-                    event_type=event_type,
-                    plugin_instance_id=instance_id,
-                    occurred_at=self._now(),
-                    outcome=outcome,
-                    code=code,
-                    reason=reason,
-                    resource=resource,
-                )
+            await self._audit.append_event(
+                event_type,
+                details={
+                    "plugin_instance_id": instance_id,
+                    "occurred_at": self._now(),
+                    "operation": event_type,
+                    "decision": "allow" if outcome == "allowed" else "deny",
+                    "code": code,
+                    "reason": reason,
+                    "resource": resource,
+                },
             )
         except Exception as exc:
             if outcome == "allowed":

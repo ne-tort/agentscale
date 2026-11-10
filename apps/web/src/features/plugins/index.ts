@@ -21,13 +21,14 @@ export type {
 export {
   usePluginFrame,
   resolveStaticOrigin,
-  buildPluginSrc,
   pluginFrameStatusKey,
 } from "./usePluginFrame";
 export type {
   PluginInfoPort,
   PluginInfoQuery,
   PluginInfo,
+  ConnectedPluginInfo,
+  NotConnectedPluginInfo,
   PluginFrameConfig,
   UsePluginFrameOptions,
   UsePluginFrameResult,
@@ -47,6 +48,12 @@ export type {
   PluginChannelMessage,
   PluginReadyMessage,
   HostReadyMessage,
+  GrantReadyMessage,
+  PluginRequestHandler,
+  PluginRequestContext,
+  PluginRpcError,
+  PluginRpcErrorCode,
+  PluginRpcMethod,
   PluginRpcRequestMessage,
   PluginRpcResponseMessage,
   PluginErrorMessage,
@@ -61,4 +68,17 @@ export {
   pluginErrorKey,
   pluginSessionRequired,
 } from "./errors";
+export { buildPluginSrc } from "./bootstrap";
+export {
+  createManifestOperationBroker,
+  createPluginGatewayTransport,
+  PluginOperationError,
+} from "./operationBroker";
+export type {
+  ManifestOperationBrokerOptions,
+  PluginGatewayTransportOptions,
+  PluginOperationTransport,
+  PluginOperationTransportRequest,
+  PluginOperationDenial,
+} from "./operationBroker";
 export type { PluginErrorCode } from "./errors";

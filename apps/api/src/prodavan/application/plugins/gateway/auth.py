@@ -18,8 +18,17 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Mapping
+
+from .canonical import (
+    canonical_backend_path,
+    canonical_raw_query,
+    webhook_external_path,
+    webhook_v2_signing_bytes,
+)
 
 from prodavan.application.plugins.gateway.errors import (
     GatewayError,
@@ -35,12 +44,15 @@ from prodavan.application.plugins.gateway.ports import (
     GatewayAuditEvent,
     GatewayClaims,
     GatewayGrant,
+    GatewayOperation,
     GatewaySession,
     GrantPort,
     HmacPort,
     RateLimitPort,
     SecretPort,
     SessionPort,
+    VerifiedWebhook,
+    is_valid_artifact_digest,
 )
 
 # ---------------------------------------------------------------------------
@@ -48,6 +60,8 @@ from prodavan.application.plugins.gateway.ports import (
 # ---------------------------------------------------------------------------
 
 HEADER_SIGNATURE = "X-Prodavan-Signature"
+HEADER_SIGNATURE_VERSION = "X-Prodavan-Signature-Version"
+HEADER_TIMESTAMP = "X-Prodavan-Timestamp"
 HEADER_EVENT = "X-Prodavan-Event"
 HEADER_DELIVERY = "X-Prodavan-Delivery"
 
@@ -85,6 +99,20 @@ class GatewayLimits:
     max_idempotent_retries: int = 2
     #: Таймаут чтения потокового ответа (SSE) — отдельный от обычного.
     stream_timeout_seconds: float = 300.0
+    #: Фактические caps входящих тел и non-streaming upstream response.
+    webhook_body_limit_bytes: int = 1_048_576
+    page_body_limit_bytes: int = 1_048_576
+    typed_payload_limit_bytes: int = 1_048_576
+    backend_response_limit_bytes: int = 4_194_304
+    #: Дешёвые pre-HMAC limits: не дают анониму съесть per-installation bucket.
+    webhook_preauth_ip_per_minute: int = 60
+    webhook_preauth_global_per_minute: int = 10_000
+    #: Freshness v2 и processing lease (done живёт delivery_ttl_seconds).
+    webhook_timestamp_tolerance_seconds: int = 300
+    #: 240с покрывает default wake 120с + 3 backend-попытки по 30с (210с).
+    delivery_lease_seconds: int = 240
+    #: XFF учитывается только если непосредственный peer входит в эти CIDR/IP.
+    trusted_proxy_cidrs: tuple[str, ...] = ()
 
 
 DEFAULT_LIMITS = GatewayLimits()
@@ -104,6 +132,9 @@ class WebhookAuthResult:
     event: str
     delivery_id: str
     duplicate: bool = False
+    verified: VerifiedWebhook | None = None
+    delivery_key: str = ""
+    replay_token: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +204,7 @@ class GatewayAuth:
     audit: AuditPort
     hmac_verifier: HmacPort = field(default_factory=Sha256HmacVerifier)
     limits: GatewayLimits = DEFAULT_LIMITS
+    clock: Callable[[], float] = time.time
 
     def __post_init__(self) -> None:
         # Fail-closed: ни один порт не может быть None. Отсутствие интеграции —
@@ -343,6 +375,32 @@ class GatewayAuth:
                 GatewayErrorCode.GRANT_INACTIVE,
                 detail=f"no active grant for plugin '{plugin_id}' in company '{company_id}'",
             )
+        if not isinstance(grant.plugin_instance_id, str) or not grant.plugin_instance_id.strip():
+            await self._audit(
+                f"plugin_{surface}_denied",
+                plugin_id=plugin_id,
+                company_id=company_id,
+                decision="deny",
+                code=GatewayErrorCode.PORT_UNAVAILABLE.value,
+                reason="active durable grant has no plugin_instance_id",
+            )
+            raise GatewayError(
+                GatewayErrorCode.PORT_UNAVAILABLE,
+                detail="active durable grant has no plugin_instance_id (fail-closed)",
+            )
+        if not is_valid_artifact_digest(grant.artifact_digest):
+            await self._audit(
+                f"plugin_{surface}_denied",
+                plugin_id=plugin_id,
+                company_id=company_id,
+                decision="deny",
+                code=GatewayErrorCode.PORT_UNAVAILABLE.value,
+                reason="active durable grant has no valid artifact_digest",
+            )
+            raise GatewayError(
+                GatewayErrorCode.PORT_UNAVAILABLE,
+                detail="active durable grant has no valid artifact_digest (fail-closed)",
+            )
         return grant
 
     @staticmethod
@@ -364,6 +422,154 @@ class GatewayAuth:
                 return True
         return False
 
+    @staticmethod
+    def _is_exact_public(path: str, declared: frozenset[str]) -> bool:
+        """Exact canonical route match; префиксы/нормализация здесь запрещены."""
+        try:
+            if canonical_backend_path(path) != path:
+                return False
+            return any(
+                entry == path and canonical_backend_path(entry) == entry
+                for entry in declared
+            )
+        except (TypeError, ValueError):
+            return False
+
+    async def _try_authorize_public_operation(
+        self,
+        *,
+        plugin_id: str,
+        company_id: str,
+        path: str,
+        method: str | None,
+        raw_body: bytes | None,
+        raw_query: bytes | None,
+        route_path: str | None,
+        headers: Mapping[str, str],
+        grant: GatewayGrant,
+        declared_public: frozenset[str],
+        request_id: str,
+        client_ip: str,
+    ) -> PageAuthResult | None:
+        """Узкое anonymous-исключение для read-only public manifest operation.
+
+        ``None`` означает, что исключение неприменимо и обычная session auth
+        должна продолжиться. Наличие session token никогда не понижается до
+        anonymous. Bootstrap DTO сюда не передаётся и доказательством не является.
+        Разрешены только GET/HEAD с пустым body по explicit public declaration;
+        side-effecting operations требуют отдельного позднего design, не bypass.
+        Signature-заголовки здесь identity не доказывают и не используются;
+        существующий webhook HMAC остаётся отдельным неизменным контуром.
+        """
+        if (
+            route_path is None
+            or self._session_token(headers) is not None
+            or not self._is_exact_public(route_path, declared_public)
+        ):
+            return None
+        resolver = getattr(self.grants, "rpc_operations", None)
+        if not callable(resolver):
+            return None
+        declarations = await resolver(plugin_id=plugin_id, company_id=company_id)
+        if declarations is None:
+            return None
+        if not isinstance(raw_query, bytes):
+            raise GatewayError(
+                GatewayErrorCode.OPERATION_NOT_ALLOWED,
+                detail="anonymous public operation requires explicit raw query bytes",
+            )
+        try:
+            backend_path = canonical_backend_path(path)
+            canonical_raw_query(raw_query)
+            operations = tuple(declarations)
+        except (TypeError, ValueError) as exc:
+            raise GatewayError(
+                GatewayErrorCode.INVALID_PATH,
+                detail="invalid public operation path or manifest registry",
+            ) from exc
+
+        path_digest = hashlib.sha256(backend_path.encode("utf-8")).hexdigest()
+        normalized_method = method.upper() if isinstance(method, str) else ""
+        read_only = normalized_method in {"GET", "HEAD"} and raw_body == b""
+        if not read_only or any(not isinstance(item, GatewayOperation) for item in operations):
+            matches: list[GatewayOperation] = []
+        else:
+            matches = [
+                item
+                for item in operations
+                # HEAD переиспользует read-only GET declaration; manifest
+                # продолжает допускать только canonical GET/POST declarations.
+                if item.backend_path == backend_path and item.http_method == "GET"
+            ]
+        if len(matches) != 1 or not matches[0].public:
+            await self._audit(
+                "plugin_page_denied",
+                plugin_id=plugin_id,
+                company_id=company_id,
+                decision="deny",
+                code=GatewayErrorCode.OPERATION_NOT_ALLOWED.value,
+                reason=(
+                    "operation is not a unique read-only public declaration "
+                    "in the signed manifest"
+                ),
+                path_digest=path_digest,
+                request_id=request_id,
+            )
+            raise GatewayError(
+                GatewayErrorCode.OPERATION_NOT_ALLOWED,
+                detail=(
+                    "anonymous access requires an exact public GET declaration "
+                    "and an empty body"
+                ),
+            )
+        operation = matches[0]
+
+        subject = hashlib.sha256((client_ip or "anon").encode("utf-8")).hexdigest()
+        await self._enforce_rate_limit(
+            bucket=self._bucket("public_page", plugin_id, company_id, subject),
+            limit=self.limits.public_page_per_minute,
+            window_seconds=self.limits.window_seconds,
+            event_kind="plugin_page_public",
+            plugin_id=plugin_id,
+            company_id=company_id,
+        )
+        claims = GatewayClaims(
+            plugin_id=plugin_id,
+            company_id=company_id,
+            subject_id="anon",
+            plugin_instance_id=grant.plugin_instance_id,
+            artifact_digest=grant.artifact_digest,
+            scopes=ANON_SCOPES,
+            project_id=None,
+            grant_id=grant.grant_id,
+            anonymous=True,
+        )
+        anon_grant = GatewayGrant(
+            grant_id=grant.grant_id,
+            plugin_instance_id=grant.plugin_instance_id,
+            artifact_digest=grant.artifact_digest,
+            published_artifact_digest=grant.published_artifact_digest,
+            active=True,
+            capability_token="",
+            operations=frozenset(),
+        )
+        await self._audit(
+            "plugin_page_opened",
+            plugin_id=plugin_id,
+            company_id=company_id,
+            decision="allow",
+            subject_id="anon",
+            grant_id=grant.grant_id,
+            request_id=request_id,
+            metadata={
+                "public": True,
+                "scopes": sorted(ANON_SCOPES),
+                "operation": operation.operation,
+                "capability": f"{operation.capability_id}@{operation.capability_version}",
+            },
+        )
+        return PageAuthResult(claims=claims, grant=anon_grant, public=True)
+
     # ------------------------------------------------------------- /pluginpage
 
     async def authorize_page(
@@ -374,7 +580,12 @@ class GatewayAuth:
         path: str,
         headers: Mapping[str, str],
         is_api: bool = False,
+        method: str | None = None,
+        raw_body: bytes | None = None,
+        raw_query: bytes | None = None,
+        route_path: str | None = None,
         request_id: str = "",
+        client_ip: str = "",
     ) -> PageAuthResult:
         """Авторизация ``/pluginpage/{plugin}/{company}/{path}``.
 
@@ -383,12 +594,15 @@ class GatewayAuth:
         2. если путь в ``public_pages`` **и это не ``/api/*``** → урезанный
            ``ANON_SCOPES`` + ОТДЕЛЬНЫЙ rate limit, БЕЗ сессии и БЕЗ
            capability-токена;
-        3. иначе — обязательная сессия + ``employee ∈ company``.
+        3. для ``/api/*`` без session token — ТОЛЬКО exact public route_path,
+           уникальная read-only public GET declaration из signed manifest,
+           метод GET/HEAD и пустой body; side effects anonymous запрещены;
+        4. иначе — обязательная сессия + ``employee ∈ company``.
 
-        ВАЖНО: исключение ``public_pages`` НЕ распространяется на ``/api/*``.
-        Анонимный вызов backend API плагина всегда даёт ``401`` (критерий
-        §11 №6), даже если страница объявлена публичной: иначе публичная
-        страница получила бы доступ к мутирующим эндпоинтам backend'а.
+        Public bootstrap как самостоятельное доказательство не используется.
+        Generic ``/api/*`` без всех этих доказательств по-прежнему даёт 401;
+        private/unknown operation на public page даёт 403. Anonymous получает
+        пустой capability_token и operations, независимо от durable grant.
         """
         if not plugin_id or not company_id:
             raise GatewayError(
@@ -406,7 +620,16 @@ class GatewayAuth:
 
         # --- публичная страница: явное исключение, урезанный scope ----------
         if public:
-            subject = self._header(headers, "X-Forwarded-For") or "anon"
+            if raw_body not in (None, b""):
+                # Public static остаётся read-only: GET/HEAD принимают только
+                # пустое body; POST и другие методы отклоняет proxy с 405.
+                raise GatewayError(
+                    GatewayErrorCode.OPERATION_NOT_ALLOWED,
+                    detail="anonymous public static requires GET/HEAD with an empty body",
+                )
+            # XFF сюда не читается: router передаёт peer, уже разрешённый по
+            # trusted_proxy_cidrs. Дополнительно не храним сам IP в Redis key.
+            subject = hashlib.sha256((client_ip or "anon").encode("utf-8")).hexdigest()
             await self._enforce_rate_limit(
                 bucket=self._bucket("public_page", plugin_id, company_id, subject),
                 limit=self.limits.public_page_per_minute,
@@ -419,6 +642,8 @@ class GatewayAuth:
                 plugin_id=plugin_id,
                 company_id=company_id,
                 subject_id="anon",
+                plugin_instance_id=grant.plugin_instance_id,
+                artifact_digest=grant.artifact_digest,
                 scopes=ANON_SCOPES,
                 project_id=None,
                 grant_id=grant.grant_id,
@@ -427,6 +652,11 @@ class GatewayAuth:
             # Anon НЕ получает capability-токен даже если grant его выдал.
             anon_grant = GatewayGrant(
                 grant_id=grant.grant_id,
+                plugin_instance_id=grant.plugin_instance_id,
+                artifact_digest=grant.artifact_digest,
+                # Preserve only exact authenticated/published bundle evidence.
+                # Anonymous never gains capability token or backend authority.
+                published_artifact_digest=grant.published_artifact_digest,
                 active=True,
                 capability_token="",
                 operations=frozenset(),
@@ -442,6 +672,24 @@ class GatewayAuth:
                 metadata={"public": True, "scopes": sorted(ANON_SCOPES)},
             )
             return PageAuthResult(claims=claims, grant=anon_grant, public=True)
+
+        if is_api:
+            public_operation = await self._try_authorize_public_operation(
+                plugin_id=plugin_id,
+                company_id=company_id,
+                path=path,
+                method=method,
+                raw_body=raw_body,
+                raw_query=raw_query,
+                route_path=route_path,
+                headers=headers,
+                grant=grant,
+                declared_public=declared_public,
+                request_id=request_id,
+                client_ip=client_ip,
+            )
+            if public_operation is not None:
+                return public_operation
 
         # --- обычная страница: сессия + employee ∈ company ------------------
         await self._enforce_rate_limit(
@@ -491,6 +739,8 @@ class GatewayAuth:
             plugin_id=plugin_id,
             company_id=company_id,
             subject_id=session.subject_id,
+            plugin_instance_id=grant.plugin_instance_id,
+            artifact_digest=grant.artifact_digest,
             scopes=SESSION_SCOPES,
             grant_id=grant.grant_id,
             employee_id=session.employee_id,
@@ -509,6 +759,139 @@ class GatewayAuth:
 
     # ---------------------------------------------------------------- /webhook
 
+    async def _enforce_webhook_preauth(
+        self, *, plugin_id: str, company_id: str, client_ip: str
+    ) -> None:
+        """Bounded IP/global limits до секрета/HMAC и per-installation bucket."""
+        subject = hashlib.sha256((client_ip or "unknown").encode("utf-8")).hexdigest()
+        await self._enforce_rate_limit(
+            bucket=f"plugin-gateway:rl:webhook_preauth_ip:{subject}",
+            limit=self.limits.webhook_preauth_ip_per_minute,
+            window_seconds=self.limits.window_seconds,
+            event_kind="plugin_webhook_preauth",
+            plugin_id=plugin_id,
+            company_id=company_id,
+        )
+        await self._enforce_rate_limit(
+            bucket="plugin-gateway:rl:webhook_preauth_global",
+            limit=self.limits.webhook_preauth_global_per_minute,
+            window_seconds=self.limits.window_seconds,
+            event_kind="plugin_webhook_preauth",
+            plugin_id=plugin_id,
+            company_id=company_id,
+        )
+
+    async def _check_webhook_route(
+        self, *, plugin_id: str, company_id: str, path: str
+    ) -> None:
+        """Применить manifest allowlist, если GrantPort смог его предоставить."""
+        resolver = getattr(self.grants, "webhook_routes", None)
+        if not callable(resolver):
+            return
+        declared = await resolver(plugin_id=plugin_id, company_id=company_id)
+        if declared is None:
+            return
+        if self._is_public(path, frozenset(declared)):
+            return
+        await self._audit(
+            "plugin_webhook_received",
+            plugin_id=plugin_id,
+            company_id=company_id,
+            decision="deny",
+            code=GatewayErrorCode.WEBHOOK_ROUTE_NOT_ALLOWED.value,
+            reason="webhook route is not present in manifest allowlist",
+            path_digest=hashlib.sha256(canonical_backend_path(path).encode("utf-8")).hexdigest(),
+        )
+        raise GatewayError(
+            GatewayErrorCode.WEBHOOK_ROUTE_NOT_ALLOWED,
+            detail="webhook route is not declared by the plugin manifest",
+        )
+
+    async def _claim_webhook_delivery(
+        self,
+        *,
+        key: str,
+        token: str,
+        plugin_id: str,
+        company_id: str,
+    ) -> DeliveryVerdict:
+        claim = getattr(self.rate_limit, "claim_delivery_lease", None)
+        if not callable(claim):
+            raise GatewayError(
+                GatewayErrorCode.PORT_UNAVAILABLE,
+                detail="webhook delivery lease/commit port is not wired",
+                retry_after_seconds=self.limits.retry_after_seconds,
+            )
+        try:
+            return await claim(
+                key=key,
+                ttl_seconds=self.limits.delivery_ttl_seconds,
+                lease_seconds=self.limits.delivery_lease_seconds,
+                token=token,
+            )
+        except GatewayError:
+            raise
+        except Exception as exc:
+            raise GatewayError(
+                GatewayErrorCode.UPSTREAM_ERROR,
+                detail="webhook delivery lease backend unavailable",
+                retry_after_seconds=self.limits.retry_after_seconds,
+            ) from exc
+
+    async def commit_webhook(self, result: WebhookAuthResult) -> None:
+        """Перевести delivery в done ТОЛЬКО после подтверждённого backend 2xx."""
+        if result.duplicate or not result.delivery_key:
+            return
+        commit = getattr(self.rate_limit, "commit_delivery", None)
+        if not callable(commit):
+            raise GatewayError(
+                GatewayErrorCode.DELIVERY_COMMIT_FAILED,
+                detail="webhook delivery commit port is not wired",
+                retry_after_seconds=self.limits.retry_after_seconds,
+            )
+        try:
+            committed = await commit(
+                key=result.delivery_key,
+                ttl_seconds=self.limits.delivery_ttl_seconds,
+                token=result.replay_token,
+            )
+        except GatewayError:
+            raise
+        except Exception as exc:
+            raise GatewayError(
+                GatewayErrorCode.DELIVERY_COMMIT_FAILED,
+                detail="webhook delivery commit backend unavailable",
+                retry_after_seconds=self.limits.retry_after_seconds,
+            ) from exc
+        if not committed:
+            raise GatewayError(
+                GatewayErrorCode.DELIVERY_COMMIT_FAILED,
+                detail="webhook delivery lease was lost before commit; retry is required",
+                retry_after_seconds=self.limits.retry_after_seconds,
+            )
+
+    async def release_webhook(self, result: WebhookAuthResult) -> None:
+        """Разрешить retry после non-2xx/202/timeout, не удаляя чужой done."""
+        if result.duplicate or not result.delivery_key:
+            return
+        release = getattr(self.rate_limit, "release_delivery", None)
+        if not callable(release):
+            raise GatewayError(
+                GatewayErrorCode.DELIVERY_COMMIT_FAILED,
+                detail="webhook delivery release port is not wired",
+                retry_after_seconds=self.limits.retry_after_seconds,
+            )
+        try:
+            await release(key=result.delivery_key, token=result.replay_token)
+        except GatewayError:
+            raise
+        except Exception as exc:
+            raise GatewayError(
+                GatewayErrorCode.DELIVERY_COMMIT_FAILED,
+                detail="webhook delivery lease release failed; retry after lease expiry",
+                retry_after_seconds=self.limits.delivery_lease_seconds,
+            ) from exc
+
     async def authorize_webhook(
         self,
         *,
@@ -519,29 +902,42 @@ class GatewayAuth:
         raw_body: bytes,
         headers: Mapping[str, str],
         request_id: str = "",
+        raw_query: bytes = b"",
+        client_ip: str = "",
     ) -> WebhookAuthResult:
-        """Авторизация ``/webhook/{plugin}/{company}/{path}`` (§7.5).
+        """Проверить webhook до создания processing lease.
 
-        Порядок (fail-closed):
-        1. наличие всех трёх заголовков (signature / event / delivery);
-        2. rate limit per ``(plugin, company)``;
-        3. активный grant;
-        4. секрет из ``SecretPort`` (не БД, не код);
-        5. HMAC по ``raw_body``;
-        6. атомарный claim delivery-id → повтор = 200 без повторной обработки.
-
-        ``/webhook/`` НИКОГДА не считается статикой: даже пустой ``path``
-        ведёт сюда, а ``index.html`` не отдаётся (критерий §11 №9).
+        Порядок: bounded preauth, required headers, grant/route/secret,
+        freshness + HMAC, per-installation limit, processing lease.
+        Следовательно bad signature не расходует bucket installation.
         """
         if not plugin_id or not company_id:
             raise GatewayError(
                 GatewayErrorCode.INVALID_PATH,
                 detail="plugin/company path segments must not be empty",
             )
+        try:
+            canonical_raw_query(raw_query)
+            external_path = webhook_external_path(
+                plugin_id=plugin_id, company_id=company_id, path=path
+            )
+            canonical_backend_path(path)
+        except (TypeError, ValueError) as exc:
+            raise GatewayError(
+                GatewayErrorCode.INVALID_PATH,
+                detail="invalid webhook path or raw query",
+            ) from exc
+
+        await self._enforce_webhook_preauth(
+            plugin_id=plugin_id, company_id=company_id, client_ip=client_ip
+        )
 
         signature = self._header(headers, HEADER_SIGNATURE)
         event = self._header(headers, HEADER_EVENT)
         delivery_id = self._header(headers, HEADER_DELIVERY)
+        version_header = self._header(headers, HEADER_SIGNATURE_VERSION)
+        timestamp = self._header(headers, HEADER_TIMESTAMP) or ""
+        signature_version = version_header or "1"
         missing = [
             name
             for name, value in zip(
@@ -549,6 +945,8 @@ class GatewayAuth:
             )
             if not value
         ]
+        if signature_version == "2" and not timestamp:
+            missing.append(HEADER_TIMESTAMP)
         if missing:
             await self._audit(
                 "plugin_webhook_received",
@@ -563,9 +961,11 @@ class GatewayAuth:
                 GatewayErrorCode.WEBHOOK_HEADERS_MISSING,
                 detail=f"missing webhook headers: {', '.join(missing)}",
             )
-        # Явная перестраховка вместо ``assert`` (который исчезает при -O):
-        # если порт заголовков вернул нестроку, это отказ, не падение с
-        # AttributeError где-то ниже по конвейеру.
+        if signature_version not in {"1", "2"}:
+            raise GatewayError(
+                GatewayErrorCode.INVALID_SIGNATURE_VERSION,
+                detail="X-Prodavan-Signature-Version must be '1' or '2'",
+            )
         if not (
             isinstance(signature, str)
             and isinstance(event, str)
@@ -575,28 +975,28 @@ class GatewayAuth:
                 GatewayErrorCode.WEBHOOK_HEADERS_MISSING,
                 detail="required webhook headers must be non-empty strings",
             )
-        # Пустой delivery-id / event после trim — тоже отказ, не «пропустить».
-        if not event.strip() or not delivery_id.strip():
+        if (
+            not event.strip()
+            or not delivery_id.strip()
+            or len(event) > 512
+            or len(delivery_id) > 512
+            or any(
+                ord(ch) < 0x20 or ord(ch) == 0x7F
+                for value in (event, delivery_id)
+                for ch in value
+            )
+        ):
             raise GatewayError(
                 GatewayErrorCode.WEBHOOK_HEADERS_MISSING,
-                detail="webhook event/delivery must not be blank",
+                detail="webhook event/delivery must be bounded printable strings",
             )
-
-        await self._enforce_rate_limit(
-            bucket=self._bucket("webhook", plugin_id, company_id),
-            limit=self.limits.webhook_per_minute,
-            window_seconds=self.limits.window_seconds,
-            event_kind="plugin_webhook",
-            plugin_id=plugin_id,
-            company_id=company_id,
-        )
 
         grant = await self._active_grant(
             plugin_id=plugin_id, company_id=company_id, surface="webhook"
         )
-
-        # Секрет — только из secret store. Нет секрета = канал не настроен:
-        # fail-closed 503, а не «принять без подписи».
+        await self._check_webhook_route(
+            plugin_id=plugin_id, company_id=company_id, path=path
+        )
         secret = await self.secrets.webhook_secret(
             plugin_id=plugin_id, company_id=company_id
         )
@@ -614,8 +1014,39 @@ class GatewayAuth:
                 detail="webhook HMAC secret is not configured",
             )
 
+        signing_bytes = raw_body
+        if signature_version == "2":
+            if (
+                not timestamp.isascii()
+                or not timestamp.isdigit()
+                or len(timestamp) > 20
+                or abs(int(self.clock()) - int(timestamp))
+                > self.limits.webhook_timestamp_tolerance_seconds
+            ):
+                await self._audit(
+                    "plugin_webhook_received",
+                    plugin_id=plugin_id,
+                    company_id=company_id,
+                    decision="deny",
+                    code=GatewayErrorCode.INVALID_TIMESTAMP.value,
+                    reason="webhook timestamp is malformed or outside freshness window",
+                )
+                raise GatewayError(
+                    GatewayErrorCode.INVALID_TIMESTAMP,
+                    detail="webhook timestamp is malformed or outside freshness window",
+                )
+            signing_bytes = webhook_v2_signing_bytes(
+                timestamp=timestamp,
+                delivery_id=delivery_id,
+                event=event,
+                method=method,
+                canonical_path=external_path,
+                raw_query=raw_query,
+                raw_body=raw_body,
+            )
+
         if not self.hmac_verifier.verify(
-            secret=secret, signing_bytes=raw_body, signature_header=signature
+            secret=secret, signing_bytes=signing_bytes, signature_header=signature
         ):
             await self._audit(
                 "plugin_webhook_received",
@@ -631,9 +1062,17 @@ class GatewayAuth:
                 detail="X-Prodavan-Signature mismatch",
             )
 
-        # Атомарный claim: гонка ретраёв не приведёт к двойной обработке.
-        # Отпечаток первой доставки сохраняется в том же атомарном вызове —
-        # иначе повтор с чужим телом прошёл бы как «уже обработанный».
+        # Только ПОСЛЕ успешной подписи анонимный запрос может занять bucket
+        # конкретной installation.
+        await self._enforce_rate_limit(
+            bucket=self._bucket("webhook", plugin_id, company_id),
+            limit=self.limits.webhook_per_minute,
+            window_seconds=self.limits.window_seconds,
+            event_kind="plugin_webhook",
+            plugin_id=plugin_id,
+            company_id=company_id,
+        )
+
         token = self._replay_token(
             plugin_id=plugin_id,
             company_id=company_id,
@@ -641,40 +1080,70 @@ class GatewayAuth:
             event=event,
             body=raw_body,
         )
-        verdict: DeliveryVerdict = await self.rate_limit.claim_delivery(
-            key=self._delivery_key(
-                plugin_id=plugin_id,
-                company_id=company_id,
-                delivery_id=delivery_id,
-            ),
-            ttl_seconds=self.limits.delivery_ttl_seconds,
+        delivery_key = self._delivery_key(
+            plugin_id=plugin_id, company_id=company_id, delivery_id=delivery_id
+        )
+        verdict = await self._claim_webhook_delivery(
+            key=delivery_key,
             token=token,
+            plugin_id=plugin_id,
+            company_id=company_id,
+        )
+        verified = VerifiedWebhook(
+            signature=signature,
+            event=event,
+            delivery_id=delivery_id,
+            signature_version=version_header or "",
+            timestamp=timestamp if signature_version == "2" else "",
         )
 
-        if verdict.status is DeliveryStatus.DUPLICATE:
-            # Повтор с тем же id, но другим телом/событием = подделка replay.
-            if verdict.previous_token is not None and not hmac.compare_digest(
-                verdict.previous_token, token
-            ):
-                await self._audit(
-                    "plugin_webhook_received",
-                    plugin_id=plugin_id,
-                    company_id=company_id,
-                    decision="deny",
-                    code=GatewayErrorCode.REPLAY_DETECTED.value,
-                    reason="delivery id reused with different payload",
-                )
-                raise GatewayError(
-                    GatewayErrorCode.REPLAY_DETECTED,
-                    detail="delivery id replay with a different payload",
-                )
-            claims = GatewayClaims(
+        if (
+            verdict.previous_token is not None
+            and not hmac.compare_digest(verdict.previous_token, token)
+        ) or (
+            verdict.status in {DeliveryStatus.IN_PROGRESS, DeliveryStatus.DUPLICATE}
+            and verdict.previous_token is None
+        ):
+            await self._audit(
+                "plugin_webhook_received",
                 plugin_id=plugin_id,
                 company_id=company_id,
-                subject_id="webhook",
-                scopes=WEBHOOK_SCOPES,
-                grant_id=grant.grant_id,
+                decision="deny",
+                code=GatewayErrorCode.REPLAY_DETECTED.value,
+                reason="delivery id reused with a different payload",
             )
+            raise GatewayError(
+                GatewayErrorCode.REPLAY_DETECTED,
+                detail="delivery id replay with a different payload",
+            )
+
+        if verdict.status is DeliveryStatus.IN_PROGRESS:
+            retry_after = verdict.retry_after_seconds or self.limits.retry_after_seconds
+            await self._audit(
+                "plugin_webhook_received",
+                plugin_id=plugin_id,
+                company_id=company_id,
+                decision="retry",
+                code=GatewayErrorCode.DELIVERY_IN_PROGRESS.value,
+                reason="delivery processing lease is still active",
+                request_id=request_id,
+            )
+            raise GatewayError(
+                GatewayErrorCode.DELIVERY_IN_PROGRESS,
+                detail="delivery is already being processed; retry later",
+                retry_after_seconds=retry_after,
+            )
+
+        claims = GatewayClaims(
+            plugin_id=plugin_id,
+            company_id=company_id,
+            subject_id="webhook",
+            plugin_instance_id=grant.plugin_instance_id,
+            artifact_digest=grant.artifact_digest,
+            scopes=WEBHOOK_SCOPES,
+            grant_id=grant.grant_id,
+        )
+        if verdict.status is DeliveryStatus.DUPLICATE:
             await self._audit(
                 "plugin_webhook_received",
                 plugin_id=plugin_id,
@@ -691,40 +1160,55 @@ class GatewayAuth:
                 event=event,
                 delivery_id=delivery_id,
                 duplicate=True,
+                verified=verified,
+                delivery_key=delivery_key,
+                replay_token=token,
+            )
+        if verdict.status is not DeliveryStatus.FIRST:
+            raise GatewayError(
+                GatewayErrorCode.UPSTREAM_ERROR,
+                detail="delivery lease backend returned an unknown verdict",
             )
 
-        claims = GatewayClaims(
-            plugin_id=plugin_id,
-            company_id=company_id,
-            subject_id="webhook",
-            scopes=WEBHOOK_SCOPES,
-            grant_id=grant.grant_id,
-        )
-        await self._audit(
-            "plugin_webhook_received",
-            plugin_id=plugin_id,
-            company_id=company_id,
-            decision="allow",
-            subject_id="webhook",
-            grant_id=grant.grant_id,
-            request_id=request_id,
-            payload_digest=hashlib.sha256(raw_body).hexdigest(),
-            metadata={"has_event": bool(event)},
-        )
-        return WebhookAuthResult(
+        result = WebhookAuthResult(
             claims=claims,
             grant=grant,
             event=event,
             delivery_id=delivery_id,
             duplicate=False,
+            verified=verified,
+            delivery_key=delivery_key,
+            replay_token=token,
         )
-
+        try:
+            await self._audit(
+                "plugin_webhook_received",
+                plugin_id=plugin_id,
+                company_id=company_id,
+                decision="allow",
+                subject_id="webhook",
+                grant_id=grant.grant_id,
+                request_id=request_id,
+                payload_digest=hashlib.sha256(raw_body).hexdigest(),
+                metadata={"has_event": bool(event)},
+            )
+        except Exception:
+            # Не оставлять processed при сбое audit после lease. Если release
+            # тоже недоступен, короткий TTL остаётся последним fail-closed рубежом.
+            try:
+                await self.release_webhook(result)
+            except GatewayError:
+                pass
+            raise
+        return result
 
 __all__ = [
     "DEFAULT_LIMITS",
     "HEADER_DELIVERY",
     "HEADER_EVENT",
     "HEADER_SIGNATURE",
+    "HEADER_SIGNATURE_VERSION",
+    "HEADER_TIMESTAMP",
     "GatewayAuth",
     "GatewayLimits",
     "PageAuthResult",

@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from prodavan.application.plugins.events.contracts import ConsumerAssignment
 from prodavan.application.plugins.gateway.auth import GatewayLimits
 from prodavan.infrastructure.plugins.adapters.build import (
     AdapterCompositionError,
@@ -86,7 +87,27 @@ def _gateway_ports() -> dict[str, Any]:
             base_url="http://plugin-static:8080", client=FakeHttpxClient()
         ),
         "limits": GatewayLimits(),
+        "shell_origin": "https://agentscale.example.test",
     }
+
+
+class _RawDlqPort:
+    async def publish(self, record: Any) -> bool:
+        return True
+
+
+class _ClaimsPort:
+    async def acquire(self, key: Any, *, lease_seconds: float) -> Any:
+        return None
+
+    async def renew(self, claim: Any) -> bool:
+        return True
+
+    async def complete(self, claim: Any) -> bool:
+        return True
+
+    async def release(self, claim: Any) -> bool:
+        return True
 
 
 def _event_ports() -> dict[str, Any]:
@@ -105,9 +126,11 @@ def _event_ports() -> dict[str, Any]:
         "consumer": _ConsumerPort(),
         "topic_admin": _TopicAdminPort(),
         "dlq": _DlqPort(),
+        "raw_dlq": _RawDlqPort(),
         "subscriptions": ports.subscriptions,
         "published_events": ports.published_events,
         "idempotency": ports.idempotency,
+        "delivery_claims": _ClaimsPort(),
         "audit": ports.audit,  # InMemoryAudit: append() событий + write() аудита
         "handler": _Handler(),
         "wake_hook": ports.wake_hook,
@@ -144,6 +167,7 @@ def test_build_gateway_runtime_succeeds_with_all_ports() -> None:
         "backend_http",
         "static_http",
         "limits",
+        "shell_origin",
     ],
 )
 def test_build_gateway_runtime_fails_without_any_port(omitted: str) -> None:
@@ -160,6 +184,41 @@ def test_build_gateway_runtime_rejects_broken_adapter_shape() -> None:
     ports = _gateway_ports()
     ports["grants"] = object()  # нет active_grant/public_pages
     with pytest.raises(AdapterCompositionError):
+        build_gateway_runtime(**ports)
+
+
+def test_build_gateway_runtime_accepts_delivery_lease_contract_without_legacy_claim() -> None:
+    class LeaseOnlyRateLimit:
+        async def allow(self, **kwargs: Any) -> bool:
+            return True
+
+        async def claim_delivery_lease(self, **kwargs: Any) -> Any:
+            return None
+
+        async def commit_delivery(self, **kwargs: Any) -> bool:
+            return True
+
+        async def release_delivery(self, **kwargs: Any) -> None:
+            return None
+
+    ports = _gateway_ports()
+    ports["rate_limit"] = LeaseOnlyRateLimit()
+    runtime = build_gateway_runtime(**ports)
+    assert runtime.auth.rate_limit is ports["rate_limit"]
+    assert not hasattr(ports["rate_limit"], "claim_delivery")
+
+
+def test_build_gateway_runtime_rejects_legacy_claim_only_rate_limit() -> None:
+    class LegacyRateLimit:
+        async def allow(self, **kwargs: Any) -> bool:
+            return True
+
+        async def claim_delivery(self, **kwargs: Any) -> Any:
+            return None
+
+    ports = _gateway_ports()
+    ports["rate_limit"] = LegacyRateLimit()
+    with pytest.raises(AdapterCompositionError, match="RateLimitPort"):
         build_gateway_runtime(**ports)
 
 
@@ -194,9 +253,11 @@ def test_build_event_dispatcher_succeeds_with_all_ports() -> None:
         "consumer",
         "topic_admin",
         "dlq",
+        "raw_dlq",
         "subscriptions",
         "published_events",
         "idempotency",
+        "delivery_claims",
         "audit",
         "handler",
         "wake_hook",
@@ -231,6 +292,14 @@ class _ProducerPort:
 
 
 class _ConsumerPort:
+    def delivery_ownership(self, record: Any) -> ConsumerAssignment:
+        return ConsumerAssignment(
+            topic=record.topic,
+            partition=record.partition,
+            owned=True,
+            offset=record.offset,
+        )
+
     async def poll(self, *, timeout_ms: int = 1000) -> Any:
         return None
 

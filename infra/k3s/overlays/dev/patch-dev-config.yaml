@@ -118,3 +118,6 @@ data:
   POD_PROBE_BASE_URL: http://agentscale-probe-pod.agentscale-dev-sandboxes.svc:3921
   POD_PROBE_LEASE_TTL_SEC: "120"
   POD_PROBE_TIMEOUT_SEC: "15"
+  # Trusted in-cluster capability gateway for projected plugin backend Secrets.
+  # Dev-only: never derive this URL from a request Host or public static origin.
+  PLUGIN_RUNTIME_GATEWAY_URL: http://plugin-gateway.agentscale-dev.svc:8080

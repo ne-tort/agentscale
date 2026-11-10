@@ -1,4 +1,4 @@
-"""Secret store protocol + backends (file:// and vault://) — L03."""
+"""Secret store protocol + file, Vault, and mounted Kubernetes backends."""
 
 from __future__ import annotations
 
@@ -16,6 +16,10 @@ from prodavan.infrastructure.secrets.cabinet_secret_store import (
     get_cabinet_secret_store,
 )
 from prodavan.infrastructure.secrets.file_store import FileSecretStore
+from prodavan.infrastructure.secrets.k8s_file_store import (
+    REF_PREFIX as K8S_SECRET_PREFIX,
+)
+from prodavan.infrastructure.secrets.k8s_file_store import K8sFileSecretStore
 from prodavan.infrastructure.secrets.owner_module_secret_store import (
     FILE_PREFIX as OWNER_FILE_PREFIX,
 )
@@ -44,8 +48,10 @@ class RoutingSecretStore:
         *,
         file_store: FileSecretStore | None = None,
         vault_store: VaultSecretStore | None = None,
+        k8s_file_store: K8sFileSecretStore | None = None,
     ) -> None:
         self._file = file_store or FileSecretStore()
+        self._k8s_file = k8s_file_store or K8sFileSecretStore()
         self._vault = vault_store
         if self._vault is None and settings.vault_addr:
             self._vault = VaultSecretStore()
@@ -56,6 +62,10 @@ class RoutingSecretStore:
         return self._file.put(key_id, secret)
 
     def get(self, secret_ref: str) -> str:
+        if secret_ref.startswith(K8S_SECRET_PREFIX):
+            # A mounted Secret failure is terminal for this ref: never fall back
+            # to the file or Vault backends used by other plugin secrets.
+            return self._k8s_file.get(secret_ref)
         if secret_ref.startswith(CABINET_VAULT_PREFIX) or secret_ref.startswith(CABINET_FILE_PREFIX):
             return get_cabinet_secret_store().get(secret_ref)
         if secret_ref.startswith(OWNER_VAULT_PREFIX) or secret_ref.startswith(OWNER_FILE_PREFIX):
@@ -72,6 +82,9 @@ class RoutingSecretStore:
         return self._file.get(secret_ref)
 
     def delete(self, secret_ref: str) -> None:
+        if secret_ref.startswith(K8S_SECRET_PREFIX):
+            self._k8s_file.delete(secret_ref)
+            return
         if secret_ref.startswith(CABINET_VAULT_PREFIX) or secret_ref.startswith(CABINET_FILE_PREFIX):
             get_cabinet_secret_store().delete(secret_ref)
             return

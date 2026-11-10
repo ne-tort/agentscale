@@ -27,5 +27,7 @@ resources:
   - tenant-postgres.yaml
   - pgbouncer.yaml
   - plugin-gateway.yaml
+  - plugin-runtime-serviceaccount.yaml
+  - plugin-activation-state.yaml
   - networkpolicy-plugin.yaml
   - egress-proxy.yaml
