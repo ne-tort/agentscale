@@ -43,7 +43,7 @@
 | MCP | `mcp_servers` + durable registration, `mcp.invoke` broker к canonical `rpc_operations`, authenticated JSON-RPC mount | Discovery/invoke/client/backend/revoke/quota/audit live unverified |
 | Scoped runtime | Read-only downwardAPI identity, fresh-wake fixed service-proxy headers; hello production provider stubs = 503 | Projection/wake и любые реальные provider operations live unverified |
 | Events | Typed `PLUGIN_EVENT_SIGNING_SECRET_REF`, dev sealed-example и read-only mounts; optional только для disabled | Real key/sign/verify/rotation/missing-key startup live unverified |
-| Objects STS | `objects.scoped_credentials` typed-unwired до enabled + post-probe availability; нет presign/static fallback для operation | Real disposable MinIO: **29/29 passed, 0 skipped** ([JUnit](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/minio-plugin-acceptance-junit.xml), [summary](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/summary.json)); STS TTL 900..3600 и canary-only probe policy подтверждены, presign остаётся 60..3600. Production/live configuration и API/Gateway lifespan остаются unverified |
+| Objects STS | `objects.scoped_credentials` typed-unwired до enabled + post-probe availability; нет presign/static fallback для operation | Real disposable MinIO: **29/29 passed, 0 skipped** ([JUnit](../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/minio-plugin-acceptance-junit.xml), [summary](../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/summary.json)); STS TTL 900..3600 и canary-only probe policy подтверждены, presign остаётся 60..3600. Production/live configuration и API/Gateway lifespan остаются unverified |
 | CI publication | Protected publication config, release Trivy evidence, static-origin CSP+digest header, OIDC POST после release verify | Protected live inputs и successful run отсутствуют; остаются blockers |
 | Pods/delivery | Exact `pods.allowlist`, reference-only `secret_delivery`, отдельный versioned delivery Secret lifecycle | Real pods/delivery/rotation/revoke/delete/RBAC live unverified |
 | Runtime Secret | SecretProjection управляет `GATEWAY_URL`, `PLUGIN_ID`, `TENANT_DB_DSN`, `WEBHOOK_SECRET` | Rotation/CAS/drift/ownership и Gateway→hello delivery остаются pending |
@@ -296,6 +296,9 @@ migration history. Flyway/Alembic — target alternatives по машинной 
   post-probe availability. До него operation typed-unwired и fail-closed;
   per-key presigned URL не эмулирует prefix-wide credentials, static/admin
   credentials не подставляются. Credentials и подписи не попадают в логи/audit.
+  Сам STS-провайдер подтверждён только в disposable MinIO (29/29: TTL 900..3600,
+  canary-only policy, foreign 403); модульный контракт и API/Gateway lifespan
+  остаются unverified.
 - `:8001` не используется плагином; `/capabilities/v1/*` находится в Plugin
   Gateway.
 
@@ -493,7 +496,7 @@ acceptance.
 | Publication | First-ever empty artifact/grant state, exact approval, denial/quarantine, failure/retry/replay без частичной активации |
 | Grant/update | Exact all-six quotas, initial/replay/update, health/CAS/compensation и digest binding |
 | Secrets | Exact four keys, ownership/drift/CAS, DSN/webhook rotation без plaintext logs |
-| Migrations | Fresh apply, historical `2026110901 → 2026110904`, repeat, checksum failure → не Ready, schema-only downgrade без данных |
+| Migrations | Fresh apply, historical `2026110901 → 2026110909`, repeat, checksum failure → не Ready, schema-only downgrade без данных |
 | Tenant isolation | Чужая БД/схема/bucket/prefix недоступны; client-supplied tenant ids не меняют SQL scope |
 | Identity | Отсутствие/просроченный/чужой/revoked token отклоняется; static env token не читается; scoped TokenRequest refresh/shutdown проверен отдельно |
 | Quotas/adapters | Real nine-adapter registry без stubs/unwired ports; metered request выдаёт `429 QUOTA_EXCEEDED` |

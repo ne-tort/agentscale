@@ -5,7 +5,7 @@
 ADR-006/007/008, не создаёт as-built контракт и не разрешает деплой или включение
 plugin platform.
 **Связанные:** ADR-006 (plugin-модули), ADR-007 (direct plugin DB), ADR-008
-(lifecycle/boundaries), ADR-001 (build-time UI history), ADR-004 (runtime
+(lifecycle/boundaries), ADR-001 (dynamic UI sandbox), ADR-004 (runtime
 revision), PLUGIN-AUTHORING.
 
 ## Контекст

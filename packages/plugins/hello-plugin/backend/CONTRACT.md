@@ -204,4 +204,6 @@ rotation evidence отсутствует.
 enabled плюс отдельное post-probe availability. До этого operation typed-unwired;
 per-key presign не заменяет prefix-wide credentials, static/admin keys не
 подставляются. Существование presign implementation elsewhere не открывает эту
-operation. Post-probe и live AssumeRole/policy/TTL/isolation не подтверждены.
+operation. Модульный контракт остаётся unverified; сам STS-провайдер
+подтверждён только в disposable MinIO (29/29: TTL 900..3600, canary-only policy,
+foreign 403), а API/Gateway lifespan и live AssumeRole — нет.
