@@ -69,7 +69,7 @@ template-репозитория, из которого продукт генер
 
 ## 4. Тесты: закрытые пробелы
 
-Добавлено **6 новых модулей тестов** на области, где не было ни одной проверки:
+Новые модули на области, где не было ни одной проверки:
 
 | Область | Что доказано |
 |---|---|
@@ -81,14 +81,19 @@ template-репозитория, из которого продукт генер
 | `ProductionDocumentStoreService` | Нет тихого in-memory fallback |
 | Rollback-конфликты реестра | Цель уже current / source исчез / version conflict |
 | `origins.py`, `scopes.py` | Граница доверия iframe и изоляция scope манифеста |
+| Guard в обоих режимах платформы | При `enabled=false` middleware всё равно стоит, при `true` — ровно один |
+| Возврат квоты при отказе | Отказ по ROWS не списывает OPS (бюджет остаётся ноль) |
+| Egress pre-flight | При отказе политики счётчик транспорта = 0, запрос не ушёл |
+| UI: создание, approve, жизненный цикл | Digest/версия берутся из сервера; текст исключения не попадает на экран |
+| UI: достижимость экрана | Маршрут смонтирован, таб в админке, секции гейтятся по scope |
 
 ## 5. Верификация
 
 | Набор | Результат |
 |---|---|
-| Backend plugin (unit + integration + acceptance) | **3905 passed** |
-| Frontend | **880 passed** / 98 файлов, `tsc --noEmit` чистый |
-| Infra/ops | **122 passed** + `prodavan-ops validate OK` |
+| Backend plugin (unit + integration + acceptance) | **3909 passed** |
+| Frontend | **896 passed** / 102 файла, `tsc --noEmit` чистый |
+| Infra/ops | **122 passed** + `prodavan-ops validate` ok |
 | Disposable PG / Redis / Kafka / K8s / MinIO | 27/27, 22/22, 16/16, 19/19, 29/29 |
 
 Санитизированные доказательства — [индекс](README.md) (37 файлов).
