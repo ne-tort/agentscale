@@ -44,6 +44,9 @@ describe("i18n/units/plugins.ts", () => {
 
   it("содержит ровно требуемые ключи", () => {
     expect(Object.keys(pluginStrings.ru).sort()).toEqual([
+      "approveDigest", "approveDone", "approveFailed", "approveHint",
+      "approveMissing", "approveNotReady", "approveReplayed", "approveSubmit",
+      "approveTitle", "approveVersion",
       "close", "createDone", "createFailed", "createHint", "createId",
       "createScopeRequired", "createSubmit", "createTitle", "createVersion",
       "lifecycleBucket", "lifecycleDatabase", "lifecycleFailed",

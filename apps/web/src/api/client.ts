@@ -59,6 +59,7 @@ import type {
   ModuleSourceResponse,
   PluginGrantResponse,
   PluginLifecycleResponse,
+  PluginPublicationApprovalResponse,
   UploadedModuleFile,
   WorkspaceListing,
   WorkspaceMutationResponse,
@@ -666,6 +667,12 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     wakePlugin: (companyId, pluginId) => request<PluginLifecycleResponse>("/admin/plugins/wake", {
       method: "POST", body: JSON.stringify({ company_id: companyId, plugin_id: pluginId }),
     }),
+    // Pre-approval публикации: разрешает РОВНО этот digest и эту политику до
+    // того, как артефакт появится. Не устанавливает и не выдаёт grant.
+    approvePluginPublication: (body) => request<PluginPublicationApprovalResponse>(
+      "/admin/plugins/publication-approvals",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
     createAdminModule: (name) => request<AdminModule>("/admin/modules", { method: "POST", body: JSON.stringify({ name }) }),
     getAdminModule: (moduleId) => request<AdminModule>(`/admin/modules/${encodePath(moduleId)}`),
     patchAdminModule: (moduleId, patch) => request<AdminModule>(`/admin/modules/${encodePath(moduleId)}`, { method: "PATCH", body: JSON.stringify(patch) }),

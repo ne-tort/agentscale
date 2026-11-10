@@ -217,6 +217,8 @@ export interface ApiClient {
   createPluginSource(companyId: Id, pluginId: Id, manifest: JsonObject): Promise<ModuleSourceResponse>;
   getPluginSource(companyId: Id, pluginId: Id): Promise<ModuleSourceResponse>;
   bindPluginSourceScope(companyId: Id, pluginId: Id, cabinetId: string, projectId: string): Promise<ModuleSourceResponse>;
+  /** Pre-approval публикации: привязывает разрешение к конкретному digest. */
+  approvePluginPublication(body: PluginPublicationApprovalRequest): Promise<PluginPublicationApprovalResponse>;
   /** Жизненный цикл: digest и task name выбирает сервер из durable grant. */
   grantPlugin(body: PluginGrantRequest): Promise<PluginGrantResponse>;
   revokePlugin(companyId: Id, pluginId: Id): Promise<PluginLifecycleResponse>;
@@ -291,6 +293,35 @@ export interface PluginGrantRequest {
   readonly capabilities: {
     readonly capabilities: readonly string[];
   };
+}
+
+/**
+ * `PublicationApprovalResponse` (`plugin_admin.py`).
+ *
+ * `created`/`replayed` различают новую запись и повтор того же approve: UI не
+ * должен показывать второй approve как новое разрешение.
+ */
+export interface PluginPublicationApprovalResponse {
+  approval_id: string;
+  company_id: string;
+  plugin_id: string;
+  manifest_version: string;
+  artifact_digest: string;
+  capabilities: string[];
+  created_by: string;
+  created_at: string;
+  consumed_at: string | null;
+  created: boolean;
+  replayed: boolean;
+}
+
+/** Тело approve: client выбирает только capabilities, не политику. */
+export interface PluginPublicationApprovalRequest {
+  readonly company_id: string;
+  readonly plugin_id: string;
+  readonly manifest_version: string;
+  readonly artifact_digest: string;
+  readonly capabilities: { readonly capabilities: readonly string[] };
 }
 
 export interface RpcOperationResponse {

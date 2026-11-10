@@ -5,6 +5,7 @@ import type { AdminPluginRow } from "../api/types";
 import { ModuleAdminPage } from "../features/contours/module-admin/ModuleAdminPage";
 import { createModuleAdminService } from "../features/contours/module-admin/service";
 import { PluginLifecycle } from "../features/plugins/PluginLifecycle";
+import { PluginPublicationApprove } from "../features/plugins/PluginPublicationApprove";
 
 /**
  * Платформенное управление plugin-модулями.
@@ -56,6 +57,16 @@ export function PluginModulesAdminPage(): ReactElement {
       pluginApi={api}
       {...(pluginScope ? { pluginScope } : {})}
     />
+    {/* Согласование публикации — ДО жизненного цикла: approve разрешает
+        конкретный digest, grant уже опирается на разрешённый артефакт. */}
+    {companyId && pluginId && current ? <PluginPublicationApprove
+      api={api}
+      companyId={companyId}
+      pluginId={pluginId}
+      manifestVersion={current.manifest_version}
+      artifactDigest={current.artifact_digest}
+      capabilities={Array.isArray(current.capabilities) ? (current.capabilities as string[]) : []}
+    /> : null}
     {companyId && pluginId && current ? <PluginLifecycle
       api={api}
       companyId={companyId}
