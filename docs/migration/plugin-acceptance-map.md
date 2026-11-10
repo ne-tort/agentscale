@@ -162,7 +162,7 @@ OIDC и saga кода не меняет этот статус и не даёт l
 | B1 | Agent получает source snapshot без Git credentials и возвращает patch; push из pod невозможен | [ ] |
 | B2 | SQL reservation предотвращает cross-worker/cross-tenant conflicts; GitHub App создаёт protected PR; human review и default-branch protection подтверждены | [ ] |
 | B3 | Trusted reusable workflow pinned SHA; OIDC repository/ref/sha/job_workflow_ref проверены | [ ] |
-| B4 | Deploy/rollback saga не оставляет частично активные menu/public и возвращает согласованную digest pair | [ ] |
+| B4 | Deploy/rollback saga не оставляет частично активные menu/public и возвращает согласованную digest pair. Меню не реализовано (см. FINAL-REPORT §6): критерий проверяет только public, а menu ждёт решения о версии схемы манифеста | [ ] |
 | B5 | Rollback кода не выполняет автоматический destructive rollback БД | [ ] |
 
 ## История и пересмотр
