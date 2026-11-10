@@ -97,6 +97,28 @@ K8s disposable acceptance уже задокументирован выше (19/1
 kind v1.37.0). Kafka/Redpanda disposable acceptance — **16/16 passed / 0 skipped**
 ([summary](../../reports/module-audit/kafka/acceptance-summary.json), [rebalance evidence](../../reports/module-audit/kafka/rebalance-evidence.log)); production/live не заявляется.
 
+Entrypoint acceptance harness на текущем этапе **не пройден** и не объявляется
+пройденным. При попытке реального запуска найдены и исправлены три дефекта,
+из-за которых он не мог пройти ни в каком окружении:
+
+1. early guard читал `option.confcutdir` в `pytest_load_initial_conftests`, где
+   pytest ещё не применил аргументы, и отвергал документированную команду как
+   bare invocation. Теперь аргументы разбираются через `parser`; regressions
+   покрывают и разрешённый, и запрещённый вызов.
+2. `database.py` использовал `async with create_async_engine(...)`, хотя
+   `AsyncEngine` не реализует `__aenter__`/`aclose`. Введён `_engine_scope` с
+   обязательным `dispose()`.
+3. `seed_bootstrap_identity` вставлял `cabinet_company_grants` раньше
+   `cabinet_instances`; ORM не выводит порядок для этой FK, поэтому PostgreSQL
+   отдавал ForeignKeyViolationError. Теперь родитель сбрасывается явным `flush()`.
+
+После исправлений offline-часть харнесса даёт **17 passed / 14 skipped** (skip —
+только явная причина «disposable environment отсутствует»), а `DisposablePostgres`
+реально создаёт БД `plugin_pg_<20 hex>`, прогоняет миграции до `2026110909` и
+закрывается. Для 14 world-тестов по-прежнему требуются подписанный attested
+OCI bundle, SASL_SSL Kafka, TLS PostgreSQL, смонтированный ServiceAccount и
+развёрнутые plugin Deployment/Service — это остаётся pending.
+
 STOP-SHIP не снимают ни отдельные completed static tasks, ни production
 composition tests, ни исторические зелёные отчёты. Нужны явно разрешённые
 integration runs на реальном составе, затем воспроизводимый live acceptance и
