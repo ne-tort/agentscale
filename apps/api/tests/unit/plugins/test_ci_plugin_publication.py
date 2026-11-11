@@ -46,6 +46,27 @@ BACKEND_DIGEST = "sha256:" + "b" * 64
 BUNDLE_DIGEST = "sha256:" + "f" * 64
 BACKEND_REF = "ghcr.io/ne-tort/plugins/hello_plugin/backend@" + BACKEND_DIGEST
 BUNDLE_REF = "ghcr.io/ne-tort/plugins/hello_plugin/bundle@" + BUNDLE_DIGEST
+# Exact record names emitted by plugin_verify.py; deliberately independent of
+# publication.REQUIRED_RELEASE_CHECKS so the regression tests detect contract drift.
+EXPECTED_RELEASE_CHECKS = frozenset(
+    {
+        "digest_pinned_refs",
+        "cosign_verify:oci-artifact",
+        "cosign_verify:backend-image",
+        "canonical_manifest_config_and_blob",
+        "backend_bundle_link",
+        "attestation:backend:sbom",
+        "attestation:backend:provenance",
+        "attestation:bundle:sbom",
+        "attestation:bundle:provenance",
+        "gate:semver",
+        "gate:protocol",
+        "gate:capability_allowlist",
+        "gate:platform_version",
+        "gate:capability_grant",
+        "gate:min_platform_version",
+    }
+)
 SCANNER_IMAGE = "aquasec/trivy:0.58.2@sha256:" + "9" * 64
 CSP = (
     "default-src 'self'; base-uri 'none'; object-src 'none'; "
@@ -177,7 +198,7 @@ def _decision() -> dict:
         },
         "checks": [
             {"name": name, "ok": True}
-            for name in sorted(publication.REQUIRED_RELEASE_CHECKS)
+            for name in sorted(EXPECTED_RELEASE_CHECKS)
         ],
     }
 
@@ -697,6 +718,54 @@ class EvidenceTests(unittest.TestCase):
         with self.assertRaises(publication.PublicationBlocked) as denied:
             publication.PublicationConfig.from_environment(_environment(document))
         self.assertEqual(denied.exception.code, "PROTECTED_CONFIG_INVALID")
+
+
+class ReleaseDecisionTests(unittest.TestCase):
+    def _validate(self, decision: dict) -> None:
+        publication.validate_release_decision(
+            decision,
+            plugin_id="hello_plugin",
+            version="1.2.0",
+            bundle_ref=BUNDLE_REF,
+            bundle_digest=BUNDLE_DIGEST,
+            backend_ref=BACKEND_REF,
+            backend_digest=BACKEND_DIGEST,
+        )
+
+    def _assert_blocked(self, decision: dict) -> None:
+        with self.assertRaises(publication.PublicationBlocked) as denied:
+            self._validate(decision)
+        self.assertEqual(denied.exception.code, "RELEASE_VERIFICATION_REQUIRED")
+
+    def test_verifier_contract_and_complete_valid_decision(self) -> None:
+        self.assertEqual(publication.REQUIRED_RELEASE_CHECKS, EXPECTED_RELEASE_CHECKS)
+        self.assertIsNone(self._validate(_decision()))
+
+    def test_removing_any_required_check_blocks(self) -> None:
+        for name in sorted(EXPECTED_RELEASE_CHECKS):
+            with self.subTest(name=name):
+                decision = _decision()
+                decision["checks"] = [
+                    item for item in decision["checks"] if item["name"] != name
+                ]
+                self._assert_blocked(decision)
+
+    def test_false_ok_on_any_required_check_blocks(self) -> None:
+        for name in sorted(EXPECTED_RELEASE_CHECKS):
+            with self.subTest(name=name):
+                decision = _decision()
+                check = next(
+                    item for item in decision["checks"] if item["name"] == name
+                )
+                check["ok"] = False
+                self._assert_blocked(decision)
+
+    def test_failed_additional_gate_is_not_filtered_out(self) -> None:
+        decision = _decision()
+        decision["checks"].append(
+            {"name": "gate:additional_policy", "ok": False, "detail": "incompatible"}
+        )
+        self._assert_blocked(decision)
 
 
 class PublicationGateTests(unittest.TestCase):
