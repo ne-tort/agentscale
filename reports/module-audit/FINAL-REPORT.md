@@ -441,23 +441,27 @@ release-путь **запускаем** и без переменных дойд�
 | Backend evidence digest | PR #347 | **пройден** |
 | Verify debug diff output | PR #351 | **в `main`** |
 
-**Оставшийся отказ — `INVALID_MANIFEST` на verify step.** Четыре прогона подряд
-(`43025110161`, `43030597495`) доходят до verify и получают
-`registry OCI manifest differs from signed expectation`. Debug diff (PR #351)
-показывает ключи, но runner имеет стабильные сетевые сбои (TLS handshake timeout
-от CloudFront), блокирующие повторные dispatch. Множественные попытки (3+)
-приводят к тем же TLS timeout. Это инфраструктурная проблема раннера, не код.
+**Root cause `INVALID_MANIFEST` найден и устранён (PR #353, merge `e28e4bd5`).**
+ORAS 1.2.3 добавляет `org.opencontainers.image.created` внутрь
+`manifest.annotations`, если его там нет. Предыдущая попытка удалить поле через
+`pushed.pop()`/`expected.pop()` работала с корнем manifest и была no-op.
+Строгое исправление: builder явно записывает `created` в подписанные аннотации;
+ORAS сохраняет значение. Реальный probe на ORAS 1.2.3 и disposable registry
+подтвердил `pushed == expected` без удаления полей. Regression-тест проверяет
+RFC3339-значение в builder и `$manifest`.
 
-**Проверено: Fulcio доступен с хоста Windows, но не с runner VM.**
-Повторные ошибки: `TLS handshake timeout` (CloudFront), `i/o timeout`
-(DNS lookup `fulcio.sigstore.dev`), `Unable to connect to deb.debian.org`.
-DNS с Windows хоста разрешается, HTTPS к Fulcio отвечает. Это подтверждает,
-что сеть runner VM — единственная оставшаяся блокирующая проблема.
+**Контракты после verify:** PR #354 (`a9bfe436`) исправляет builder identity для
+reusable workflow_call и вычисление Docker config path через `$HOME` вместо
+неподдерживаемого `runner.home`. PR #355 требует все release-decision checks,
+включая gate и digest; PR #356 синхронизирует backend OIDC events и canonical
+workflow refs (direct branch + reusable full SHA) и добавляет новую миграцию
+`2026111201`. Эти PR проходят CI и ещё не смержены на момент записи.
 
-**Release-цепочка прошла каждый шаг, который код позволяет проверить.**
-Прогоны `43025110161` и `43030597495` дошли до verify, а `43056479216`
-до backend sign/attest. Debug diff (PR #351) покажет точный mismatch
-при следующем стабильном прогоне. Но для этого нужна работающая сеть runner.
+**Runner network:** read-only probe на runner показал `https4 200`, `https6 000`,
+`fulcio4 501`. То есть IPv4 работает, IPv6 egress недоступен. PR #358 задаёт
+IPv4-приоритет в `/etc/gai.conf` при bootstrap и документирует live-команду для
+существующей VM; само применение на live VM не выполнялось. Отдельный unbounded
+IPv6 probe зависал dry-run — PR #357 добавляет hard timeouts и regression test.
 
 **Проверено живьём, что эндпоинт публикации наружу не выставлен.**
 `POST /internal/plugin-artifacts` на dev-ingress отвечает `405 Not Allowed` от
