@@ -411,6 +411,11 @@ jobs:
               handle.write(f"SIGNER_IDENTITY=https://github.com/{builder}\n")
               handle.write(f"REGISTRY_OWNER={repository.split('/')[0].lower()}\n")
           PY
+          # GITHUB_ENV is only applied to *later* steps. Reading
+          # $TRUSTED_BUILDER_ID here is empty under `set -u`, which aborted the
+          # release before any registry write with a bare "parameter not set". Derive
+          # the same value in this step instead of re-reading the env file.
+          TRUSTED_BUILDER_ID="ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@$GITHUB_REF"
           # This typed protected mapping is required before any registry write.
           # Backend OIDC validation and durable approval remain authoritative later.
           python3 "$CI_DIR/plugin_publication.py" validate-context             --plugin-id "$PLUGIN_ID" --builder-identity "$TRUSTED_BUILDER_ID"
