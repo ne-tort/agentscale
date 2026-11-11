@@ -281,6 +281,18 @@ Release-job привязан к environment `plugin-release`, но этого en
 `plugin-release` с required reviewers, а затем задать переменные. Только тогда
 прогон release-шага даёт свидетельство, а не немедленную публикацию.
 
+**Вторая находка того же раунда: release-путь ни разу не исполнялся.**
+У `Plugin OCI Artifacts` 39 прогонов `pull_request` и 1 `workflow_dispatch`,
+**ноль `push`**. Причина в `.github/workflows/auto-merge.yml`: он сливает PR
+через `GITHUB_TOKEN`, а такой merge **не порождает событие `push`** (это прямо
+написано в его шапке). Поэтому условие release-job
+(`github.event_name == 'push' && ref == default_branch`) за всё время ни разу не
+было истинным, и весь путь «quarantine → sign → promote → release verify →
+publication» остаётся **непроверенным живьём** — независимо от переменных.
+
+Проверено, что на PR release корректно `skipped`, а dry-run проходит. То есть
+протестирован только dry-run-путь; release-путь — нет.
+
 **Оставшийся вход, который остаётся внешним:**
   `publication_base_url` (адрес API платформы), `scanner_image` (digest Trivy)
   и `sources[]` с `repository_id`/`trusted_workflow_ref`/`static_origin`.
