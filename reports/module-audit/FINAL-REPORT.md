@@ -264,8 +264,10 @@ bootstrap анонимен по дизайну и отдаёт только `com
   protected publication environment: platform host, Trivy digest и версия
   платформы известны только владельцу, а выдуманные значения включили бы
   публикацию с фиктивными данными.
-- `Plugin OCI Artifacts` корректно падает на незакреплённом базовом образе: нужны
-  реальные `PYTHON_BASE_IMAGE`, `LIQUIBASE_SHA256` и полный `requirements.lock`.
+- `Plugin OCI Artifacts` **проходит**: сухой прогон, 9 шагов, включая реальную
+  сборку backend-образа на self-hosted docker-раннере. Базовый образ, liquibase
+  и `requirements.lock` заданы и проверены; release-job по-прежнему требует три
+  protected-переменные выше.
 
 **По существу (STOP-SHIP сохраняется):**
 
