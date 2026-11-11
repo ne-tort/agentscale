@@ -24,6 +24,9 @@ from prodavan.application.plugins.sources.types import ModuleSource, ModuleSourc
 NOW = 1_800_000_000
 COMMIT = "c" * 40
 WORKFLOW = "ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@" + "a" * 40
+DIRECT_WORKFLOW = (
+    "ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@refs/heads/main"
+)
 AUDIENCE = "agentscale-plugin-ci"
 
 
@@ -69,18 +72,20 @@ class FakeJwks:
         return self.documents[index]
 
 
-def _source() -> ModuleSource:
+def _source(
+    *, full_name: str = "ne-tort/example", workflow: str = WORKFLOW
+) -> ModuleSource:
     now = datetime(2026, 11, 9, tzinfo=UTC)
     return ModuleSource(
         id="psrc_0123456789abcdef",
         company_id="company_1",
         plugin_id="hello_plugin",
         repo_id=123456,
-        full_name="ne-tort/example",
+        full_name=full_name,
         private=True,
         default_branch="main",
         installation_credential_ref="vault://github_app/company_1/hello_plugin/installation",
-        trusted_workflow_ref=WORKFLOW,
+        trusted_workflow_ref=workflow,
         status=ModuleSourceStatus.READY,
         created_at=now,
         updated_at=now,
@@ -153,6 +158,48 @@ async def test_valid_oidc_binds_source_and_lazy_jwks(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("event_name", ["push", "workflow_dispatch", "workflow_call"])
+async def test_supported_release_events_bind_full_sha_workflow(
+    key_material: tuple[Any, dict[str, Any]], event_name: str
+) -> None:
+    key, jwk = key_material
+    claims = _claims()
+    claims["event_name"] = event_name
+    validated = await _validator(FakeJwks({"keys": [jwk]})).validate_for_source(
+        _token(key, claims),
+        source=_source(),
+        commit_sha=COMMIT,
+        ref="refs/heads/main",
+    )
+    assert validated.event_name == event_name
+    assert validated.job_workflow_ref == WORKFLOW
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_name", ["push", "workflow_dispatch"])
+async def test_direct_workflow_binds_canonical_protected_branch_identity(
+    key_material: tuple[Any, dict[str, Any]], event_name: str
+) -> None:
+    key, jwk = key_material
+    source = _source(full_name="ne-tort/agentscale", workflow=DIRECT_WORKFLOW)
+    claims = _claims()
+    claims.update(
+        repository=source.full_name,
+        event_name=event_name,
+        job_workflow_ref=DIRECT_WORKFLOW,
+    )
+    validated = await _validator(FakeJwks({"keys": [jwk]})).validate_for_source(
+        _token(key, claims),
+        source=source,
+        commit_sha=COMMIT,
+        ref=source.expected_ref,
+    )
+    assert validated.event_name == event_name
+    assert validated.job_workflow_ref == DIRECT_WORKFLOW
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_name", ["push", "workflow_dispatch", "workflow_call"])
 @pytest.mark.parametrize(
     ("claim", "value"),
     [
@@ -160,15 +207,15 @@ async def test_valid_oidc_binds_source_and_lazy_jwks(
         ("repository_id", "999999"),
         ("ref", "refs/heads/feature"),
         ("sha", "d" * 40),
-        ("event_name", "workflow_dispatch"),
         ("job_workflow_ref", WORKFLOW[:-40] + "b" * 40),
     ],
 )
-async def test_wrong_source_binding_claim_is_denied(
-    key_material: tuple[Any, dict[str, Any]], claim: str, value: Any
+async def test_wrong_source_binding_claim_is_denied_for_every_event(
+    key_material: tuple[Any, dict[str, Any]], event_name: str, claim: str, value: Any
 ) -> None:
     key, jwk = key_material
     claims = _claims()
+    claims["event_name"] = event_name
     claims[claim] = value
     with pytest.raises(OidcValidationError) as caught:
         await _validator(FakeJwks({"keys": [jwk]})).validate_for_source(
@@ -179,6 +226,58 @@ async def test_wrong_source_binding_claim_is_denied(
         )
     assert caught.value.code is OidcErrorCode.SOURCE_BINDING_MISMATCH
     assert caught.value.claim == claim
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "actual_workflow",
+    [
+        DIRECT_WORKFLOW.replace("refs/heads/main", "refs/heads/release"),
+        DIRECT_WORKFLOW.replace("ne-tort/agentscale", "ne-tort/other"),
+        DIRECT_WORKFLOW.replace("plugin-artifacts.yml", "other.yml"),
+        DIRECT_WORKFLOW.replace("refs/heads/main", "refs/heads/*"),
+        WORKFLOW,
+    ],
+)
+async def test_direct_workflow_rejects_wrong_identity(
+    key_material: tuple[Any, dict[str, Any]], actual_workflow: str
+) -> None:
+    key, jwk = key_material
+    source = _source(full_name="ne-tort/agentscale", workflow=DIRECT_WORKFLOW)
+    claims = _claims()
+    claims.update(
+        repository=source.full_name,
+        event_name="workflow_dispatch",
+        job_workflow_ref=actual_workflow,
+    )
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(FakeJwks({"keys": [jwk]})).validate_for_source(
+            _token(key, claims),
+            source=source,
+            commit_sha=COMMIT,
+            ref=source.expected_ref,
+        )
+    assert caught.value.code is OidcErrorCode.SOURCE_BINDING_MISMATCH
+    assert caught.value.claim == "job_workflow_ref"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_name", ["pull_request", "pull_request_target", "schedule", ""])
+async def test_unsupported_event_is_denied(
+    key_material: tuple[Any, dict[str, Any]], event_name: str
+) -> None:
+    key, jwk = key_material
+    claims = _claims()
+    claims["event_name"] = event_name
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(FakeJwks({"keys": [jwk]})).validate_for_source(
+            _token(key, claims),
+            source=_source(),
+            commit_sha=COMMIT,
+            ref="refs/heads/main",
+        )
+    assert caught.value.code is OidcErrorCode.SOURCE_BINDING_MISMATCH
+    assert caught.value.claim == "event_name"
 
 
 @pytest.mark.asyncio
@@ -265,12 +364,14 @@ async def test_future_iat_and_nbf_are_denied(key_material: tuple[Any, dict[str, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("event_name", ["push", "workflow_dispatch", "workflow_call"])
 @pytest.mark.parametrize("protected", [True, "false", "1"])
-async def test_ref_protected_must_be_github_true_string(
-    key_material: tuple[Any, dict[str, Any]], protected: Any
+async def test_ref_protected_must_be_github_true_string_for_every_event(
+    key_material: tuple[Any, dict[str, Any]], event_name: str, protected: Any
 ) -> None:
     key, jwk = key_material
     claims = _claims()
+    claims["event_name"] = event_name
     claims["ref_protected"] = protected
     with pytest.raises(OidcValidationError) as caught:
         await _validator(FakeJwks({"keys": [jwk]})).validate(_token(key, claims))
