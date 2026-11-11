@@ -500,7 +500,10 @@ jobs:
         id: backend_build
         run: |
           set -euo pipefail
-          docker buildx build --push             --provenance=mode=max --sbom=true             --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE"             --build-arg "LIQUIBASE_SHA256=$LIQUIBASE_SHA256"             --metadata-file "$RUNNER_TEMP/backend-build-metadata.json"             --file "$DOCKERFILE"             --tag "$QUAR_BACKEND:sha-$GITHUB_SHA"             "$BUILD_CONTEXT"
+          # BuildKit defaults to an empty builder.id. The evidence validator
+          # rejects that before signing, so bind provenance to the same trusted
+          # workflow identity that cosign will use.
+          docker buildx build --push             --provenance="mode=max,builder-id=https://github.com/$TRUSTED_BUILDER_ID" --sbom=true             --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE"             --build-arg "LIQUIBASE_SHA256=$LIQUIBASE_SHA256"             --metadata-file "$RUNNER_TEMP/backend-build-metadata.json"             --file "$DOCKERFILE"             --tag "$QUAR_BACKEND:sha-$GITHUB_SHA"             "$BUILD_CONTEXT"
           BACKEND_DIGEST="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["containerimage.digest"])' "$RUNNER_TEMP/backend-build-metadata.json")"
           [[ "$BACKEND_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
             echo "::error::buildx did not return a valid backend digest"; exit 1;

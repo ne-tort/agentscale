@@ -644,5 +644,25 @@ class WorkflowEnvironmentTiming(unittest.TestCase):
             run.index('plugin_manifest_builder.py" backend-evidence'),
         )
 
+
+class WorkflowProvenanceIdentity(unittest.TestCase):
+    def test_backend_build_binds_provenance_to_the_trusted_workflow(self) -> None:
+        """BuildKit emits builder.id="" unless builder-id is passed explicitly."""
+
+        import yaml
+
+        workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+        step = next(
+            step
+            for step in workflow["jobs"]["release"]["steps"]
+            if step.get("name", "").startswith("Build and push backend only")
+        )
+        run = step["run"]
+        self.assertIn(
+            '--provenance="mode=max,builder-id=https://github.com/$TRUSTED_BUILDER_ID"',
+            run,
+        )
+        self.assertNotIn("--provenance=mode=max --sbom", run)
+
 if __name__ == "__main__":
     unittest.main()
