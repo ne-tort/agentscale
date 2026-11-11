@@ -594,5 +594,55 @@ class WorkflowPassesRequiredBuildArgs(unittest.TestCase):
             self.assertNotIn("ubuntu-latest", line)
 
 
+class WorkflowEnvironmentTiming(unittest.TestCase):
+    """GITHUB_ENV/ PATH take effect in later steps, never in the writer step."""
+
+    def test_env_exports_have_a_local_value_before_same_step_use(self) -> None:
+        import yaml
+
+        workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+        offenders: list[str] = []
+        for job_name, job in workflow["jobs"].items():
+            for step in job["steps"]:
+                run = step.get("run") or ""
+                writes = set(re.findall(r'echo ["\x27]([A-Z][A-Z0-9_]+)=', run))
+                writes.update(
+                    re.findall(r'handle\.write\(f?["\x27]([A-Z][A-Z0-9_]+)=', run)
+                )
+                reads = {
+                    name
+                    for pair in re.findall(
+                        r'\$([A-Z][A-Z0-9_]+)\b|\$\{([A-Z][A-Z0-9_]+)\}', run
+                    )
+                    for name in pair
+                    if name
+                }
+                local = set(
+                    re.findall(r'(?m)^\s*([A-Z][A-Z0-9_]+)=', run)
+                )
+                for name in sorted((writes & reads) - local):
+                    offenders.append(f"{job_name}: {step.get('name')}: {name}")
+        self.assertEqual(offenders, [])
+
+    def test_backend_manifest_digest_is_read_from_the_computed_value(self) -> None:
+        import yaml
+
+        workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+        step = next(
+            step
+            for step in workflow["jobs"]["release"]["steps"]
+            if step.get("name", "").startswith("Extract backend buildx SBOM")
+        )
+        run = step["run"]
+        self.assertIn('image-manifest-digest.txt", "w"', run)
+        self.assertIn(
+            'BACKEND_IMAGE_MANIFEST_DIGEST="$(< "$EVIDENCE/image-manifest-digest.txt")"',
+            run,
+        )
+        self.assertLess(
+            run.index("BACKEND_IMAGE_MANIFEST_DIGEST=\"$(<"),
+            run.index('plugin_manifest_builder.py" backend-evidence'),
+        )
+
 if __name__ == "__main__":
     unittest.main()
