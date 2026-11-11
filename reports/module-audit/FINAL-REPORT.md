@@ -373,7 +373,8 @@ line 60: TRUSTED_BUILDER_ID: parameter not set
 **Где release-путь сейчас.** После задания всех 10 переменных и фиксов сборки
 прогон `42958196517` прошёл dry-run, OIDC claims, установку cosign/ORAS, сборку
 и публикацию backend-образа в quarantine, а затем остановился на генерации
-buildx evidence:
+buildx evidence. Последовательные исправления (PR #343–#350) продвинули release
+до финального шага `Verify signatures and all evidence before any release write`.
 
 ```
 line 45: BACKEND_IMAGE_MANIFEST_DIGEST: parameter not set
