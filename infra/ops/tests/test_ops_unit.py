@@ -395,3 +395,63 @@ def test_gitops_bootstrap_fails_loudly_without_ghcr_token() -> None:
     assert "TF_VAR_ghcr_token is empty" in tpl
     assert "WARN: no TF_VAR_ghcr_token" not in tpl
 
+
+
+def test_rollout_timeout_prints_pod_state(monkeypatch, capsys) -> None:
+    """Таймаут без диагностики не отличим от любой другой причины."""
+
+    from types import SimpleNamespace
+
+    from prodavan_ops import k8s
+
+    class _Dep:
+        metadata = SimpleNamespace(generation=2)
+        spec = SimpleNamespace(replicas=1)
+        status = SimpleNamespace(
+            ready_replicas=0, updated_replicas=1, observed_generation=2
+        )
+
+    class _Apps:
+        def read_namespaced_deployment(self, *, name, namespace):
+            return _Dep()
+
+        def patch_namespaced_deployment(self, **kwargs):
+            return None
+
+    crashing = SimpleNamespace(
+        name="worker",
+        ready=False,
+        restart_count=7,
+        state=SimpleNamespace(
+            waiting=SimpleNamespace(
+                reason="CrashLoopBackOff", message="back-off 40s restarting",
+            ),
+            terminated=None,
+        ),
+    )
+    pod = SimpleNamespace(
+        metadata=SimpleNamespace(name="agentscale-celery-worker-abc"),
+        status=SimpleNamespace(phase="Running", container_statuses=[crashing]),
+    )
+
+    class _Core:
+        def list_namespaced_pod(self, *, namespace, label_selector):
+            return SimpleNamespace(items=[pod])
+
+        def read_namespaced_pod_log(self, **kwargs):
+            return "Traceback: RuntimeError: boom"
+
+    monkeypatch.setattr(k8s, "require_k8s_api", lambda: None)
+    monkeypatch.setattr(k8s, "load_kube", lambda: None)
+    monkeypatch.setattr(k8s.client, "AppsV1Api", lambda: _Apps())
+    monkeypatch.setattr(k8s.client, "CoreV1Api", lambda: _Core())
+    monkeypatch.setattr(k8s.time, "sleep", lambda _s: None)
+
+    with pytest.raises(TimeoutError):
+        k8s.rollout_restart(namespace="agentscale-dev", deployments=("agentscale-celery-worker",), timeout_sec=0)
+
+    out = capsys.readouterr().out
+    assert "rollout diag: pod agentscale-celery-worker-abc" in out
+    assert "reason=CrashLoopBackOff" in out
+    assert "restarts=7" in out
+    assert "RuntimeError: boom" in out

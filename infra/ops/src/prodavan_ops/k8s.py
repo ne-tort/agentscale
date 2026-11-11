@@ -346,7 +346,52 @@ def rollout_restart(
             print(f"rollout wait: {ns}/{name} ready={ready} updated={updated} desired={desired}")
             time.sleep(5)
         else:
+            _dump_rollout_diagnostics(name=name, ns=ns)
             raise TimeoutError(f"rollout timed out: {ns}/{name}")
+
+
+def _dump_rollout_diagnostics(*, name: str, ns: str) -> None:
+    """Печатать состояние подов и причины до таймаута.
+
+    Без этого таймаут сообщает только «ready=0», и понять, под не стартует,
+    падает в CrashLoop или не может скачать образ, невозможно без доступа к
+    кластеру. Диагностика best-effort: её провал не скрывает исходную ошибку.
+    """
+    try:
+        core = client.CoreV1Api()
+        pods = core.list_namespaced_pod(
+            namespace=ns, label_selector=f"app={name}"
+        )
+    except Exception as exc:  # noqa: BLE001 — диагностика не маскирует таймаут
+        print(f"rollout diag unavailable for {ns}/{name}: {type(exc).__name__}")
+        return
+    for pod in pods.items or []:
+        status = pod.status
+        phase = getattr(status, "phase", "?") if status else "?"
+        print(f"rollout diag: pod {pod.metadata.name} phase={phase}")
+        for container in (status.container_statuses or []) if status else []:
+            state = container.state
+            failing = getattr(state, "waiting", None) or getattr(state, "terminated", None)
+            reason = getattr(failing, "reason", "") if failing else ""
+            message = getattr(failing, "message", "") if failing else ""
+            print(
+                f"rollout diag:   {container.name} ready={container.ready} "
+                f"restarts={container.restart_count} reason={reason or '-'}"
+            )
+            if message:
+                print(f"rollout diag:     {message[:240]}")
+            if reason in {"CrashLoopBackOff", "Error"}:
+                try:
+                    logs = core.read_namespaced_pod_log(
+                        name=pod.metadata.name,
+                        namespace=ns,
+                        container=container.name,
+                        tail_lines=40,
+                    )
+                except Exception:  # noqa: BLE001
+                    continue
+                for line in (logs or "").splitlines()[-25:]:
+                    print(f"rollout diag:     | {line}")
 
 
 def wait_argo_app(
