@@ -596,3 +596,38 @@ class WorkflowPassesRequiredBuildArgs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_release_job_is_unreachable_while_auto_merge_suppresses_push() -> None:
+    """Release-путь не исполняется ни разу: merge через GITHUB_TOKEN не даёт push.
+
+    У workflow 39 прогонов `pull_request` и один `workflow_dispatch`, ни одного
+    `push`. Причина в `auto-merge.yml`: squash-merge токеном GITHUB_TOKEN не
+    порождает событие `push`, поэтому условие release-job
+    (`event_name == 'push'` на default branch) за всё время не было истинным.
+    Тест фиксирует это как факт: пока условие не изменено, ветка
+    quarantine→sign→promote→publication остаётся непроверенной, и зелёный
+    прогон PR не должен читаться как проверка публикации.
+    """
+
+    import yaml
+
+    workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    release = workflow["jobs"]["release"]
+
+    # Release объявлен с environment и правами записи: он способен публиковать.
+    assert release["environment"] == "plugin-release"
+    assert release["permissions"]["packages"] == "write"
+    assert release["permissions"]["id-token"] == "write"
+
+    # Но запускается только на push в default branch (или dispatch/release-call).
+    condition = release["if"]
+    assert "github.event_name == 'push'" in condition
+    assert "github.event_name != 'pull_request'" in condition
+
+    # А push-событие в этом репозитории не появляется: merge делает auto-merge
+    # токеном, о чём прямо сказано в его шапке.
+    auto_merge = (
+        ROOT / ".github" / "workflows" / "auto-merge.yml"
+    ).read_text(encoding="utf-8")
+    assert "GITHUB_TOKEN merge does not trigger push workflows" in auto_merge
