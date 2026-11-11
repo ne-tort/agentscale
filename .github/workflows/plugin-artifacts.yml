@@ -248,10 +248,17 @@ jobs:
           ip -brief addr || true
           ip route show || true
           ip -6 route show || true
-          echo '== curl -4/-6 https probes =='
-          curl -4 -sS -o /dev/null -w 'https4 %{http_code} %{remote_ip} %{time_total}s\n' https://deb.debian.org/ || true
-          curl -6 -sS -o /dev/null -w 'https6 %{http_code} %{remote_ip} %{time_total}s\n' https://deb.debian.org/ || true
-          curl -4 -sS -o /dev/null -w 'fulcio4 %{http_code} %{remote_ip} %{time_total}s\n' https://fulcio.sigstore.dev/api/v1/signingCert || true
+          echo '== curl -4/-6 https probes (bounded) =='
+          # IPv6 egress on this VM is known to be unreachable; probe IPv6 too,
+          # but never without hard timeouts — the dry-run used to hang here.
+          for proto in 4 6; do
+            curl -$proto --connect-timeout 5 --max-time 15 -sS -o /dev/null \
+              -w "https$proto %{http_code} %{remote_ip} %{time_total}s\n" \
+              https://deb.debian.org/ || true
+          done
+          curl -4 --connect-timeout 5 --max-time 15 -sS -o /dev/null \
+            -w 'fulcio4 %{http_code} %{remote_ip} %{time_total}s\n' \
+            https://fulcio.sigstore.dev/api/v1/signingCert || true
           echo '== docker info network =='
           docker info --format '{{json .DriverStatus}}' || true
 
