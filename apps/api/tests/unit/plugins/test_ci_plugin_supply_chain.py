@@ -686,14 +686,33 @@ class WorkflowBundlePushPaths(unittest.TestCase):
             self.assertIn(f'"{relative}"', run)
         self.assertNotIn("--disable-path-validation", run)
 
-    def test_verify_strips_registry_timestamp_before_comparison(self) -> None:
-        """ORAS adds org.opencontainers.image.created on push; not signed content."""
+    def test_builder_pins_created_annotation_for_oras_to_preserve(self) -> None:
+        """created is signed content; ORAS must not generate a different value."""
 
-        import yaml
+        source = _source_manifest()
+        with tempfile.TemporaryDirectory() as tmp:
+            canonical = Path(tmp) / "canonical-manifest.json"
+            canonical.write_bytes(builder.canonical_manifest_bytes(source))
+            frontend = Path(tmp) / "frontend-dist.tar.gz"
+            migrations = Path(tmp) / "migrations.tar.gz"
+            frontend.write_bytes(b"frontend")
+            migrations.write_bytes(b"migrations")
+            manifest = builder.build_bundle_manifest(
+                source,
+                "ghcr.io/ne-tort/plugins/hello_plugin/backend@sha256:" + "a" * 64,
+                str(canonical),
+                str(frontend),
+                str(migrations),
+                "ne-tort/agentscale",
+                "c" * 40,
+            )
+        created = manifest["annotations"]["org.opencontainers.image.created"]
+        self.assertRegex(created, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+        self.assertEqual(builder.annotation_file(manifest)["$manifest"]["org.opencontainers.image.created"], created)
 
         verify = (ROOT / ".github" / "scripts" / "plugin_verify.py").read_text(encoding="utf-8")
-        self.assertIn('_ts_key = "org.opencontainers.image.created"', verify)
-        self.assertIn("pushed.pop(_ts_key, None)", verify)
+        self.assertNotIn("pushed.pop(_ts_key", verify)
+        self.assertNotIn("expected.pop(_ts_key", verify)
 
 
 if __name__ == "__main__":

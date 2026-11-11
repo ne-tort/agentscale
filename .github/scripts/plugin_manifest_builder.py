@@ -622,7 +622,10 @@ def build_bundle_manifest(
         _layer_descriptor(Path(frontend_archive), FRONTEND_MEDIA_TYPE, ROLE_FRONTEND, "frontend-dist.tar.gz"),
         _layer_descriptor(Path(migrations_archive), MIGRATIONS_MEDIA_TYPE, ROLE_MIGRATIONS, "migrations.tar.gz"),
     ]
+    # ORAS adds org.opencontainers.image.created to manifest.annotations when
+    # absent. Set it here so expected and pushed bytes are identical before signing.
     annotations = {
+        "org.opencontainers.image.created": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         A_PLUGIN_ID: source_manifest["plugin_id"],
         A_MANIFEST_VERSION: source_manifest["version"],
         A_PROTOCOL: PLUGIN_PROTOCOL,
