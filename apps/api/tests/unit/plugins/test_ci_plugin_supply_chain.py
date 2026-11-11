@@ -664,5 +664,27 @@ class WorkflowProvenanceIdentity(unittest.TestCase):
         )
         self.assertNotIn("--provenance=mode=max --sbom", run)
 
+class WorkflowBundlePushPaths(unittest.TestCase):
+    def test_bundle_file_references_are_relative_to_the_prepare_parent(self) -> None:
+        """ORAS rejects absolute file refs; keep path validation enabled instead."""
+
+        import yaml
+
+        workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+        step = next(
+            step
+            for step in workflow["jobs"]["release"]["steps"]
+            if step.get("name", "").startswith("Build and push canonical OCI bundle")
+        )
+        run = step["run"]
+        self.assertIn('cd "$(dirname "$CANONICAL_MANIFEST")/.."', run)
+        for relative in (
+            "plugin-prepare/canonical-manifest.json",
+            "plugin-prepare/frontend-dist.tar.gz",
+            "plugin-prepare/migrations.tar.gz",
+        ):
+            self.assertIn(relative, run)
+        self.assertNotIn("--disable-path-validation", run)
+
 if __name__ == "__main__":
     unittest.main()
