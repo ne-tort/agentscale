@@ -517,11 +517,24 @@ bindings; source/OIDC/ref/workflow checks выполняются до registry w
 **Схема конфига** (ровно эти ключи, `additionalProperties` запрещён — лишний
 ключ даёт `PROTECTED_CONFIG_INVALID`):
 
-Release-job объявлен с `environment: plugin-release`. Это **не** декорация:
-именно этот environment держит protected-переменные (включая
-`PLUGIN_PLATFORM_PUBLICATION_CONFIG`) и правила ревью, поэтому без него
-job либо не стартует, либо видит пустые значения. Секретов workflow не требует
-вовсе — единственный используемый `GITHUB_TOKEN` выдаётся рантаймом.
+Release-job объявлен с `environment: plugin-release`.
+
+**Что этот environment делает фактически (2026-11-11).** В репозитории
+`environments` **ноль** (`GET /repos/…/environments` → `total_count: 0`), и
+`plugin-release` среди них нет (обращение к нему → 404). GitHub **не** блокирует
+job, если объявленный environment не существует: он создаёт его неявно при
+первом запуске, без required reviewers. Поэтому прежнее утверждение «без него
+job либо не стартует, либо видит пустые значения» **неверно** — job
+стартует, а защита сводится к тому, что переменные не заданы.
+
+Практический вывод: пока environment не создан с required reviewers и пока
+`PLUGIN_PLATFORM_PUBLICATION_CONFIG` не заданы, **единственный** фактический
+предохранитель — отсутствие переменных. Как только их зададут, следующий push в
+`main` с изменениями в `packages/plugins/**` или в скриптах публикации запустит
+release с `packages: write` и `id-token: write` **без ревью**.
+
+Секретов workflow не требует вовсе — единственный используемый `GITHUB_TOKEN`
+выдаётся рантаймом.
 
 Все входы release-пути приходят из repository/environment `vars`, а не из
 caller-параметров. Полный список — ровно эти десять имён; незаданная переменная
