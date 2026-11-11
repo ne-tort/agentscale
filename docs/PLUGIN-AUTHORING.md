@@ -560,6 +560,21 @@ caller-параметров. Полный список — ровно эти д�
 }
 ```
 
+**`publication_base_url` — достижимый адрес API, а не публичный ingress.**
+Эндпоинт публикации живёт по пути `/internal/plugin-artifacts`
+(`api/internal/plugin_artifacts.py`, роутер без префикса). Ingress маршрутизирует
+только `/api`, `/health` и `/`; проверено живьём на dev, что
+`POST /internal/plugin-artifacts` с `Host: agentscale.dev` и с `localhost`
+возвращает **405 Not Allowed** от nginx — путь наружу не выставлен намеренно.
+Поэтому в конфигурации указывается адрес, реально доступный раннеру внутри
+доверенной сети (ClusterIP Service либо защищённый внутренний адрес). Указать
+туда публичный host — значит получить отказ публикации на 405, а не рабочий
+канал.
+
+`PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST` нужен **только** для `http://` адреса: при
+`https://` конфигурация принимается без него (проверено исполнением, отказ идёт
+как `HTTPS_REQUIRED`).
+
 `static_origin`, если он указан, принимает ровно `url_template`,
 `plugin_shell_origin` и `security_headers`; `null` означает, что CSP-проба для
 этого источника не выполняется. `scanner_image` обязан иметь и точную версию, и
