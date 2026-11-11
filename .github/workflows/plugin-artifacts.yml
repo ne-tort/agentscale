@@ -439,8 +439,11 @@ jobs:
           tar -xzf "$TOOLS/oras.tar.gz" -C "$TOOLS" oras
           chmod 0555 "$TOOLS/cosign" "$TOOLS/oras"
           echo "$TOOLS" >> "$GITHUB_PATH"
-          cosign version | grep -F "$COSIGN_VERSION"
-          oras version | grep -F "$ORAS_VERSION"
+          # GITHUB_PATH is applied to *later* steps only. Verifying with the bare
+          # names here is "command not found" and aborted the release before any
+          # registry write, even though both binaries had just been installed.
+          "$TOOLS/cosign" version | grep -F "$COSIGN_VERSION"
+          "$TOOLS/oras" version | grep -F "$ORAS_VERSION"
 
       - name: Revalidate manifest, layout and protocol before quarantine build
         run: |
