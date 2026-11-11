@@ -645,6 +645,84 @@ class WorkflowEnvironmentTiming(unittest.TestCase):
         )
 
 
+class WorkflowTrustedBuilderIdentity(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        import yaml
+
+        workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+        cls.step = next(
+            step
+            for step in workflow["jobs"]["release"]["steps"]
+            if step.get("name", "").startswith("Validate GitHub OIDC source")
+        )
+        cls.trust_run = cls.step["run"]
+
+    def test_direct_push_and_dispatch_use_the_validated_canonical_branch(self) -> None:
+        self.assertIn('if [[ "$GITHUB_EVENT_NAME" == "workflow_call" ]]', self.trust_run)
+        self.assertIn(
+            'TRUSTED_BUILDER_ID="ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@$GITHUB_REF"',
+            self.trust_run,
+        )
+        self.assertIn("EXPECTED_REF", self.step["env"])
+        self.assertIn("DEFAULT_BRANCH", self.step["env"])
+
+    def test_workflow_call_uses_the_pinned_input_instead_of_the_caller_ref(self) -> None:
+        self.assertIn(
+            'EXPECTED_BUILDER_ID="ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@$WORKFLOW_SHA"',
+            self.trust_run,
+        )
+        self.assertIn('[[ "$INPUT_WORKFLOW_REF" == "$EXPECTED_BUILDER_ID" ]]', self.trust_run)
+        self.assertIn('TRUSTED_BUILDER_ID="$INPUT_WORKFLOW_REF"', self.trust_run)
+        assignments = re.findall(
+            r"(?m)^[ \t]*TRUSTED_BUILDER_ID=(\S+)$", self.trust_run
+        )
+        self.assertEqual(
+            assignments,
+            [
+                '"$INPUT_WORKFLOW_REF"',
+                '"ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@$GITHUB_REF"',
+            ],
+        )
+
+    def test_validate_context_uses_the_identity_exported_by_release_trust(self) -> None:
+        self.assertIn("builder = trust.builder_identity", self.trust_run)
+        self.assertIn(r'handle.write(f"TRUSTED_BUILDER_ID={builder}\n")', self.trust_run)
+        self.assertIn('--builder-identity "$TRUSTED_BUILDER_ID"', self.trust_run)
+        self.assertLess(
+            self.trust_run.index("TRUSTED_BUILDER_ID="),
+            self.trust_run.index('plugin_publication.py" validate-context'),
+        )
+
+
+class WorkflowDockerConfigPath(unittest.TestCase):
+    def test_publish_computes_and_checks_the_login_config_without_runner_home(self) -> None:
+        import yaml
+
+        workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+        steps = workflow["jobs"]["release"]["steps"]
+        login_index = next(
+            index for index, step in enumerate(steps)
+            if step.get("name", "").startswith("Login to GHCR")
+        )
+        publish_index = next(
+            index for index, step in enumerate(steps)
+            if step.get("name", "").startswith("Verify independent release evidence")
+        )
+        publish = steps[publish_index]
+        run = publish["run"]
+        assignment = 'export DOCKER_CONFIG_PATH="${DOCKER_CONFIG:-$HOME/.docker}/config.json"'
+        check = 'test -f "$DOCKER_CONFIG_PATH"'
+
+        self.assertLess(login_index, publish_index)
+        self.assertNotIn("DOCKER_CONFIG_PATH", publish.get("env", {}))
+        self.assertNotIn("runner.home", WORKFLOW_PATH.read_text(encoding="utf-8"))
+        self.assertIn(assignment, run)
+        self.assertIn(check, run)
+        self.assertLess(run.index(assignment), run.index(check))
+        self.assertLess(run.index(check), run.index('plugin_publication.py" publish'))
+
+
 class WorkflowProvenanceIdentity(unittest.TestCase):
     def test_backend_build_binds_provenance_to_the_trusted_workflow(self) -> None:
         """BuildKit emits builder.id="" unless builder-id is passed explicitly."""
