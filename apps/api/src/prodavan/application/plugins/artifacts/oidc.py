@@ -27,6 +27,7 @@ GITHUB_ACTIONS_JWKS_URL = f"{GITHUB_ACTIONS_ISSUER}/.well-known/jwks"
 DEFAULT_PLUGIN_AUDIENCE = "agentscale-plugin-ci"
 DEFAULT_ALLOWED_ALGORITHMS = frozenset({"RS256"})
 _MAX_JWKS_BYTES = 1024 * 1024
+_ALLOWED_EVENT_NAMES = frozenset({"push", "workflow_dispatch", "workflow_call"})
 _REQUIRED_CLAIMS = (
     "iss",
     "aud",
@@ -201,13 +202,13 @@ class GitHubActionsOidcValidator:
             raise OidcValidationError(OidcErrorCode.TOKEN_MALFORMED) from exc
         self._validate_time_and_audience(claims)
         # GitHub exposes this claim as the string "true", not a JSON boolean.
-        # Push publication is accepted only for the protected default ref.
+        # Every supported release event still requires the protected default ref.
         if claims.get("ref_protected") != "true":
             raise OidcValidationError(
                 OidcErrorCode.INVALID_CLAIM,
                 claim="ref_protected",
             )
-        if claims.get("event_name") != "push":
+        if claims.get("event_name") not in _ALLOWED_EVENT_NAMES:
             raise OidcValidationError(
                 OidcErrorCode.SOURCE_BINDING_MISMATCH,
                 claim="event_name",
@@ -231,7 +232,6 @@ class GitHubActionsOidcValidator:
             "repository_id": str(source.repo_id),
             "ref": source.expected_ref,
             "sha": commit_sha,
-            "event_name": "push",
             "job_workflow_ref": source.trusted_workflow_ref,
         }
         actual = {
@@ -239,7 +239,6 @@ class GitHubActionsOidcValidator:
             "repository_id": claims.repository_id,
             "ref": claims.ref,
             "sha": claims.sha,
-            "event_name": claims.event_name,
             "job_workflow_ref": claims.job_workflow_ref,
         }
         for name, expected_value in expected.items():

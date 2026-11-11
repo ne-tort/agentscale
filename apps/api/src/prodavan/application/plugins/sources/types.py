@@ -2,7 +2,7 @@
 
 Модуль не знает о GitHub token'ах и не разрешает секреты. Это НЕ второй
 runtime/grant registry: здесь только неизменяемая привязка исходника и trust-
-конфигурация reusable workflow для CI publication.
+конфигурация direct/reusable workflow для CI publication.
 """
 
 from __future__ import annotations
@@ -17,9 +17,14 @@ from prodavan.domain.plugins.types import PLUGIN_ID_PATTERN
 
 _FULL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _DEFAULT_BRANCH_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$")
+_CANONICAL_WORKFLOW_REPOSITORY = "ne-tort/agentscale"
+_CANONICAL_WORKFLOW_PATH = (
+    f"{_CANONICAL_WORKFLOW_REPOSITORY}/.github/workflows/plugin-artifacts.yml"
+)
+_FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _TRUSTED_WORKFLOW_PATTERN = re.compile(
-    r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/"
-    r"[.]github/workflows/[A-Za-z0-9_.-]+[.]ya?ml@[0-9a-f]{40}$"
+    r"^ne-tort/agentscale/[.]github/workflows/plugin-artifacts[.]yml@"
+    r"(?:[0-9a-f]{40}|refs/heads/main)$"
 )
 _SECRET_REF_PATTERN = re.compile(
     r"^(?:vault://|secret_ref://|secret://|secret_ref:)[A-Za-z0-9][A-Za-z0-9._/-]{2,}$"
@@ -63,9 +68,7 @@ class ModuleSourceTrustConfig:
         )
         if _SECRET_REF_PATTERN.fullmatch(self.installation_credential_ref) is None:
             raise ValueError("installation_credential_ref must be a secret REF, never a token")
-        _text(self.trusted_workflow_ref, field="trusted_workflow_ref", maximum=1024)
-        if _TRUSTED_WORKFLOW_PATTERN.fullmatch(self.trusted_workflow_ref) is None:
-            raise ValueError("trusted_workflow_ref must be a central workflow path@40 lowercase hex")
+        _validate_trusted_workflow_ref(self.trusted_workflow_ref)
 
 
 def _validate_scope_pair(cabinet_id: object, project_id: object) -> None:
@@ -88,6 +91,36 @@ def _validate_default_branch(value: object) -> None:
         or (value.startswith("refs/") and not value.startswith("refs/heads/"))
     ):
         raise ValueError("default_branch must be a plain Git branch name")
+
+
+def _expected_ref(default_branch: str) -> str:
+    if default_branch.startswith("refs/heads/"):
+        return default_branch
+    return f"refs/heads/{default_branch}"
+
+
+def _validate_trusted_workflow_ref(value: object) -> None:
+    _text(value, field="trusted_workflow_ref", maximum=1024)
+    if not isinstance(value, str) or _TRUSTED_WORKFLOW_PATTERN.fullmatch(value) is None:
+        raise ValueError(
+            "trusted_workflow_ref must be the canonical workflow at a full SHA "
+            "or protected branch ref"
+        )
+
+
+def _validate_workflow_source_binding(
+    *, full_name: str, default_branch: str, trusted_workflow_ref: str
+) -> None:
+    """Bind a mutable direct identity to its exact canonical protected source ref."""
+    workflow_ref = trusted_workflow_ref.rsplit("@", 1)[1]
+    if _FULL_SHA_PATTERN.fullmatch(workflow_ref) is not None:
+        return
+    expected_direct_ref = f"{_CANONICAL_WORKFLOW_PATH}@{_expected_ref(default_branch)}"
+    if full_name != _CANONICAL_WORKFLOW_REPOSITORY or trusted_workflow_ref != expected_direct_ref:
+        raise ValueError(
+            "direct trusted_workflow_ref requires the canonical repository and "
+            "its exact protected default branch"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +168,11 @@ class ModuleSourceProvisioningReservation:
             installation_credential_ref=self.installation_credential_ref,
             trusted_workflow_ref=self.trusted_workflow_ref,
         ).validate()
+        _validate_workflow_source_binding(
+            full_name=self.full_name,
+            default_branch=self.default_branch,
+            trusted_workflow_ref=self.trusted_workflow_ref,
+        )
         _text(self.attempt_id, field="attempt_id", maximum=80)
         if not isinstance(self.create_in_progress, bool):
             raise ValueError("create_in_progress must be a boolean")
@@ -215,9 +253,12 @@ class ModuleSource:
         )
         if _SECRET_REF_PATTERN.fullmatch(self.installation_credential_ref) is None:
             raise ValueError("installation_credential_ref must be a secret REF, never a token")
-        _text(self.trusted_workflow_ref, field="trusted_workflow_ref", maximum=1024)
-        if _TRUSTED_WORKFLOW_PATTERN.fullmatch(self.trusted_workflow_ref) is None:
-            raise ValueError("trusted_workflow_ref must be a central workflow path@40 lowercase hex")
+        _validate_trusted_workflow_ref(self.trusted_workflow_ref)
+        _validate_workflow_source_binding(
+            full_name=self.full_name,
+            default_branch=self.default_branch,
+            trusted_workflow_ref=self.trusted_workflow_ref,
+        )
         if not isinstance(self.status, ModuleSourceStatus):
             raise ValueError("unknown ModuleSource status")
         for value in (self.created_at, self.updated_at):
@@ -233,11 +274,9 @@ class ModuleSource:
 
     @property
     def expected_ref(self) -> str:
-        if self.default_branch.startswith("refs/heads/"):
-            return self.default_branch
-        return f"refs/heads/{self.default_branch}"
+        return _expected_ref(self.default_branch)
 
     @property
     def expected_signer_identity(self) -> str:
-        """Cosign identity центрального workflow на том же immutable SHA."""
+        """Exact reusable SHA or direct protected-branch cosign identity."""
         return f"https://github.com/{self.trusted_workflow_ref}"

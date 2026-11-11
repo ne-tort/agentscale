@@ -352,8 +352,8 @@ MODULE_SOURCE_PROVIDER_SQL = "github_app"
 
 MODULE_SOURCE_FULL_NAME_SQL = "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
 MODULE_SOURCE_WORKFLOW_SQL = (
-    "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/"
-    "[.]github/workflows/[A-Za-z0-9_.-]+[.]ya?ml@[0-9a-f]{40}$"
+    "^ne-tort/agentscale/[.]github/workflows/plugin-artifacts[.]yml@"
+    "([0-9a-f]{40}|refs/heads/main)$"
 )
 MODULE_SOURCE_SECRET_REF_SQL = (
     "^(vault://|secret_ref://|secret://|secret_ref:)[A-Za-z0-9][A-Za-z0-9._/-]+$"
@@ -597,7 +597,8 @@ class ModuleSourceRow(Base):
     #: каноническим ``expected_ref`` из application-типа.
     default_branch: Mapped[str] = mapped_column(String(255), nullable=False)
     installation_credential_ref: Mapped[str] = mapped_column(String(512), nullable=False)
-    #: Центральный reusable workflow строго ``path@40 hex`` (без mutable ref).
+    #: Canonical reusable full SHA или direct identity строго на refs/heads/main.
+    #: Cross-field repository/ref binding дополнительно enforced в ModuleSource.
     trusted_workflow_ref: Mapped[str] = mapped_column(String(1024), nullable=False)
     status: Mapped[str] = mapped_column(
         String(16),

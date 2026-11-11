@@ -13,6 +13,11 @@ from prodavan.domain.plugins.helpers import (
     plugin_instance_id_for,
 )
 
+WORKFLOW = "ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@" + "a" * 40
+DIRECT_WORKFLOW = (
+    "ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@refs/heads/main"
+)
+
 
 def _source() -> ModuleSource:
     now = datetime(2026, 11, 9, tzinfo=UTC)
@@ -25,7 +30,7 @@ def _source() -> ModuleSource:
         private=True,
         default_branch="main",
         installation_credential_ref="vault://github_app/company_1/hello_plugin/installation",
-        trusted_workflow_ref="ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@" + "a" * 40,
+        trusted_workflow_ref=WORKFLOW,
         created_at=now,
         updated_at=now,
         status=ModuleSourceStatus.READY,
@@ -46,6 +51,18 @@ def test_source_has_exact_oidc_and_cosign_identities() -> None:
     assert source.expected_signer_identity == "https://github.com/" + source.trusted_workflow_ref
 
 
+def test_direct_source_binds_exact_canonical_protected_branch_identity() -> None:
+    for default_branch in ("main", "refs/heads/main"):
+        source = replace(
+            _source(),
+            full_name="ne-tort/agentscale",
+            default_branch=default_branch,
+            trusted_workflow_ref=DIRECT_WORKFLOW,
+        )
+        assert source.expected_ref == "refs/heads/main"
+        assert source.expected_signer_identity == "https://github.com/" + DIRECT_WORKFLOW
+
+
 @pytest.mark.parametrize(
     "changes",
     [
@@ -53,6 +70,24 @@ def test_source_has_exact_oidc_and_cosign_identities() -> None:
         {"installation_credential_ref": "ghp_raw-token-value"},
         {"installation_credential_ref": "file:///tmp/github-token"},
         {"trusted_workflow_ref": "ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@main"},
+        {"trusted_workflow_ref": "ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@" + "a" * 39},
+        {"trusted_workflow_ref": "ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@" + "A" * 40},
+        {"trusted_workflow_ref": "other/agentscale/.github/workflows/plugin-artifacts.yml@" + "a" * 40},
+        {"trusted_workflow_ref": "ne-tort/agentscale/.github/workflows/other.yml@" + "a" * 40},
+        {"trusted_workflow_ref": DIRECT_WORKFLOW},
+        {
+            "full_name": "ne-tort/agentscale",
+            "trusted_workflow_ref": DIRECT_WORKFLOW.replace("refs/heads/main", "refs/heads/release"),
+        },
+        {
+            "full_name": "ne-tort/agentscale",
+            "trusted_workflow_ref": DIRECT_WORKFLOW.replace("refs/heads/main", "refs/heads/*"),
+        },
+        {
+            "full_name": "ne-tort/agentscale",
+            "default_branch": "release",
+            "trusted_workflow_ref": DIRECT_WORKFLOW.replace("refs/heads/main", "refs/heads/release"),
+        },
         {"default_branch": "refs/tags/main"},
         {"status": "active"},
     ],
