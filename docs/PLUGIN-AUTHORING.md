@@ -410,6 +410,33 @@ source → private platform-org repo/template
   → deploy saga → явный public (меню НЕ реализовано, см. §9) → update/rollback saga
 ```
 
+### CI publication: отдельный trust-контур
+
+Публикация артефактов — **не** часть plugin runtime и **не** часть source-
+контура. Она включается своим флагом и намеренно **не** наследует
+`PLUGIN_PLATFORM_ENABLED`, Keycloak-employee auth, `grant`-статусы или
+credential'ы агента/пода. Статический токен и анонимный GHCR-загрузчик
+исключены.
+
+| Env | По умолчанию | Назначение |
+|---|---|---|
+| `PLUGIN_CI_PUBLICATION_ENABLED` | выключено | Явный boolean; иное значение — ошибка композиции, а не «выключено» |
+| `PLUGIN_CI_OIDC_AUDIENCE` | — | **Обязателен** при включении: audience для проверки GitHub OIDC |
+
+Полная композиция (`install_plugin_ci_publication`) дополнительно требует:
+
+- `ManagedOrganization` + `GitHubAppClient` для registry_read токенов;
+- durable reader `PublicationApproval`;
+- существующую cosign identity;
+- общий SQL session factory.
+
+Любой отказ восстанавливает `app.state` и закрывает только собственный store;
+заимствованные provider и source factory не трогаются. При выключенном флаге
+`POST /internal/plugin-artifacts` отвечает типизированным **503**, а не 404 и не
+пустым ответом.
+
+`PLUGIN_CI_OIDC_AUDIENCE` читается только при включённом контуре, поэтому пустое
+значение при выключенном флаге безопасно.
 ### ModuleSource: настройки managed provisioning
 
 Provisioning — независимый trust-контур: он **не включает** plugin runtime и
