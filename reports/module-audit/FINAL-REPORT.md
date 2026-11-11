@@ -352,12 +352,29 @@ line 60: TRUSTED_BUILDER_ID: parameter not set
 Это ещё один дефект, который **невозможно было увидеть без исполнения**: до
 снятия `ref_protected` до этой строки не доходил ни один прогон.
 
-**Остаток на текущий момент — не код.** Повторные dispatch после фикса падают
-в dry-run на инфраструктуре раннера: `docker.sock … context deadline exceeded`
-(buildkit-контейнер не отвечает), при этом `CI Images`, `Verify Dev` и
-`Auto-merge` в те же минуты зелёные. Digest Liquibase проверен независимо:
-архив скачивается, sha256 = `6ecf638a…`, совпадает с переменной, то есть
-checksum не является причиной.
+**Далее нашлись ещё два дефекта (PR #344, #345; merge `68d5d948`, `226ab304`).**
+
+1. **Сборка образа не имела сети.** Dry-run падал с
+   `Unable to connect to deb.debian.org` при установке JRE. Выглядело как сбой
+   раннера: `docker.sock … context deadline exceeded`. Но `CI Images` в те же
+   минуты собирал образы успешно, а tarball Liquibase скачивался с хоста и давал
+   верный sha256 (`6ecf638a…`), то есть checksum был ни при чём. Разница —
+   драйвер buildx: `ci-images.yml` создаёт builder с
+   `--driver-opt network=host`, а `plugin-artifacts.yml` — нет, поэтому у
+   buildkit-контейнера не было egress. Оба builder'а приведены к рабочему
+   варианту.
+2. **Flaky-тест контракта.** `test_lifetime_follows_a_shorter_credential_expiry`
+   падал 2 раза из 20: `expires_at` считался в `credential()` (свой
+   `clock_now()`), резолвер брал `frozen_clock()`, а утверждение — третий
+   `clock_now()`. Любое пересечение границы секунды ломало точное по смыслу
+   сравнение. Теперь опорный момент читается один раз и передаётся и в
+   credential, и в часы резолвера — 0 падений из 20.
+
+**Где release-путь сейчас.** С обоими фиксами прогон `42955669309` дал
+dry-run `success`, а release дошёл до `PROTECTED_CONFIG_REQUIRED` — то есть до
+**последнего** барьера, который и должен срабатывать без конфигурации
+публикации. Все предыдущие слои (OIDC claims, `ref_protected`, `GITHUB_ENV`,
+сеть сборки) пройдены.
 
 Важно, что dispatch **не** заблокирован отсутствием `trusted_workflow_ref` во
 входах: для canonical-репозитория `ne-tort/agentscale` пустой
