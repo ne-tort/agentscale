@@ -251,6 +251,14 @@ bootstrap анонимен по дизайну и отдаёт только `com
   и `sources[]` с `repository_id`/`trusted_workflow_ref`/`static_origin`.
   Это адреса конкретной инсталляции; выдумать их нельзя, а подстановка
   «похожего» значения дала бы ложный зелёный на release-шаге.
+
+**Проверено живьём, что эндпоинт публикации наружу не выставлен.**
+`POST /internal/plugin-artifacts` на dev-ingress отвечает `405 Not Allowed` от
+nginx: path не проксируется, поэтому GitHub OIDC не может быть предъявлен с
+хоста снаружи кластера. Проверено и обратное — роутер смонтирован
+безусловно (`main.py:139`), а сервис появляется только при включённом CI
+(`install_plugin_ci_publication`), иначе `get_plugin_artifact_publication_service`
+возвращает `None` → 503. 510 тестов публикации зелёные.
 - `requirements.lock` **создан** из реального индекса через `uv pip compile`
   (`--python-version 3.13 --python-platform x86_64-manylinux_2_28
   --generate-hashes`): 22 пакета, 658 хешей, покрытие всех допустимых wheel и
