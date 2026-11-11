@@ -234,11 +234,23 @@ bootstrap анонимен по дизайну и отдаёт только `com
   находился только прогоном (см. ниже).
 - Repo-переменные: **7 из 10 заданы**, каждая из проверяемого источника (список
   ниже). Раньше я писал, что их нет вовсе — это тоже было неверно.
-- Оставшиеся **3 не заданы намеренно**: `PLUGIN_PLATFORM_PUBLICATION_CONFIG`,
-  `PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST`, `PLATFORM_VERSION`. Это protected
-  publication env: base URL платформы, digest сканера и версия платформы
-  (`>= 4.0.0` по манифесту hello). Придумать их нельзя — это данные владельца
-  платформы, и подстановка «похожего» значения дала бы ложный зелёный.
+- **`PLATFORM_VERSION` задан** (`4.0.0`). Раньше я относил его к «данным
+  владельца» — это было ошибкой: это версия *протокола* платформы, и она лежит
+  в коде константой `PLATFORM_VERSION = "4.0.0"`
+  (`application/plugins/artifacts/verification.py:55`). Проверено, что
+  `_semver_key("4.0.0") <= _semver_key("4.0.0")` проходит, а значение
+  `0.1.0` (версия приложения из `pyproject.toml`) — неверно и было бы
+  отвергнуто как `min_platform_version`.
+- **`PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST` не требуется** для нормального пути:
+  проверено исполнением, что при `https://` base URL конфигурация принимается
+  без allowlist, а без него блокируется только `http://` (`HTTPS_REQUIRED`).
+  Это аварийный вход для protected internal development, а не обязательное
+  значение.
+- **Единственный настоящий внешний вход — `PLUGIN_PLATFORM_PUBLICATION_CONFIG`:**
+  `publication_base_url` (адрес API платформы), `scanner_image` (digest Trivy)
+  и `sources[]` с `repository_id`/`trusted_workflow_ref`/`static_origin`.
+  Это адреса конкретной инсталляции; выдумать их нельзя, а подстановка
+  «похожего» значения дала бы ложный зелёный на release-шаге.
 - `requirements.lock` **создан** из реального индекса через `uv pip compile`
   (`--python-version 3.13 --python-platform x86_64-manylinux_2_28
   --generate-hashes`): 22 пакета, 658 хешей, покрытие всех допустимых wheel и
