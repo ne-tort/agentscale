@@ -677,14 +677,24 @@ class WorkflowBundlePushPaths(unittest.TestCase):
             if step.get("name", "").startswith("Build and push canonical OCI bundle")
         )
         run = step["run"]
-        self.assertIn('cd "$(dirname "$CANONICAL_MANIFEST")/.."', run)
+        self.assertIn('cd "$(dirname "$CANONICAL_MANIFEST")"', run)
         for relative in (
-            "plugin-prepare/canonical-manifest.json",
-            "plugin-prepare/frontend-dist.tar.gz",
-            "plugin-prepare/migrations.tar.gz",
+            'canonical-manifest.json:$PLUGIN_MANIFEST_MEDIA_TYPE',
+            'frontend-dist.tar.gz:$FRONTEND_MEDIA_TYPE',
+            'migrations.tar.gz:$MIGRATIONS_MEDIA_TYPE',
         ):
-            self.assertIn(relative, run)
+            self.assertIn(f'"{relative}"', run)
         self.assertNotIn("--disable-path-validation", run)
+
+    def test_verify_strips_registry_timestamp_before_comparison(self) -> None:
+        """ORAS adds org.opencontainers.image.created on push; not signed content."""
+
+        import yaml
+
+        verify = (ROOT / ".github" / "scripts" / "plugin_verify.py").read_text(encoding="utf-8")
+        self.assertIn('_ts_key = "org.opencontainers.image.created"', verify)
+        self.assertIn("pushed.pop(_ts_key, None)", verify)
+
 
 if __name__ == "__main__":
     unittest.main()
