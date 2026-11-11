@@ -164,6 +164,22 @@ actions (`setup-buildx`/`setup-docker`), поэтому собрать обра�
 (TLS-сертификат и креденшелы отвергнуты), SSH на VM требует ключ. Поэтому статус
 честно зафиксирован как **не установленный**, а не как «исправлено».
 
+**Причина найдена и исправлена (PR #342, merge `90958970`).** Диагностика из
+PR #341 дала её на первом же прогоне:
+
+```
+rollout diag:   worker ready=False restarts=7 reason=CrashLoopBackOff
+| RuntimeError: KAFKA_CONSUMER_ENABLED=true requires a dedicated
+  AUTH_COMMAND_SIGNING_SECRET of at least 32 bytes
+```
+
+Это **регрессия релиза**: `settings.py` получил новый гейт, требующий
+`AUTH_COMMAND_SIGNING_SECRET` и `AUTH_EVENT_SIGNING_SECRET` (>=32 байта), а
+`base/agentscale-api/secret.yaml` не содержал ни одного из них. Dev-конфиг
+включает `KAFKA_CONSUMER_ENABLED=true`, поэтому `Settings()` падал при импорте
+в каждом контейнере: `celery-worker` уходил в CrashLoopBackOff. Добавлены
+dev-плейсхолдеры и тест, сверяющий configmap с Secret.
+
 **Устранён пробел диагностики (PR #341, merge `5ce5a24e`).** Таймаут rollout
 печатал только `ready=0 updated=1 desired=1`, что не отличает медленный
 image-pull от crash loop. Теперь при таймауте `prodavan-ops` печатает фазу пода,
