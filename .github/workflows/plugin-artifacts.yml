@@ -247,7 +247,7 @@ jobs:
             echo "::error::BLOCKER: PLUGIN_BUILDKIT_IMAGE must pin moby/buildkit version and digest"; exit 1;
           }
           docker buildx create --name "$BUILDER" --driver docker-container \
-            --driver-opt "image=$BUILDKIT_IMAGE" --use
+            --driver-opt "image=$BUILDKIT_IMAGE" --driver-opt network=host --use
           docker buildx inspect --bootstrap "$BUILDER"
           docker buildx build --load             --provenance=false --sbom=false             --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE"             --build-arg "LIQUIBASE_SHA256=$LIQUIBASE_SHA256"             --file "$DOCKERFILE"             --tag "local/$PLUGIN_ID:sha-$GITHUB_SHA"             "$BUILD_CONTEXT"
 
@@ -490,7 +490,7 @@ jobs:
             echo "::error::BLOCKER: PLUGIN_BUILDKIT_IMAGE must pin moby/buildkit version and digest"; exit 1;
           }
           docker buildx create --name "$BUILDER" --driver docker-container \
-            --driver-opt "image=$BUILDKIT_IMAGE" --use
+            --driver-opt "image=$BUILDKIT_IMAGE" --driver-opt network=host --use
           docker buildx inspect --bootstrap "$BUILDER"
 
       - name: Build and push backend only to quarantine with buildx evidence
