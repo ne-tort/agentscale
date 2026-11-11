@@ -533,6 +533,14 @@ job либо не стартует, либо видит пустые значе�
 `main` с изменениями в `packages/plugins/**` или в скриптах публикации запустит
 release с `packages: write` и `id-token: write` **без ревью**.
 
+**Второе обязательное условие репозитория — защита `main`.** Локальная проверка
+claims (`plugin_publication.py:669`) требует `ref_protected == "true"` в GitHub
+OIDC-токене. GitHub выставляет это значение только для protected branch. Если
+ветка не защищена, release падает с `OIDC_CLAIMS_MISMATCH` **до** любой записи в
+registry, и понять это из лога можно лишь по коду проверки. Измерено
+2026-11-11: `GET /repos/…/branches/main/protection` → `404 "Branch not
+protected"`, прогон `42943815422` — ровно этот отказ.
+
 Секретов workflow не требует вовсе — единственный используемый `GITHUB_TOKEN`
 выдаётся рантаймом.
 
