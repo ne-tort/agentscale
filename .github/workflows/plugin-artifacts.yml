@@ -541,9 +541,17 @@ jobs:
               raise SystemExit("::error::buildx attestation descriptors are missing")
           with open(root + "/manifest-digests.txt", "w", encoding="utf-8") as handle:
               handle.write("\n".join(attestations) + "\n")
+          with open(root + "/image-manifest-digest.txt", "w", encoding="utf-8") as handle:
+              handle.write(image_digest + "\n")
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
               handle.write(f"BACKEND_IMAGE_MANIFEST_DIGEST={image_digest}\n")
           PY
+          # GITHUB_ENV applies to later steps only. Read the exact digest just
+          # computed instead of expanding an empty variable under `set -u` here.
+          BACKEND_IMAGE_MANIFEST_DIGEST="$(< "$EVIDENCE/image-manifest-digest.txt")"
+          [[ "$BACKEND_IMAGE_MANIFEST_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "::error::invalid backend image manifest digest"; exit 1;
+          }
           INDEX=0
           while IFS= read -r MANIFEST_DIGEST; do
             [[ "$MANIFEST_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
