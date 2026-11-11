@@ -222,3 +222,33 @@ def test_plugin_disabled_ignores_missing_secret_and_origin() -> None:
     s = Settings(app_environment="prod", plugin_platform_enabled=False)
     assert s.plugin_platform_enabled is False
 
+
+
+def test_dev_manifests_supply_every_secret_the_kafka_guard_requires() -> None:
+    """Гейт `KAFKA_CONSUMER_ENABLED` требовал секреты, которых не было в манифестах.
+
+    Settings отказывается стартовать без `AUTH_COMMAND_SIGNING_SECRET` и
+    `AUTH_EVENT_SIGNING_SECRET` (>=32 байта), а dev-конфиг включает kafka consumer
+    и не задавал ни одного из них: API и celery падали в CrashLoopBackOff, и
+    понять это из `verify-dev` было нельзя. Тест сверяет манифест с гейтом,
+    чтобы следующее новое обязательное значение не оказалось только в коде.
+    """
+
+    from pathlib import Path
+
+    import yaml
+
+    repo_root = Path(__file__).resolve().parents[4]
+    secret_path = repo_root / "infra" / "k3s" / "base" / "agentscale-api" / "secret.yaml"
+    configmap_path = repo_root / "infra" / "k3s" / "base" / "agentscale-api" / "configmap.yaml"
+    secret = yaml.safe_load(secret_path.read_text(encoding="utf-8"))
+    configmap = yaml.safe_load(configmap_path.read_text(encoding="utf-8"))
+
+    kafka_enabled = str(configmap["data"].get("KAFKA_CONSUMER_ENABLED", "")).strip().lower()
+    if kafka_enabled != "true":
+        pytest.skip("kafka consumer is disabled in the base configmap")
+
+    values = secret["stringData"]
+    for name in ("AUTH_COMMAND_SIGNING_SECRET", "AUTH_EVENT_SIGNING_SECRET"):
+        assert name in values, f"{name} is required by KAFKA_CONSUMER_ENABLED"
+        assert len(str(values[name]).encode("utf-8")) >= 32, name
