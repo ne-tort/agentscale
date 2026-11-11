@@ -85,6 +85,7 @@ def _trusted_workflow_matches(
 
 REQUIRED_RELEASE_CHECKS = frozenset(
     {
+        "digest_pinned_refs",
         "cosign_verify:oci-artifact",
         "cosign_verify:backend-image",
         "canonical_manifest_config_and_blob",
@@ -93,6 +94,12 @@ REQUIRED_RELEASE_CHECKS = frozenset(
         "attestation:backend:provenance",
         "attestation:bundle:sbom",
         "attestation:bundle:provenance",
+        "gate:semver",
+        "gate:protocol",
+        "gate:capability_allowlist",
+        "gate:platform_version",
+        "gate:capability_grant",
+        "gate:min_platform_version",
     }
 )
 REQUIRED_CSP_DIRECTIVES = frozenset(
@@ -804,12 +811,13 @@ def validate_release_decision(
     checks = decision.get("checks")
     if not isinstance(checks, list):
         raise PublicationBlocked("RELEASE_VERIFICATION_REQUIRED")
-    passed = {
-        item.get("name")
-        for item in checks
-        if isinstance(item, dict) and item.get("ok") is True
-    }
-    if not REQUIRED_RELEASE_CHECKS <= passed:
+    observed: set[str] = set()
+    for item in checks:
+        name = item.get("name") if isinstance(item, dict) else None
+        if not isinstance(name, str) or item.get("ok") is not True:
+            raise PublicationBlocked("RELEASE_VERIFICATION_REQUIRED")
+        observed.add(name)
+    if not REQUIRED_RELEASE_CHECKS <= observed:
         raise PublicationBlocked("RELEASE_VERIFICATION_REQUIRED")
     if not bundle_ref.endswith("@" + bundle_digest):
         raise PublicationBlocked("RELEASE_REFS_INVALID")
