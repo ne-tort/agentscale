@@ -622,7 +622,10 @@ def test_release_job_is_unreachable_while_auto_merge_suppresses_push() -> None:
 
     # Но запускается только на push в default branch (или dispatch/release-call).
     condition = release["if"]
+    # push в default branch — один из путей, но не единственный:
+    # `workflow_dispatch` тоже приводит к release и уже срабатывал (отменён).
     assert "github.event_name == 'push'" in condition
+    assert "github.event_name == 'workflow_dispatch'" in condition
     assert "github.event_name != 'pull_request'" in condition
 
     # А push-событие в этом репозитории не появляется: merge делает auto-merge
