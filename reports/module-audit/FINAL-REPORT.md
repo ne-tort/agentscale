@@ -246,7 +246,29 @@ bootstrap анонимен по дизайну и отдаёт только `com
   без allowlist, а без него блокируется только `http://` (`HTTPS_REQUIRED`).
   Это аварийный вход для protected internal development, а не обязательное
   значение.
-- **Единственный настоящий внешний вход — `PLUGIN_PLATFORM_PUBLICATION_CONFIG`:**
+**`PLUGIN_PLATFORM_PUBLICATION_CONFIG` СОБРАН И ПРИНЯТ ВАЛИДАТОРОМ.**
+Я четыре раунда называл его «данными владельца, которые нельзя вывести». Это
+было неверно: все компоненты выводимы из репозитория и публичных источников.
+
+| Компонент | Откуда взято | Значение |
+|---|---|---|
+| `publication_base_url` | `base/agentscale-api/service.yaml` (ClusterIP :8000) | `http://agentscale-api.agentscale-dev.svc.cluster.local:8000` |
+| `scanner_image` | `docker buildx imagetools inspect aquasec/trivy:0.76.2` | `aquasec/trivy:0.76.2@sha256:8f6bb947…` |
+| `sources[].repository_id` | `gh api repos/ne-tort/agentscale` | `1387473826` |
+| `trusted_workflow_ref` | canonical `ne-tort/agentscale/…plugin-artifacts.yml@refs/heads/main` | совпадает |
+| `plugin_id` | `packages/plugins/hello-plugin/manifest.json` | `hello_plugin` |
+
+Проверено исполнением: `PublicationConfig.from_environment` с этой
+конфигурацией и allowlist'ом **принимает** её; `SourceBinding.parse` проходит.
+Без allowlist'а отказ идёт как `HTTPS_REQUIRED` — то есть единственное, что
+связывает конфигурацию с окружением, это dev-allowlist для `http`-адреса.
+
+Важная деталь, которую легко испортить: `plugin_id` в source-привязке
+обязан совпадать с `PLUGIN_ID_RE = ^[a-z][a-z0-9_]*$`. Дефис (`hello-plugin`)
+даёт `SOURCE_CONFIG_INVALID`, а подчёркивание (`hello_plugin`) — верно, потому
+что это значение из манифеста, а не имя каталога.
+
+**Единственный настоящий внешний вход — `PLUGIN_PLATFORM_PUBLICATION_CONFIG`:**
   `publication_base_url` (адрес API платформы), `scanner_image` (digest Trivy)
   и `sources[]` с `repository_id`/`trusted_workflow_ref`/`static_origin`.
   Это адреса конкретной инсталляции; выдумать их нельзя, а подстановка
