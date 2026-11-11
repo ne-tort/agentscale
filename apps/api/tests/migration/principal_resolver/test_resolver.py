@@ -12,7 +12,7 @@ The obligations proven here are the ones the RLS adapters rely on:
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -83,12 +83,18 @@ def credential(
     tenant: str | None = None,
     cabinet: str | None = None,
     project: str | None = None,
+    issued_at: datetime | None = None,
 ) -> VerifiedCredential:
+    # ``expires_at`` must be derived from the same instant the caller asserts
+    # against. Reading the wall clock here as well means three independent reads
+    # (credential, resolver clock, assertion) that disagree whenever one of them
+    # crosses a second boundary.
+    anchor = issued_at if issued_at is not None else clock_now()
     return VerifiedCredential(
         correlation_id=correlation_id,
         subject_claim=subject,
         resolution_source=source,
-        expires_at=clock_now() + ttl,
+        expires_at=anchor + ttl,
         asserted_tenant_id=tenant,
         asserted_cabinet_id=cabinet,
         asserted_project_id=project,
@@ -96,10 +102,22 @@ def credential(
 
 
 def resolver(factory, *, cred: VerifiedCredential | None = None, **kwargs) -> AuthBoundaryPrincipalResolver:
+    return resolver_with_clock(factory, frozen_clock(), cred=cred, **kwargs)
+
+
+def resolver_with_clock(
+    factory,
+    clock,
+    *,
+    cred: VerifiedCredential | None = None,
+    **kwargs,
+) -> AuthBoundaryPrincipalResolver:
+    """Build the resolver on an explicit clock the assertions can share."""
+
     return AuthBoundaryPrincipalResolver(
         credential_source=CredentialSource(cred if cred is not None else credential()),
         directory=SqlTenantIdentityDirectory(session_factory=factory),
-        clock=frozen_clock(),
+        clock=clock,
         **kwargs,
     )
 
@@ -231,16 +249,23 @@ async def test_lifetime_is_capped_by_max_ttl() -> None:
 
 
 async def test_lifetime_follows_a_shorter_credential_expiry() -> None:
+    # Both sides must read the same instant. The resolver is built on
+    # ``frozen_clock()``; comparing against a second, independent ``clock_now()``
+    # fails whenever the two calls straddle a second boundary, which is why this
+    # test flaked in CI while every assertion it makes stayed true.
+    anchor = clock_now()
     async with identity_database() as factory:
         async with factory() as session:
             await seed_baseline(session)
 
-        principal = await resolver(factory, cred=credential(ttl=timedelta(seconds=45))).resolve(
-            correlation_id=CORRELATION
-        )
+        principal = await resolver_with_clock(
+            factory,
+            frozen_clock(anchor),
+            cred=credential(ttl=timedelta(seconds=45), issued_at=anchor),
+        ).resolve(correlation_id=CORRELATION)
 
     assert isinstance(principal, TrustedPrincipal)
-    assert principal.expires_at == clock_now() + timedelta(seconds=45)
+    assert principal.expires_at == anchor + timedelta(seconds=45)
     assert DEFAULT_MAX_PRINCIPAL_TTL > timedelta(0)
 
 
