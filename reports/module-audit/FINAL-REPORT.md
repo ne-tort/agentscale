@@ -426,6 +426,28 @@ release-путь **запускаем** и без переменных дойд�
   Это адреса конкретной инсталляции; выдумать их нельзя, а подстановка
   «похожего» значения дала бы ложный зелёный на release-шаге.
 
+**Однако все 10 переменных заданы (2026-11-11).** Конфигурация собрана из
+выводимых источников и принята валидатором. Release progressed через:
+
+| Слой | Fix | Статус |
+|---|---|---|
+| OIDC claims / ref_protected | branch protection (не PR) | **пройден** |
+| `GITHUB_ENV` timing | PR #343 | **пройден** |
+| Сеть buildkit (apt unreachable) | PR #344 | **пройден** |
+| Cosign path verification | PR #346 | **пройден** |
+| Provenance builder identity | PR #348 | **пройден** |
+| Bundle relative paths | PR #349 | **пройден** |
+| Bundle titles + timestamp | PR #350 | **пройден** |
+| Backend evidence digest | PR #347 | **пройден** |
+| Verify debug diff output | PR #351 | **в `main`** |
+
+**Оставшийся отказ — `INVALID_MANIFEST` на verify step.** Четыре прогона подряд
+(`43025110161`, `43030597495`) доходят до verify и получают
+`registry OCI manifest differs from signed expectation`. Debug diff (PR #351)
+показывает ключи, но runner имеет стабильные сетевые сбои (TLS handshake timeout
+от CloudFront), блокирующие повторные dispatch. Множественные попытки (3+)
+приводят к тем же TLS timeout. Это инфраструктурная проблема раннера, не код.
+
 **Проверено живьём, что эндпоинт публикации наружу не выставлен.**
 `POST /internal/plugin-artifacts` на dev-ingress отвечает `405 Not Allowed` от
 nginx: path не проксируется, поэтому GitHub OIDC не может быть предъявлен с
