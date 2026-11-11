@@ -579,11 +579,7 @@ def verify_artifact(
         pushed = module._read_json(pushed_manifest_path)
         if not isinstance(expected, dict) or not isinstance(pushed, dict):
             raise VerifyError(VerifyErrorCode.INVALID_MANIFEST, "OCI manifests must be JSON objects")
-        # ORAS adds org.opencontainers.image.created on push; it is a registry timestamp,
-        # not signed content. Remove it from both sides before the exact comparison.
-        _ts_key = "org.opencontainers.image.created"
-        pushed.pop(_ts_key, None)
-        expected.pop(_ts_key, None)
+        # Builder sets org.opencontainers.image.created explicitly; ORAS preserves it.
         if pushed != expected:
             for key in sorted(set(list(pushed.keys()) + list(expected.keys()))):
                 if pushed.get(key) != expected.get(key):
