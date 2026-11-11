@@ -391,7 +391,8 @@ merge `3a743b77`).
 путь к вычисленному digest. Удаление локального чтения ломает оба теста.
 Полный набор plugin suites: **3925 passed**.
 
-**Следующий слой — пустая identity у buildx provenance (PR #348).** После
+**Следующий слой — пустая identity у buildx provenance (PR #348,
+merge `5f43bc7c`).** После
 исправления digest прогон `42989623661` дошёл до
 `INVALID_EVIDENCE: buildx provenance has no builder identity`. Я скачал
 фактические in-toto statements из quarantined backend через GHCR API:
