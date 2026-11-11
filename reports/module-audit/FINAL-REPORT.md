@@ -303,6 +303,23 @@ publication» остаётся **непроверенным живьём** — �
 актуальной версии workflow** — не из-за отсутствия триггера, а потому что
 единственная попытка была отменена на другой ревизии.
 
+**Проверено прогоном (2026-11-11, run `42943815422`).** `workflow_dispatch`
+действительно доводит до release-job: dry-run прошёл, release стартовал и упал
+с `OIDC_CLAIMS_MISMATCH` **до** любой записи в registry. Разбор показал, что все
+прочие claims совпадают (`repository`, `repository_id`, `ref`, `sha`,
+`event_name`, `job_workflow_ref`, `aud`), а решает одно требование:
+`payload["ref_protected"] == "true"` (`plugin_publication.py:669`).
+
+Изолировано исполнением: при всех верных полях и `ref_protected=true` проверка
+проходит; при `ref_protected=false` — ровно `OIDC_CLAIMS_MISMATCH`.
+
+**Причина:** `main` **не защищена** — `GET /repos/…/branches/main/protection`
+отвечает `404 "Branch not protected"`. GitHub выставляет `ref_protected=true`
+только для protected branch, поэтому release-путь в этом репозитории
+**недостижим в принципе**, пока ветка не защищена — независимо от переменных,
+environment и событий. Это не отсутствие данных, а отсутствующее условие
+репозитория.
+
 Важно, что dispatch **не** заблокирован отсутствием `trusted_workflow_ref` во
 входах: для canonical-репозитория `ne-tort/agentscale` пустой
 `INPUT_WORKFLOW_REF` обрабатывается штатной веткой
