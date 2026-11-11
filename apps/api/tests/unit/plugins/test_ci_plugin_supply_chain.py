@@ -715,5 +715,23 @@ class WorkflowBundlePushPaths(unittest.TestCase):
         self.assertNotIn("expected.pop(_ts_key", verify)
 
 
+class WorkflowEgressProbeBounds(unittest.TestCase):
+    def test_egress_diagnostics_never_run_without_hard_timeouts(self) -> None:
+        """Unbounded -6 probe previously hung the entire dry-run job."""
+
+        import yaml
+
+        workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+        step = next(
+            step
+            for step in workflow["jobs"]["dry-run"]["steps"]
+            if step.get("name", "").startswith("Diagnose runner egress")
+        )
+        run = step["run"]
+        self.assertNotIn("curl -4 -sS", run)
+        self.assertNotIn("curl -6 -sS", run)
+        self.assertIn("--connect-timeout 5", run)
+        self.assertIn("--max-time 15", run)
+
 if __name__ == "__main__":
     unittest.main()
