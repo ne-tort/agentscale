@@ -410,6 +410,41 @@ source → private platform-org repo/template
   → deploy saga → явный public (меню НЕ реализовано, см. §9) → update/rollback saga
 ```
 
+### ModuleSource: настройки managed provisioning
+
+Provisioning — независимый trust-контур: он **не включает** plugin runtime и
+**не включает** CI publication. Все значения по умолчанию fail-closed (пусто /
+`False`), то есть без явной настройки source-путь просто не включён.
+
+| Env | Тип | По умолчанию | Назначение |
+|---|---|---|---|
+| `PLUGIN_MODULE_SOURCE_ENABLED` | bool | `False` | Включает source-контур |
+| `PLUGIN_MODULE_SOURCE_GITHUB_APP_ID` | int | — | App id |
+| `PLUGIN_MODULE_SOURCE_GITHUB_APP_PRIVATE_KEY_SECRET_REF` | ref | пусто | **Ссылка** на ключ в SecretStore, не сам ключ |
+| `PLUGIN_MODULE_SOURCE_GITHUB_APP_ORGANIZATION` | str | пусто | Организация-владелец новых repo |
+| `PLUGIN_MODULE_SOURCE_GITHUB_APP_INSTALLATION_ID` | int | — | Installation id |
+| `..._GITHUB_APP_TEMPLATE_OWNER` / `..._TEMPLATE_NAME` | str | пусто | **Приватный** template-репозиторий |
+| `..._GITHUB_APP_TEMPLATE_AGENTS_REVISION` | str | пусто | Пин ревизии `AGENTS.md` |
+| `..._GITHUB_APP_TEMPLATE_SECURITY_REVISION` | str | пусто | Пин ревизии security-файлов |
+| `PLUGIN_MODULE_SOURCE_GITHUB_APP_TIMEOUT_SECONDS` | float | `10.0` | Таймаут GitHub API |
+| `PLUGIN_MODULE_SOURCE_INSTALLATION_CREDENTIAL_REF` | ref | пусто | Ссылка на installation credential |
+| `PLUGIN_MODULE_SOURCE_TRUSTED_WORKFLOW_REF` | str | пусто | Доверенный reusable workflow (SHA-пин) |
+| `PLUGIN_MODULE_SOURCE_DEFAULT_BRANCH` | str | `main` | Ветка по умолчанию |
+| `PLUGIN_MODULE_SOURCE_REQUIRED_STATUS_CHECKS` | csv | пусто | Требуемые checks на ветке |
+| `PLUGIN_MODULE_SOURCE_REQUIRED_APPROVING_REVIEW_COUNT` | int | `1` | Ревью до merge |
+
+Как это работает в коде (`github_app.py:172-200`): репозиторий создаётся через
+официальный **generate API** из `organization.template`, а не пустым. Seed-commit
+не используется намеренно — генерация серверная, и у provisioning-токена нет
+прав на запись contents; токены авторинга выдаются отдельно только для явных
+patch/PR-операций.
+
+**Что это значит для автора модуля.** Содержимое (структура, CI-шаблон,
+`AGENTS.md`, security-файлы) задаётся **template-репозиторием**, который
+администратор платформы готовит заранее. Продукт создаёт repo *из* шаблона, а не
+пишет шаблон сам. Если template не настроен или pinned-ревизии отсутствуют,
+source-контур остаётся выключенным.
+
 ### ModuleSource и reservation
 
 `ModuleSource` — metadata source/authoring и trust config, **не второй runtime
