@@ -188,6 +188,11 @@ jobs:
         run: |
           set -euo pipefail
           PREPARE="$RUNNER_TEMP/plugin-prepare"
+          # ORAS intentionally rejects absolute file paths in file refs. Work
+          # from the parent of the prepare directory so bundle inputs stay
+          # relative to the current working directory.
+          WORKSPACE="$(dirname "$PREPARE")"
+          cd "$WORKSPACE"
           python3 "$CI_DIR/plugin_manifest_builder.py" prepare             --source-root "$SOURCE_DIR"             --plugin-dir "$PLUGIN_DIR"             --manifest-path "$INPUT_MANIFEST_PATH"             --output-dir "$PREPARE"             --base-image-arg "$PYTHON_BASE_IMAGE" > "$RUNNER_TEMP/resolved.json"
           python3 - <<'PY'
           import json
@@ -449,6 +454,11 @@ jobs:
         run: |
           set -euo pipefail
           PREPARE="$RUNNER_TEMP/plugin-prepare"
+          # ORAS intentionally rejects absolute file paths in file refs. Work
+          # from the parent of the prepare directory so bundle inputs stay
+          # relative to the current working directory.
+          WORKSPACE="$(dirname "$PREPARE")"
+          cd "$WORKSPACE"
           python3 "$CI_DIR/plugin_manifest_builder.py" prepare             --source-root "$SOURCE_DIR"             --plugin-dir "${{ needs.dry-run.outputs.plugin_dir }}"             --manifest-path "${{ inputs.manifest_path }}"             --output-dir "$PREPARE"             --base-image-arg "$PYTHON_BASE_IMAGE" > "$RUNNER_TEMP/resolved.json"
           python3 - <<'PY'
           import json
@@ -582,8 +592,11 @@ jobs:
         id: bundle_build
         run: |
           set -euo pipefail
+          # ORAS rejects absolute file refs; build outputs live under
+          # plugin-prepare, so run from its parent and reference them relatively.
+          cd "$(dirname "$CANONICAL_MANIFEST")/.."
           python3 "$CI_DIR/plugin_manifest_builder.py" build             --source-manifest "$SOURCE_MANIFEST"             --canonical-manifest "$CANONICAL_MANIFEST"             --backend-ref "$RELEASE_BACKEND@$BACKEND_DIGEST"             --frontend-archive "$FRONTEND_ARCHIVE"             --migrations-archive "$MIGRATIONS_ARCHIVE"             --source-repository "$GITHUB_REPOSITORY" --source-sha "$GITHUB_SHA"             --output "$RUNNER_TEMP/oci-manifest.json"             --annotation-output "$RUNNER_TEMP/oci-annotations.json"
-          oras push "$QUAR_BUNDLE:sha-$GITHUB_SHA"             --artifact-type "$ARTIFACT_TYPE"             --config "$CANONICAL_MANIFEST:$PLUGIN_MANIFEST_MEDIA_TYPE"             --annotation-file "$RUNNER_TEMP/oci-annotations.json"             --export-manifest "$RUNNER_TEMP/pushed-manifest.json"             "$CANONICAL_MANIFEST:$PLUGIN_MANIFEST_MEDIA_TYPE"             "$FRONTEND_ARCHIVE:$FRONTEND_MEDIA_TYPE"             "$MIGRATIONS_ARCHIVE:$MIGRATIONS_MEDIA_TYPE"
+          oras push "$QUAR_BUNDLE:sha-$GITHUB_SHA"             --artifact-type "$ARTIFACT_TYPE"             --config "$CANONICAL_MANIFEST:$PLUGIN_MANIFEST_MEDIA_TYPE"             --annotation-file "$RUNNER_TEMP/oci-annotations.json"             --export-manifest "$RUNNER_TEMP/pushed-manifest.json"             "plugin-prepare/canonical-manifest.json:$PLUGIN_MANIFEST_MEDIA_TYPE"             "plugin-prepare/frontend-dist.tar.gz:$FRONTEND_MEDIA_TYPE"             "plugin-prepare/migrations.tar.gz:$MIGRATIONS_MEDIA_TYPE"
           test -s "$RUNNER_TEMP/pushed-manifest.json"
           ARTIFACT_DIGEST="sha256:$(sha256sum "$RUNNER_TEMP/pushed-manifest.json" | awk '{print $1}')"
           [[ "$ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
