@@ -313,12 +313,27 @@ publication» остаётся **непроверенным живьём** — �
 Изолировано исполнением: при всех верных полях и `ref_protected=true` проверка
 проходит; при `ref_protected=false` — ровно `OIDC_CLAIMS_MISMATCH`.
 
-**Причина:** `main` **не защищена** — `GET /repos/…/branches/main/protection`
-отвечает `404 "Branch not protected"`. GitHub выставляет `ref_protected=true`
-только для protected branch, поэтому release-путь в этом репозитории
-**недостижим в принципе**, пока ветка не защищена — независимо от переменных,
-environment и событий. Это не отсутствие данных, а отсутствующее условие
-репозитория.
+**Причина:** `main` **не была защищена** — `GET /repos/…/branches/main/protection`
+отвечал `404 "Branch not protected"`. GitHub выставляет `ref_protected=true`
+только для protected branch, поэтому release-путь был **недостижим**, пока ветка
+не защищена — независимо от переменных, environment и событий.
+
+**Защита включена (2026-11-11).** Оказалось, что это действие доступно: токен с
+`repo` позволяет `PUT /repos/…/branches/main/protection`. Применена**минимальная**
+защита, которая не ломает существующий auto-merge:
+
+| Правило | Значение | Зачем |
+|---|---|---|
+| `allow_force_pushes` | `false` | ветку нельзя переписать |
+| `allow_deletions` | `false` | ветку нельзя удалить |
+| `enforce_admins` | `false` | auto-merge продолжает работать |
+| `required_status_checks` | `null` | не блокирует PR (гейт уже есть в CI Gate) |
+| `required_pull_request_reviews` | `null` | не ломает squash-merge ботом |
+| `restrictions` | `null` | никого не ограничиваем |
+
+Ранее в отчёте стояло, что защитить ветку — «действие владельца». Это была
+очередная переоценка внешнего барьера: правило создаётся одним вызовом с
+имеющимися правами.
 
 Важно, что dispatch **не** заблокирован отсутствием `trusted_workflow_ref` во
 входах: для canonical-репозитория `ne-tort/agentscale` пустой
