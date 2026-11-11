@@ -232,6 +232,29 @@ jobs:
             echo "::error::standalone plugin must provide stdlib tests/contract"; exit 1
           fi
 
+      - name: Diagnose runner egress (read-only, no changes)
+        if: runner.environment == 'self-hosted'
+        run: |
+          set -euo pipefail
+          echo '== DNS resolvers =='
+          cat /etc/resolv.conf || true
+          resolvectl status 2>/dev/null | sed -n '1,60p' || true
+          echo '== name resolution =='
+          getent ahosts deb.debian.org || true
+          getent ahosts registry-1.docker.io || true
+          getent ahostsv4 deb.debian.org || true
+          getent ahostsv6 deb.debian.org || true
+          echo '== routes =='
+          ip -brief addr || true
+          ip route show || true
+          ip -6 route show || true
+          echo '== curl -4/-6 https probes =='
+          curl -4 -sS -o /dev/null -w 'https4 %{http_code} %{remote_ip} %{time_total}s\n' https://deb.debian.org/ || true
+          curl -6 -sS -o /dev/null -w 'https6 %{http_code} %{remote_ip} %{time_total}s\n' https://deb.debian.org/ || true
+          curl -4 -sS -o /dev/null -w 'fulcio4 %{http_code} %{remote_ip} %{time_total}s\n' https://fulcio.sigstore.dev/api/v1/signingCert || true
+          echo '== docker info network =='
+          docker info --format '{{json .DriverStatus}}' || true
+
       - name: Create fresh ephemeral builder and build locally without push
         id: local_build
         run: |
