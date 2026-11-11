@@ -571,6 +571,12 @@ caller-параметров. Полный список — ровно эти д�
 туда публичный host — значит получить отказ публикации на 405, а не рабочий
 канал.
 
+**Конкретный адрес для dev:** `Service agentscale-api` — `ClusterIP`, порт
+`8000` (`infra/k3s/base/agentscale-api/service.yaml`), то есть
+`http://agentscale-api.agentscale-dev.svc.cluster.local:8000`. Это `http://`,
+поэтому для dev-контура дополнительно нужен
+`PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST` с ровно этой строкой.
+
 `PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST` нужен **только** для `http://` адреса: при
 `https://` конфигурация принимается без него (проверено исполнением, отказ идёт
 как `HTTPS_REQUIRED`).
