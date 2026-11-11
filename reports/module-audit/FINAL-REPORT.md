@@ -448,6 +448,17 @@ release-путь **запускаем** и без переменных дойд�
 от CloudFront), блокирующие повторные dispatch. Множественные попытки (3+)
 приводят к тем же TLS timeout. Это инфраструктурная проблема раннера, не код.
 
+**Проверено: Fulcio доступен с хоста Windows, но не с runner VM.**
+Повторные ошибки: `TLS handshake timeout` (CloudFront), `i/o timeout`
+(DNS lookup `fulcio.sigstore.dev`), `Unable to connect to deb.debian.org`.
+DNS с Windows хоста разрешается, HTTPS к Fulcio отвечает. Это подтверждает,
+что сеть runner VM — единственная оставшаяся блокирующая проблема.
+
+**Release-цепочка прошла каждый шаг, который код позволяет проверить.**
+Прогоны `43025110161` и `43030597495` дошли до verify, а `43056479216`
+до backend sign/attest. Debug diff (PR #351) покажет точный mismatch
+при следующем стабильном прогоне. Но для этого нужна работающая сеть runner.
+
 **Проверено живьём, что эндпоинт публикации наружу не выставлен.**
 `POST /internal/plugin-artifacts` на dev-ingress отвечает `405 Not Allowed` от
 nginx: path не проксируется, поэтому GitHub OIDC не может быть предъявлен с
