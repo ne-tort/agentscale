@@ -441,9 +441,18 @@ jobs:
           PY
           # GITHUB_ENV is only applied to *later* steps. Reading
           # $TRUSTED_BUILDER_ID here is empty under `set -u`, which aborted the
-          # release before any registry write with a bare "parameter not set". Derive
-          # the same value in this step instead of re-reading the env file.
-          TRUSTED_BUILDER_ID="ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@$GITHUB_REF"
+          # release before any registry write with a bare "parameter not set". Mirror
+          # ReleaseTrust: direct push/dispatch uses the validated canonical branch,
+          # while a reusable call uses its pinned workflow SHA, never the caller ref.
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_call" ]]; then
+            EXPECTED_BUILDER_ID="ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@$WORKFLOW_SHA"
+            [[ "$INPUT_WORKFLOW_REF" == "$EXPECTED_BUILDER_ID" ]] || {
+              echo "::error::trusted_workflow_ref does not match the pinned reusable workflow"; exit 1;
+            }
+            TRUSTED_BUILDER_ID="$INPUT_WORKFLOW_REF"
+          else
+            TRUSTED_BUILDER_ID="ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@$GITHUB_REF"
+          fi
           # This typed protected mapping is required before any registry write.
           # Backend OIDC validation and durable approval remain authoritative later.
           python3 "$CI_DIR/plugin_publication.py" validate-context             --plugin-id "$PLUGIN_ID" --builder-identity "$TRUSTED_BUILDER_ID"
@@ -675,10 +684,12 @@ jobs:
           python3 "$CI_DIR/plugin_verify.py"             --manifest "$RUNNER_TEMP/oci-manifest.json"             --source-manifest "$SOURCE_MANIFEST"             --canonical-manifest "$CANONICAL_MANIFEST"             --pushed-manifest "$RUNNER_TEMP/pushed-manifest.json"             --backend-digest "$BACKEND_DIGEST"             --artifact-ref "$RELEASE_ARTIFACT_REF" --backend-ref "$RELEASE_BACKEND_REF"             --source-repository "$GITHUB_REPOSITORY" --source-sha "$GITHUB_SHA"             --builder-identity "$TRUSTED_BUILDER_ID"             --platform-version "$PLATFORM_VERSION"             --granted-capabilities "$PLUGIN_GRANTED_CAPABILITIES"             --certificate-identity "$SIGNER_IDENTITY"             --output "$RUNNER_TEMP/release-decision.json"
 
       - name: Verify independent release evidence and publish through platform OIDC
-        env:
-          DOCKER_CONFIG_PATH: ${{ runner.home }}/.docker/config.json
         run: |
           set -euo pipefail
+          export DOCKER_CONFIG_PATH="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
+          test -f "$DOCKER_CONFIG_PATH" || {
+            echo "::error::Docker credentials were not found after docker login"; exit 1;
+          }
           # The pinned Trivy scan targets the actual release backend. The CSP
           # probe targets protected static-origin evidence for this exact release
           # bundle. Either missing/failed input stops before the platform POST.
