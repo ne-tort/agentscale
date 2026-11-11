@@ -21,6 +21,34 @@
 | `actions.runner.ne-tort-agentscale.vm-as-1..5` | `ne-tort/agentscale` | Gate / Images / Verify / Nightly |
 | `actions.runner.ne-tort-prodavan-claw.vm-claw-1..2` | `ne-tort/prodavan-claw` | openclaw CI / images |
 
+## IPv4-приоритет для egress
+
+У VM есть DNS-ответы AAAA, но рабочего IPv6 egress через Hyper-V сейчас нет.
+Docker/Go может выбрать IPv6-адрес первым, что проявляется как
+`net/http: network is unreachable` или TLS handshake timeout. `01-base.py`
+идемпотентно добавляет в `/etc/gai.conf` правило
+`precedence ::ffff:0:0/96 100` до первого сетевого шага bootstrap. Уже активная
+эквивалентная строка не дублируется, остальные правила сохраняются.
+
+Для точечного применения на **существующей** VM (без повторного полного bootstrap)
+выполнить с Windows из Git Bash:
+
+```bash
+ssh -t www@172.31.156.203 "sudo python3 -c 'from pathlib import Path; p=Path(\"/etc/gai.conf\"); line=\"precedence ::ffff:0:0/96 100\"; text=p.read_text(encoding=\"utf-8\") if p.exists() else \"\"; fields=line.split(); None if any(item.partition(\"#\")[0].split() == fields for item in text.splitlines()) else p.write_text(text + (\"\n\" if text and not text.endswith(\"\n\") else \"\") + \"# Prefer IPv4: Docker/Go may otherwise select unreachable IPv6 egress.\n\" + line + \"\n\", encoding=\"utf-8\")'"
+```
+
+Команда только дополняет `gai.conf` и ничего не перезапускает. Правило повышает
+приоритет IPv4 при сортировке адресов `getaddrinfo(3)` для dual-stack имён; это
+**не** отключение IPv6 и не принудительный IPv4-only режим. На уже запущенные
+процессы распространение настройки зависит от того, когда они читают resolver-
+конфиг: если ошибка сохранится, может понадобиться отдельный контролируемый
+рестарт runner/Docker (в команду намеренно не включён). Проверка порядка адресов
+на VM: `getent ahosts github.com`.
+
+Ограничение: host `/etc/gai.conf` действует на пользователей glibc `getaddrinfo`.
+Go binary с resolver `netgo` и контейнеры с собственным `/etc/gai.conf` могут его
+игнорировать; такой случай требует отдельной настройки соответствующего runtime.
+
 ## Кэши (цель миграции — чтобы каждый PR не качал и не пересобирал всё заново)
 
 | Что | Где | Что даёт |

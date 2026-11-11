@@ -13,6 +13,36 @@ import textwrap
 from pathlib import Path
 
 
+GAI_CONF = Path("/etc/gai.conf")
+IPV4_GAI_PRECEDENCE = "precedence ::ffff:0:0/96 100"
+
+
+def ensure_ipv4_egress_preference(path: Path = GAI_CONF) -> None:
+    """Prefer IPv4 in getaddrinfo(3) without disabling IPv6.
+
+    Docker/Go can otherwise select IPv6 addresses even though this Hyper-V VM
+    has no usable IPv6 egress, causing `network is unreachable` and TLS
+    handshake timeouts. Keep the existing policy and add only the missing rule.
+    """
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    expected_fields = IPV4_GAI_PRECEDENCE.split()
+    if any(
+        line.partition("#")[0].split() == expected_fields
+        for line in text.splitlines()
+    ):
+        return
+
+    separator = "" if not text or text.endswith("\n") else "\n"
+    comment = (
+        "# Prefer IPv4 for CI egress: Docker/Go may otherwise select unreachable\n"
+        "# IPv6 addresses on this Hyper-V VM (network/TLS handshake timeouts).\n"
+    )
+    path.write_text(
+        f"{text}{separator}{comment}{IPV4_GAI_PRECEDENCE}\n",
+        encoding="utf-8",
+    )
+
+
 def sh(cmd: str) -> None:
     print(f"+ {cmd}")
     subprocess.run(["bash", "-c", cmd], check=True)
@@ -24,6 +54,9 @@ def run(args: list[str]) -> None:
 
 
 def main() -> None:
+    print("==> getaddrinfo: prefer IPv4 for runner egress")
+    ensure_ipv4_egress_preference()
+
     print("==> apt base packages")
     sh(
         "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "
