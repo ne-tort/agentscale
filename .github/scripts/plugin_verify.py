@@ -580,6 +580,9 @@ def verify_artifact(
         if not isinstance(expected, dict) or not isinstance(pushed, dict):
             raise VerifyError(VerifyErrorCode.INVALID_MANIFEST, "OCI manifests must be JSON objects")
         if pushed != expected:
+            for key in sorted(set(list(pushed.keys()) + list(expected.keys()))):
+                if pushed.get(key) != expected.get(key):
+                    print(f"::error::manifest diff key={key}: pushed={json.dumps(pushed.get(key), default=str)[:300]} expected={json.dumps(expected.get(key), default=str)[:300]}", file=sys.stderr)
             raise VerifyError(VerifyErrorCode.INVALID_MANIFEST, "registry OCI manifest differs from signed expectation")
         canonical_bytes = module.canonical_manifest_bytes(source_manifest)
         with open(canonical_manifest_path, "rb") as handle:
