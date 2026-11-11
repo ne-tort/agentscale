@@ -391,6 +391,21 @@ merge `3a743b77`).
 путь к вычисленному digest. Удаление локального чтения ломает оба теста.
 Полный набор plugin suites: **3925 passed**.
 
+**Следующий слой — пустая identity у buildx provenance (PR #348).** После
+исправления digest прогон `42989623661` дошёл до
+`INVALID_EVIDENCE: buildx provenance has no builder identity`. Я скачал
+фактические in-toto statements из quarantined backend через GHCR API:
+`predicateType=https://slsa.dev/provenance/v0.2`, а `predicate.builder` равен
+`{"id": ""}`. Отказ правильный: attestation без указания builder не
+доказывает, кто собрал образ.
+
+В исходнике BuildKit `builder-id` передаётся атрибутом provenance. Локальная
+сборка с `mode=max,builder-id=https://example.test/builder` подтвердила, что
+после этого identity действительно попадает в statement. Release build теперь
+передаёт `builder-id=https://github.com/$TRUSTED_BUILDER_ID` — ту же identity,
+которая используется для подписи. Добавлен регресс-тест; удаление атрибута
+ломает его. Полный набор после изменения: **3926 passed**.
+
 Ранее прогон `42955669309` останавливался на `PROTECTED_CONFIG_REQUIRED`,
 поэтому этот результат — движение вперёд, а не регрессия: конфигурация теперь
 принята, и до backend evidence дошли впервые.
