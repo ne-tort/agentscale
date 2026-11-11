@@ -1,6 +1,6 @@
 # Итоговый отчёт аудита plugin-платформы AgentScale
 
-**Дата:** 2026-11-10 · **Ветка:** `plugin-platform-checkpoint` · **PR:** [#339](https://github.com/ne-tort/agentscale/pull/339) → `main`
+**Дата:** 2026-11-11 · **Ветки:** `plugin-platform-checkpoint`, `diag-rollout`, `fix-auth-secrets`  **Смержено в `main`:** [#339](https://github.com/ne-tort/agentscale/pull/339) `a3f0ad8f` — платформа, [#341](https://github.com/ne-tort/agentscale/pull/341) `5ce5a24e` — диагностика rollout, [#342](https://github.com/ne-tort/agentscale/pull/342) `90958970` — недостающие auth secrets. Последний `Verify Dev` на `main` — **success**.
 
 Документ отвечает на исходную задачу: аудит системы UI+backend-модулей, независимая
 проверка предварительных findings, устранение подтверждённых проблем, согласование
