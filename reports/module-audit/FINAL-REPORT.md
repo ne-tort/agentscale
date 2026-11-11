@@ -226,16 +226,19 @@ bootstrap анонимен по дизайну и отдаёт только `com
 в `BUILD_CONTEXT`, потому что docker CLI читает это имя как имя своего контекста
 и падал с `context not found: <путь к исходникам>`.
 
-**Внешние (не дефекты кода):**
+**Внешние границы — что я взял на себя, а что осталось владельцу:**
 
-- 0 из 5 self-hosted раннеров online → `CI Gate` / `CI E2E` не запускаются.
-  Последний успешный Gate — 2026-11-07.
-- `Plugin OCI Artifacts` падает **до** сборки, потому что в репозитории вообще нет
-  required переменных: `gh variable list` пуст, а workflow читает 7 значений
-  (`PLUGIN_COSIGN_2_4_1_LINUX_AMD64_SHA256`, `PLUGIN_ORAS_1_2_3_LINUX_AMD64_SHA256`,
-  `PLUGIN_BUILDKIT_IMAGE`, `PLUGIN_PLATFORM_PUBLICATION_CONFIG`,
-  `PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST`, `PLUGIN_PLATFORM_REPOSITORY_ID`,
-  `PLUGIN_GRANTED_CAPABILITIES`). Это environment-owned конфигурация, а не код.
+- Self-hosted раннеры: **5 из 5 online** и оба workflow на них зелёные. Ранее
+  0 из 5 были offline, и я ошибочно называл это внешним блокером — после того
+  как VM подняли, выяснилось, что за ним стояли **пять дефектов кода**, каждый
+  находился только прогоном (см. ниже).
+- Repo-переменные: **7 из 10 заданы**, каждая из проверяемого источника (список
+  ниже). Раньше я писал, что их нет вовсе — это тоже было неверно.
+- Оставшиеся **3 не заданы намеренно**: `PLUGIN_PLATFORM_PUBLICATION_CONFIG`,
+  `PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST`, `PLATFORM_VERSION`. Это protected
+  publication env: base URL платформы, digest сканера и версия платформы
+  (`>= 4.0.0` по манифесту hello). Придумать их нельзя — это данные владельца
+  платформы, и подстановка «похожего» значения дала бы ложный зелёный.
 - `requirements.lock` **создан** из реального индекса через `uv pip compile`
   (`--python-version 3.13 --python-platform x86_64-manylinux_2_28
   --generate-hashes`): 22 пакета, 658 хешей, покрытие всех допустимых wheel и
