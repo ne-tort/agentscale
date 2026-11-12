@@ -455,7 +455,7 @@ reusable workflow_call и вычисление Docker config path через `$H
 неподдерживаемого `runner.home`. PR #355 требует все release-decision checks,
 включая gate и digest; PR #356 синхронизирует backend OIDC events и canonical
 workflow refs (direct branch + reusable full SHA) и добавляет новую миграцию
-`2026111201`. Эти PR проходят CI и ещё не смержены на момент записи.
+`2026111201`. Все три PR **смержены**.
 
 **Runner network:** read-only probe на runner показал `https4 200`, `https6 000`,
 `fulcio4 501`. То есть IPv4 работает, IPv6 egress недоступен. PR #358 задаёт
