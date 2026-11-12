@@ -622,17 +622,26 @@ def prepare_package(
     }
 
 
-def _layer_descriptor(path: Path, media_type: str, role: str, title: str) -> dict[str, Any]:
+def _layer_descriptor(
+    path: Path,
+    media_type: str,
+    role: str,
+    title: str,
+    *,
+    extra_annotations: dict[str, str] | None = None,
+) -> dict[str, Any]:
     if not path.is_file() or path.is_symlink():
         _fail(ManifestErrorCode.MISSING_FILE, f"layer payload not found: {path}")
+    annotations = {
+        A_LAYER_ROLE: role,
+        "org.opencontainers.image.title": title,
+        **(extra_annotations or {}),
+    }
     return {
         "mediaType": media_type,
         "digest": _sha256_file(path),
         "size": path.stat().st_size,
-        "annotations": {
-            A_LAYER_ROLE: role,
-            "org.opencontainers.image.title": title,
-        },
+        "annotations": annotations,
     }
 
 
@@ -660,7 +669,15 @@ def build_bundle_manifest(
 
     layers = [
         _layer_descriptor(canonical_path, PLUGIN_MANIFEST_MEDIA_TYPE, ROLE_MANIFEST, "canonical-manifest.json"),
-        _layer_descriptor(Path(frontend_archive), FRONTEND_MEDIA_TYPE, ROLE_FRONTEND, "frontend-dist.tar.gz"),
+        _layer_descriptor(
+            Path(frontend_archive),
+            FRONTEND_MEDIA_TYPE,
+            ROLE_FRONTEND,
+            "frontend-dist.tar.gz",
+            extra_annotations={
+                "agentscale.plugin.frontend.entry": source_manifest["frontend"]["entry"],
+            },
+        ),
         _layer_descriptor(Path(migrations_archive), MIGRATIONS_MEDIA_TYPE, ROLE_MIGRATIONS, "migrations.tar.gz"),
     ]
     # ORAS adds org.opencontainers.image.created to manifest.annotations when

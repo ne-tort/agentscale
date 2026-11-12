@@ -561,11 +561,44 @@ def _parse_dev_allowlist(raw: str) -> frozenset[str]:
             or parsed.password is not None
             or "?" in item
             or "#" in item
+            or "*" in item
             or item in result
         ):
             raise PublicationBlocked("DEV_ALLOWLIST_INVALID")
         result.add(item)
     return frozenset(result)
+
+
+def _static_origin_url_allowed(
+    raw: str, *, dev_allowlist: frozenset[str], code: str
+) -> parse.SplitResult:
+    """Static-origin URL gate: HTTPS is unchanged; HTTP needs an exact origin.
+
+    Plain HTTP is accepted only when the canonical http://host[:port] origin
+    is present in the dev allowlist. Userinfo, query, fragment, wildcards and
+    any other scheme stay fail-closed for both schemes. Callers validate the
+    template probe and the formatted URL, so format fields cannot move a
+    probe onto another origin.
+    """
+    parsed = _split_url(raw, code=code)
+    if (
+        not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or "#" in raw
+        or "?" in raw
+        or any(ord(char) < 32 for char in raw)
+    ):
+        raise PublicationBlocked(code)
+    if parsed.scheme == "https":
+        return parsed
+    if parsed.scheme != "http":
+        raise PublicationBlocked(code)
+    host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+    origin = f"http://{host}" + (f":{parsed.port}" if parsed.port is not None else "")
+    if not dev_allowlist or origin not in dev_allowlist:
+        raise PublicationBlocked(code)
+    return parsed
 
 
 def _exact_https_origin(raw: Any, *, code: str) -> str:
@@ -609,9 +642,10 @@ class StaticOriginConfig:
     url_template: str
     plugin_shell_origin: str
     security_headers: Mapping[str, str]
+    dev_allowlist: frozenset[str] = frozenset()
 
     @classmethod
-    def parse(cls, value: Any) -> StaticOriginConfig:
+    def parse(cls, value: Any, *, dev_allowlist: frozenset[str] = frozenset()) -> StaticOriginConfig:
         document = _exact_keys(
             value,
             {"url_template", "plugin_shell_origin", "security_headers"},
@@ -638,7 +672,9 @@ class StaticOriginConfig:
             )
         except (KeyError, ValueError) as exc:
             raise PublicationBlocked("CSP_CONFIG_INVALID") from exc
-        static = _validate_https_url(probe, code="CSP_CONFIG_INVALID")
+        static = _static_origin_url_allowed(
+            probe, dev_allowlist=dev_allowlist, code="CSP_CONFIG_INVALID"
+        )
         shell = _split_url(shell_origin, code="CSP_CONFIG_INVALID")
         if (
             static.hostname == shell.hostname
@@ -662,6 +698,7 @@ class StaticOriginConfig:
             url_template=template,
             plugin_shell_origin=shell_origin,
             security_headers=headers,
+            dev_allowlist=dev_allowlist,
         )
 
     def url_for(self, *, plugin_id: str, version: str, bundle_digest: str) -> str:
@@ -671,7 +708,9 @@ class StaticOriginConfig:
             )
         except (KeyError, ValueError) as exc:
             raise PublicationBlocked("CSP_CONFIG_INVALID") from exc
-        parsed = _validate_https_url(url, code="CSP_ORIGIN_INVALID")
+        parsed = _static_origin_url_allowed(
+            url, dev_allowlist=self.dev_allowlist, code="CSP_ORIGIN_INVALID"
+        )
         if bundle_digest not in parsed.path:
             raise PublicationBlocked("CSP_ORIGIN_INVALID")
         return url
@@ -707,7 +746,7 @@ class SourceBinding:
     static_origin: StaticOriginConfig | None
 
     @classmethod
-    def parse(cls, value: Any) -> SourceBinding:
+    def parse(cls, value: Any, *, dev_allowlist: frozenset[str] = frozenset()) -> SourceBinding:
         document = _exact_keys(
             value,
             {
@@ -748,7 +787,11 @@ class SourceBinding:
         ):
             raise PublicationBlocked("SOURCE_CONFIG_INVALID")
         raw_origin = document["static_origin"]
-        origin = None if raw_origin is None else StaticOriginConfig.parse(raw_origin)
+        origin = (
+            None
+            if raw_origin is None
+            else StaticOriginConfig.parse(raw_origin, dev_allowlist=dev_allowlist)
+        )
         return cls(
             source_id=source_id,
             company_id=company_id,
@@ -787,7 +830,9 @@ class PublicationConfig:
         raw_sources = document["sources"]
         if not isinstance(raw_sources, list) or len(raw_sources) > 256:
             raise PublicationBlocked("SOURCE_CONFIG_INVALID")
-        sources = tuple(SourceBinding.parse(item) for item in raw_sources)
+        sources = tuple(
+            SourceBinding.parse(item, dev_allowlist=allowlist) for item in raw_sources
+        )
         identities = [(item.source_id, item.company_id, item.plugin_id, item.repository) for item in sources]
         if len(set(identities)) != len(identities) or len({item.source_id for item in sources}) != len(
             sources

@@ -77,9 +77,30 @@ mode binding и migration regressions усиливаются локально и
 
 **OPEN (не закрыты, design/fix в работе, успех не заявлен):**
 
-- **B1 — static_origin null против fail-closed CSP.** Старые docs описывали
-  `static_origin: null`, что противоречит fail-closed CSP-модели. Требуется
-  exact digest predeploy; текущий workflow его не доставляет.
+- **B1 — static_origin null против fail-closed CSP → offline implemented,
+  live blocked by deployment/config.** Реализован cluster-internal
+  `plugin-static` (`agentscale-dev`, ClusterIP :8081, без Ingress/write
+  API/RBAC/tenant creds) с digest-verified readiness route
+  `/internal/plugin-static/v1/bundles/{plugin_id}/{version}/{bundle_digest}/ready`
+  (`prodavan.main_plugin_static` + `PluginStaticEvidenceService`: quarantine
+  GHCR first, release только после proven 404, OCI manifest + canonical
+  config JSON + frontend tar.gz), dev-only NetworkPolicy patch для CI
+  runner VM `172.31.156.203/32` (TCP 8081) и fail-closed dev HTTP allowlist
+  для static-origin в `plugin_publication.py`. После builder→service
+  integration fix CI manifests эмитят `agentscale.plugin.frontend.entry`
+  (`artifacts/layers.py`); service совместим с legacy manifests без
+  annotation — entry подтверждается digest-verified canonical config JSON,
+  mismatch отклоняется (bridge `test_builder_entry_binding.py`). Offline
+  verification: full backend plugin suite **4251 passed / 1 skipped**,
+  static_origin **85 passed** (+4 builder-entry bridge), infra/ops **156
+  passed**, scoped ruff passed, stdlib suites green. Live: deployment (CI Images rebuild + Argo sync dev), SealedSecret
+  `plugin-module-source-github-app`, ConfigMap managed installation, exact
+  `PLUGIN_PLATFORM_PUBLICATION_CONFIG.static_origin` и dev allowlist **не
+  выполнены**; probe не запускался; успешный CI run не заявлен. Это НЕ
+  public browser static hosting; `gh variable set` не выполнялся. Детали:
+  [STATIC-ORIGIN-EVIDENCE.md](STATIC-ORIGIN-EVIDENCE.md),
+  [PLUGIN-AUTHORING](../../docs/PLUGIN-AUTHORING.md) §9. STOP-SHIP
+  сохраняется.
 - **B2 — approval exact digest без stable rerun/handoff.** Статический
   same-commit resume helper и rerun flow локально implemented / UNVERIFIED under
   freeze; успешный live rerun/publication не доказан.
@@ -318,9 +339,19 @@ Digest базового образа был получен (`sha256:e48f59cd…`
    включении.
 5. **STOP-SHIP сохраняется.** Отсутствие свежего полного прогона и production/live
    acceptance не компенсируется прежними 3975/248/3910 passed или merge PR.
-6. **B1 — static_origin null против fail-closed CSP.** Старые docs описывали
-   `static_origin: null`, что противоречит fail-closed CSP. Требуется exact
-   digest predeploy; текущий workflow его не доставляет.
+6. **B1 — offline implemented, live blocked by deployment/config.**
+   Cluster-internal `plugin-static` (no Ingress/write API/tenant creds) с
+   digest-verified readiness route, dev NetworkPolicy runner patch
+   (`172.31.156.203/32` → TCP 8081) и dev HTTP allowlist static-origin
+   реализованы и проверены offline (plugin suite 4251 passed / 1 skipped,
+   static_origin 85 passed — включая 4 builder-entry bridge регрессии
+   `agentscale.plugin.frontend.entry` с legacy-совместимостью, infra/ops 156
+   passed, scoped ruff passed). До
+   live evidence остаются: CI Images rebuild, Argo sync dev, SealedSecret
+   `plugin-module-source-github-app` + ConfigMap managed installation, exact
+   protected `static_origin` + dev allowlist — **не выполнены**; probe и
+   успешный CI run не заявлены. План:
+   [STATIC-ORIGIN-EVIDENCE.md](STATIC-ORIGIN-EVIDENCE.md).
 7. **B2 — approval exact digest без stable rerun/handoff.** Статический
    same-commit resume helper и rerun flow локально implemented / UNVERIFIED under
    freeze; успешный live rerun/publication не доказан.
@@ -350,7 +381,7 @@ Digest базового образа был получен (`sha256:e48f59cd…`
 - Не утверждаются promote, reverify или publication без фактического run evidence.
 - Не утверждается, что сеть полностью стабильна или live VM уже настроена.
 - Не утверждается, что локальные непроверенные доработки опубликованы.
-- Не утверждается закрытие B1 (open), B2/B3 (UNVERIFIED), успешный CI run
+- Не утверждается live-закрытие B1 (offline implemented, live blocked by deployment/config), B2/B3 (UNVERIFIED), успешный CI run
   или готовность B4 к production использованию; локальная workflow integration
   evidence-first (evidence до promote, reuse snapshot) НЕ является live
   acceptance, а только unverified static implementation.

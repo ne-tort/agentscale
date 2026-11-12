@@ -31,3 +31,6 @@ resources:
   - plugin-activation-state.yaml
   - networkpolicy-plugin.yaml
   - egress-proxy.yaml
+  # Scope B1 (CI evidence): cluster-internal static contour plugin-static.
+  # БЕЗ Ingress, БЕЗ RBAC, БЕЗ tenant-секретов; NP в самом plugin-static.yaml.
+  - plugin-static.yaml

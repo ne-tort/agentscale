@@ -44,7 +44,7 @@
 | Scoped runtime | Read-only downwardAPI identity, fresh-wake fixed service-proxy headers; hello production provider stubs = 503 | Projection/wake и любые реальные provider operations live unverified |
 | Events | Typed `PLUGIN_EVENT_SIGNING_SECRET_REF`, dev sealed-example и read-only mounts; optional только для disabled | Real key/sign/verify/rotation/missing-key startup live unverified |
 | Objects STS | `objects.scoped_credentials` typed-unwired до enabled + post-probe availability; нет presign/static fallback для operation | Real disposable MinIO: **29/29 passed, 0 skipped** ([JUnit](../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/minio-plugin-acceptance-junit.xml), [summary](../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/summary.json)); STS TTL 900..3600 и canary-only probe policy подтверждены, presign остаётся 60..3600. Production/live configuration и API/Gateway lifespan остаются unverified |
-| CI publication | Protected publication config, release Trivy evidence, static-origin CSP+digest header, OIDC POST после release verify | Protected live inputs и successful run отсутствуют; остаются blockers |
+| CI publication | Protected publication config, release Trivy evidence, static-origin CSP+digest header, OIDC POST после release verify | Protected live inputs и successful run отсутствуют; B1 evidence-only (§9): cluster-internal `plugin-static` + dev allowlist implemented offline (plugin suite 4251/1 skip, static_origin 85, infra/ops 156, scoped ruff passed), live blocked by deployment/config; НЕ public browser static hosting; остаются blockers |
 | Pods/delivery | Exact `pods.allowlist`, reference-only `secret_delivery`, отдельный versioned delivery Secret lifecycle | Real pods/delivery/rotation/revoke/delete/RBAC live unverified |
 | Runtime Secret | SecretProjection управляет `GATEWAY_URL`, `PLUGIN_ID`, `TENANT_DB_DSN`, `WEBHOOK_SECRET` | Rotation/CAS/drift/ownership и Gateway→hello delivery остаются pending |
 | Port/health | Hello использует `8080` и `/health`; Liquibase readiness fail-closed | Произвольный port/health сам не настраивает Deployment/Service/probe |
@@ -615,10 +615,199 @@ origin в нём нет, и конкретный реальный origin зде�
 остановится fail-closed (`CSP_EVIDENCE_REQUIRED`, `CSP_ORIGIN_HTTP_ERROR`,
 `CSP_SECURITY_HEADERS_FAILED` или `CSP_ARTIFACT_BINDING_MISMATCH`).
 
+**B1 (evidence-only) реализован offline:** ниже — «Static-origin evidence —
+cluster-internal `plugin-static`»: отдельный cluster-internal Service с
+digest-verified readiness route, манифесты и dev allowlist в CI script.
+**Live blocker сохраняется:** deployment/config (CI Images rebuild, Argo
+sync dev, SealedSecret, ConfigMap, protected `static_origin` + dev
+allowlist) не выполнены, evidence probe не запускался, успешный CI run не
+заявлен. Sanitized config plan и evidence-контракт:
+[STATIC-ORIGIN-EVIDENCE.md](../reports/module-audit/STATIC-ORIGIN-EVIDENCE.md).
+
 Это порядок в текущих workflow/scripts, **не evidence выполненного release**.
 Protected publication config/source mapping, scanner digest, static-origin
 credentials/endpoint и остальные live inputs для аудита не предоставлены;
 missing/invalid input останавливает path до POST и остаётся STOP-SHIP blocker.
+
+### Static-origin evidence — cluster-internal `plugin-static` (B1: implemented offline, live blocked by deployment/config)
+
+Это **Scope B1**: снять operator blocker только для CI evidence
+(static-origin CSP/digest probe), а **не** предоставить public browser
+static hosting. As-built в worktree: ASGI `apps/api/src/prodavan/main_plugin_static.py`
+(`prodavan.main_plugin_static:app`) + `PluginStaticEvidenceService`
+(`application/plugins/static_origin/service.py`), unit tests
+`apps/api/tests/unit/plugins/static_origin/`, манифесты
+`infra/k3s/base/plugins/plugin-static.yaml` и dev-only NetworkPolicy patch
+`infra/k3s/overlays/dev/plugins/patch-plugin-static-runner-ingress.yaml`,
+регрессии `infra/ops/tests/test_plugin_static_manifest.py`. Verification
+(offline, 2026-11-12): full backend plugin suite **4251 passed / 1 skipped**,
+static_origin **85 passed** (включая 4 builder-entry bridge регрессии),
+infra/ops **156 passed**, scoped ruff passed,
+stdlib CI suites зелёные. **Live unverified:** Service не задеплоен,
+SealedSecret/ConfigMap/protected config не заполнены, evidence probe не
+выполнялся. B1 = offline implemented + live blocked by deployment/config;
+STOP-SHIP сохраняется.
+
+**Контур и поверхность (as-built):**
+
+- Отдельный Deployment/Service `plugin-static` в namespace `agentscale-dev`,
+  ClusterIP `:8081` (NodePort/LoadBalancer запрещены regression-тестом).
+  **Без Ingress**, без публичного DNS: адрес доступен только внутри кластера
+  и с dev CI runner VM (NetworkPolicy ниже).
+- **Read-only API:** только `GET`/`HEAD`; любой другой метод — `405`.
+  Write API (`POST /internal/plugin-artifacts`, upload/sync/delete) на этом
+  Service отсутствует по дизайну и не проксируется.
+- **Нет tenant-доступа:** `automountServiceAccountToken: false`, RBAC не
+  выдаётся; tenant MinIO/DB credentials, `TENANT_DB_DSN`, SecretProjection и
+  capability tokens отсутствуют. Единственный credential — GHCR read-only
+  `registry_read` (GitHub App installation token, `packages:read` +
+  `metadata:read`) через `GhcrRegistryAuthorizer`; приватный ключ — только
+  `k8s-secret://` REF + read-only mount SealedSecret'а, токены не
+  логируются.
+- **NetworkPolicy `plugin-static-egress`** (podSelector `app: plugin-static`):
+  ingress только от подов `plugin-gateway`/`agentscale-api` на TCP 8081;
+  dev-only JSON6902 patch добавляет ровно один peer — CI runner VM
+  `172.31.156.203/32` на TCP 8081, base-правила не заменяются. Egress:
+  kube-dns (UDP/TCP 53) и внешний TCP 443 с except pod/service CIDR
+  (`10.42.0.0/16`, `10.43.0.0/16`) для api.github.com + ghcr.io; порт 80,
+  БД/MinIO/Kubernetes API и внутренние Service'ы fail-closed.
+
+**Readiness route (as-built contract v1):**
+
+```
+http://plugin-static.agentscale-dev.svc.cluster.local:8081/internal/plugin-static/v1/bundles/{plugin_id}/{version}/{bundle_digest}/ready
+```
+
+- `bundle_digest` — canonical `sha256:<64 lowercase hex>`; exact digest
+  обязан быть в path (требование `StaticOriginConfig.url_for` и route
+  `STATIC_EVIDENCE_READY_PATH`).
+- **Реальная digest-верификация, не «ready по headers»:**
+  `PluginStaticEvidenceService` перепроверяет полный OCI manifest contract
+  (schema/mediaType/artifactType, аннотации `plugin_id`/`manifest_version`,
+  config descriptor, ровно один `frontend-dist` layer), canonical config JSON
+  bytes и frontend `tar.gz` (только iterate members, `extractall` запрещён).
+  Fetch — `HttpxOciArtifactLoader` (`allowed_registries=("ghcr.io",)`,
+  `trust_env=False`, redirects запрещены, bounded caps) с
+  `sha256(raw bytes) == {bundle_digest}` и digest+size проверками blobs.
+- **Builder↔service entry contract:** новые CI manifests эмитят
+  `agentscale.plugin.frontend.entry` (`artifacts/layers.py`); service
+  совместим с legacy manifests без annotation — entry подтверждается
+  digest-verified canonical config JSON, mismatch отклоняется. Bridge
+  regressions `static_origin/test_builder_entry_binding.py` (реальный
+  `build_bundle_manifest` → ready, legacy accepted, mismatch rejected).
+- **Quarantine→release fallback:** exact
+  `ghcr.io/<org>/plugins-quarantine/<plugin_id>/bundle@{bundle_digest}`;
+  release `ghcr.io/<org>/plugins/<plugin_id>/bundle@{bundle_digest}` —
+  **только после доказанного registry 404** в quarantine. Любой другой сбой
+  (transport/auth/unexpected) = typed sanitized `503 EVIDENCE_UNAVAILABLE`
+  без fallback/retries; digest mismatch/contract failure/proven double-404 =
+  typed `404 BUNDLE_NOT_READY`; caps exceeded = typed `413 BUNDLE_TOO_LARGE`.
+- Ответ `200` только после верификации: `HEAD` — пустое тело +
+  `StaticResponsePolicy` headers; `GET` — minimal sanitized JSON metadata
+  (без blobs/secrets); прочие методы `405`. Клиентские `X-AgentScale-*` не
+  принимаются как evidence; CI `validate_csp_response` fail-closed по
+  `status != 200`.
+- Verified results — bounded in-memory LRU с per-digest singleflight и
+  коротким negative cache (503 не кэшируется); disk cache и blob storage
+  отсутствуют. `/health/ready` — configured-gate (`200` только при composed
+  loader+policy, иначе typed `503`), `/health/live` — дешёвая liveness;
+  пробы в GHCR не ходят. Под без trusted GitHub/GHCR конфигурации стартует
+  явно unconfigured: liveness up, readiness/evidence fail-closed `503`.
+
+**Response headers — ровно `StaticResponsePolicy` (server-owned):**
+
+Headers строятся через
+`StaticResponsePolicy(shell_origin=<PLUGIN_SHELL_ORIGIN>).response_headers(artifact_digest=<bundle_digest>)`,
+а не из request или manifest:
+
+| Header | Значение |
+|---|---|
+| `X-AgentScale-Bundle-Digest` | `sha256:<bundle_digest>` из path после verify |
+| `Content-Security-Policy` | `default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors <plugin_shell_origin>` |
+| `X-Content-Type-Options` | `nosniff` |
+| `Referrer-Policy` | `no-referrer` |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` |
+
+`plugin_shell_origin` — exact canonical HTTPS origin (`exact_https_origin`),
+совпадающий с API `PLUGIN_SHELL_ORIGIN` (server-derived, не из request Host
+или `window.location`; dev-значение в tests — `https://agentscale.dev`).
+Static и shell origins обязаны различаться (`exact_plugin_origins`);
+wildcard и implicit `'self'` в `frame-ancestors` запрещены.
+`security_headers` в protected config — lowercase-ключи, байт-в-байт как у
+`_static_security_headers(shell_origin)` в `plugin_publication.py`: ровно
+четыре ключа `content-security-policy`, `x-content-type-options`,
+`referrer-policy`, `permissions-policy`;
+`X-AgentScale-Bundle-Digest` проверяется отдельно.
+
+**CI evidence usage (target):** `plugin_release_evidence.py` продолжает делать
+HEAD по `static_origin.url_for(...)`; readiness route заменяет «голый» file
+hosting metadata-ответом, поэтому CSP/digest evidence дополнительно
+подтверждает фактическую проверку OCI manifest + frontend `tar.gz`. Scope
+строго evidence: browser iframe static hosting, SPA/entry serving и
+`GatewayProxy.forward_static` в этот план не входят и остаются live
+unverified.
+
+**Deployment/config prerequisites (live blocked, НЕ выполнены):**
+
+1. **CI Images rebuild** `ghcr.io/ne-tort/agentscale-api:latest` с entrypoint
+   `prodavan.main_plugin_static` (`imagePullPolicy: Always`): без свежего
+   образа под не найдёт модуль. Доставка только merge в main → CI Images.
+2. **Argo CD sync dev** (Application `plugin-platform` →
+   `infra/k3s/overlays/dev/plugins`): подключает base `plugin-static.yaml`
+   и dev NetworkPolicy patch. Ручной `kubectl apply` не используется.
+3. **SealedSecret `plugin-module-source-github-app`** (dev): Opaque Secret с
+   единственным key `private-key` = PEM приватного ключа GitHub App.
+   Оператор запечатывает его kubeseal'ом (dev controller cert,
+   namespace/name scope), коммитит только
+   `plugin-module-source-github-app.sealed.yaml` и подключает его в
+   kustomization; `.example` в resources не входит. Plaintext/base64 PEM,
+   PAT и installation token в Git запрещены; значения в этот документ не
+   включались и не читались.
+4. **ConfigMap `plugin-static-config` (dev patch)**: managed installation
+   config для `managed_config_from_settings`/`github_app_client_from_settings`
+   — `PLUGIN_MODULE_SOURCE_GITHUB_APP_ID`,
+   `PLUGIN_MODULE_SOURCE_GITHUB_APP_INSTALLATION_ID` и trusted
+   template/workflow/branch-policy values. `PLUGIN_MODULE_SOURCE_ENABLED`
+   остаётся `false`, `PLUGIN_PLATFORM_ENABLED` — `false` (emergency
+   disabled). Без полной установки readiness/evidence = typed `503`, не
+   anonymous GHCR.
+5. **`PLUGIN_PLATFORM_PUBLICATION_CONFIG`**: только
+   `sources[0].static_origin` = `url_template` v1 ready route +
+   `plugin_shell_origin` (exact HTTPS, совпадает с ConfigMap
+   `PLUGIN_SHELL_ORIGIN: https://agentscale.dev`) + `security_headers`
+   (ровно 4 ключа `_static_security_headers(shell_origin)`). Остальные ключи
+   и `publication_base_url` не меняются. План применения без печати значений
+   — [STATIC-ORIGIN-EVIDENCE.md](../reports/module-audit/STATIC-ORIGIN-EVIDENCE.md)
+   §3; `gh variable set` здесь НЕ выполнялся.
+6. **`PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST`**: exact origin
+   `http://plugin-static.agentscale-dev.svc.cluster.local:8081` (dev only;
+   prod пусто). Без allowlist static-origin `http://` отклоняется
+   `CSP_CONFIG_INVALID`.
+7. **Rollback:** удалить sealed-файл и ConfigMap/NP patches из
+   kustomization → Argo sync возвращает прежнее состояние; откат protected
+   config на прежнее значение = fail-closed `CSP_EVIDENCE_REQUIRED` до
+   platform POST, частичной активации нет; удаление runner patch вновь
+   закрывает доступ VM. Деструктивных DB-операций нет — контур без БД.
+
+**Dev HTTP allowlist для static-origin (implemented offline, UNVERIFIED
+live):** `PLUGIN_PLATFORM_DEV_HTTP_ALLOWLIST` — JSON-список exact `http://`
+origins (≤32, без path/query/credentials/wildcards; wildcard entries
+отклоняются `DEV_ALLOWLIST_INVALID`). Сейчас в `plugin_publication.py`
+static-origin использует тот же allowlist, что и `publication_base_url`:
+`StaticOriginConfig.parse` принимает optional `dev_allowlist`,
+`SourceBinding.parse` пробрасывает его, а `PublicationConfig.from_environment`
+передаёт существующий `_parse_dev_allowlist`. HTTPS поведение не изменено.
+`http://` в template probe и в formatted `url_for` разрешён **только** при
+exact origin membership `http://host[:port]` в allowlist — проверяются оба
+URL (`_static_origin_url_allowed`), поэтому подстановка fields не может
+увести probe на другой origin. Userinfo/query/fragment/другие схемы
+отклоняются `CSP_CONFIG_INVALID`/`CSP_ORIGIN_INVALID`.
+`plugin_shell_origin` всегда остаётся HTTPS. Prod: allowlist пуст, только
+HTTPS. Regressions в `test_ci_plugin_publication.py`
+(`StaticOriginDevHttpAllowlistTests`): focused offline runs 71/71
+(publication) и 25/25 (release evidence) passed на Python 3.13.3; live
+Service/probe не проверены. Sanitized config plan — в
+[STATIC-ORIGIN-EVIDENCE.md](../reports/module-audit/STATIC-ORIGIN-EVIDENCE.md).
 
 ### Production composition tests — написаны, не выполнены
 
@@ -638,10 +827,11 @@ Deployment create, retry/replay и private/public DTO. Они также сод�
 verification freeze этот репозиторий их не запускает; наличие тестов не отмечает
 acceptance.
 
-Trusted CI дополнительно содержит offline stdlib-модули в
+Trusted CI дополнительно содержит семь offline stdlib-модулей в
 `apps/api/tests/unit/plugins/`: `test_ci_plugin_supply_chain.py`,
 `test_ci_plugin_publication.py`, `test_ci_plugin_network.py`,
-`test_ci_plugin_archive_safety.py` и `test_ci_plugin_promotion.py`; dry-run
+`test_ci_plugin_archive_safety.py`, `test_ci_plugin_promotion.py`,
+`test_ci_plugin_resume.py` и `test_ci_plugin_release_evidence.py`; dry-run
 workflow перечисляет их с безопасным `[[ -f ]]` guard для historical trees.
 Они проверяют статические контракты workflow/scripts (supply chain, publication
 gate, bounded network operations, archive safety, quarantine→release promotion),

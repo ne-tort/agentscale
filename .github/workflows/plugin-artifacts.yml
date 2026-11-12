@@ -326,15 +326,17 @@ jobs:
   release:
     name: Quarantine sign/verify then promote by digest
     needs: dry-run
+    # Release gate keys on the reusable-workflow INPUTS, never on event_name
+    # propagation: inside a workflow_call the caller event may surface either as
+    # the caller event or as 'workflow_call'. Direct runs (empty reusable input)
+    # stay limited to push/workflow_dispatch on the protected default branch; a
+    # reusable caller must pass a non-empty pinned trusted_workflow_ref AND an
+    # explicit enable_release opt-in. Protected trust/OIDC gates inside the job
+    # are unchanged and still fail closed.
     if: >-
       github.event_name != 'pull_request' &&
       github.event_name != 'pull_request_target' &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) ||
-        (inputs.enable_release == true && github.event_name == 'workflow_call') ||
-        (inputs.enable_release == true && github.event_name == 'push')
-      )
+      ((inputs.trusted_workflow_ref == '' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)))) || (inputs.trusted_workflow_ref != '' && inputs.enable_release == true))
     # Как в ci-images.yml/ci-e2e.yml: сборка требует Docker daemon, которого на
     # чистый ubuntu-latest нет. Это же площадка с buildx и локальным реестром.
     runs-on: [self-hosted, linux, docker]

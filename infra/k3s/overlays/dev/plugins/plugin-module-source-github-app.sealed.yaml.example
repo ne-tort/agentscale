@@ -1,0 +1,40 @@
+# DEV-ONLY EXAMPLE — do not add this .example file to kustomization resources.
+# Create an Opaque Secret named plugin-module-source-github-app in namespace
+# agentscale-dev holding ONLY the GitHub App private key as PEM under the key
+# private-key, then seal it with the dev Sealed Secrets controller certificate
+# and namespace/name scope. Scope B1 (CI evidence) registry_read auth for the
+# cluster-internal Service plugin-static:8081.
+#
+# Commit only kubeseal output as plugin-module-source-github-app.sealed.yaml and
+# add THAT file to kustomization. Never commit the source Secret, plaintext/base64
+# PEM, PAT, installation token, or the App private key itself.
+#
+# Runtime wiring (infra/k3s/base/plugins/plugin-static.yaml):
+#   * Deployment mounts this Secret readOnly at
+#     /var/run/secrets/plugin-module-source-github-app (optional: true, items
+#     private-key -> private-key, defaultMode 0440, fsGroup 10001).
+#   * env PLUGIN_MODULE_SOURCE_GITHUB_APP_PRIVATE_KEY_SECRET_REF =
+#     k8s-secret://plugin-module-source-github-app/private-key (a REF, not key
+#     material) is resolved by K8sFileSecretStore. A missing file fails closed:
+#     compose/readiness refuses, it never falls back to anonymous GHCR.
+#   * The same enable step must supply the non-secret managed installation
+#     configuration consumed by managed_config_from_settings plus
+#     github_app_client_from_settings: PLUGIN_MODULE_SOURCE_GITHUB_APP_ID,
+#     PLUGIN_MODULE_SOURCE_GITHUB_APP_INSTALLATION_ID and the trusted
+#     template/workflow/branch-policy values (dev patch on plugin-static-config).
+#     Composition is fail-closed without them; PLUGIN_MODULE_SOURCE_ENABLED
+#     stays false because managed source provisioning remains disabled.
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: plugin-module-source-github-app
+  namespace: agentscale-dev
+spec:
+  encryptedData:
+    # Placeholder only: replace with kubeseal ciphertext of the PEM bytes.
+    private-key: SEALED_CIPHERTEXT_REQUIRED
+  template:
+    metadata:
+      name: plugin-module-source-github-app
+      namespace: agentscale-dev
+    type: Opaque

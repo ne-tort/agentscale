@@ -1473,6 +1473,145 @@ class CspBindingHardeningTests(unittest.TestCase):
             )
         self.assertEqual(denied.exception.code, "CSP_ORIGIN_INVALID")
 
+class StaticOriginDevHttpAllowlistTests(unittest.TestCase):
+    """Cluster-internal http static origin only behind an exact allowlist.
+
+    R1 contract: HTTPS static origins keep working without an allowlist;
+    plain http is accepted only when the exact http://host[:port] origin is
+    allowlisted; the gate re-runs on the formatted url_for result, so format
+    fields cannot move a probe onto another origin.
+    """
+
+    DEV_ORIGIN = "http://plugin-static.agentscale-dev.svc.cluster.local:8081"
+    DEV_TEMPLATE = (
+        DEV_ORIGIN
+        + "/internal/plugin-static/v1/bundles"
+        + "/{plugin_id}/{version}/{bundle_digest}/ready"
+    )
+
+    def _http_static_origin(self, template: str | None = None) -> dict:
+        document = _source()["static_origin"]
+        document["url_template"] = template if template is not None else self.DEV_TEMPLATE
+        return document
+
+    def test_exact_cluster_internal_origin_and_port_is_accepted(self) -> None:
+        origin = publication.StaticOriginConfig.parse(
+            self._http_static_origin(), dev_allowlist=frozenset({self.DEV_ORIGIN})
+        )
+        url = origin.url_for(
+            plugin_id="hello_plugin", version="1.2.0", bundle_digest=BUNDLE_DIGEST
+        )
+        parsed = parse.urlsplit(url)
+        self.assertEqual(parsed.scheme, "http")
+        self.assertEqual(
+            parsed.hostname, "plugin-static.agentscale-dev.svc.cluster.local"
+        )
+        self.assertEqual(parsed.port, 8081)
+        self.assertIn(BUNDLE_DIGEST, parsed.path)
+        self.assertEqual(origin.plugin_shell_origin, "https://agentscale.example.test")
+
+    def test_other_host_or_port_is_rejected_even_with_allowlist(self) -> None:
+        for template in (
+            self.DEV_TEMPLATE.replace(
+                "plugin-static.agentscale-dev", "other-static.agentscale-dev"
+            ),
+            self.DEV_TEMPLATE.replace(":8081", ":9090"),
+        ):
+            with self.subTest(template=template):
+                with self.assertRaises(publication.PublicationBlocked) as denied:
+                    publication.StaticOriginConfig.parse(
+                        self._http_static_origin(template),
+                        dev_allowlist=frozenset({self.DEV_ORIGIN}),
+                    )
+                self.assertEqual(denied.exception.code, "CSP_CONFIG_INVALID")
+
+    def test_http_static_origin_without_allowlist_is_rejected(self) -> None:
+        with self.assertRaises(publication.PublicationBlocked) as denied:
+            publication.StaticOriginConfig.parse(self._http_static_origin())
+        self.assertEqual(denied.exception.code, "CSP_CONFIG_INVALID")
+        document = _config()
+        document["sources"][0]["static_origin"] = self._http_static_origin()
+        with self.assertRaises(publication.PublicationBlocked) as denied:
+            publication.PublicationConfig.from_environment(_environment(document))
+        self.assertEqual(denied.exception.code, "CSP_CONFIG_INVALID")
+
+    def test_https_static_origin_without_allowlist_still_accepted(self) -> None:
+        origin = publication.StaticOriginConfig.parse(_source()["static_origin"])
+        self.assertEqual(origin.dev_allowlist, frozenset())
+        self.assertEqual(
+            origin.url_for(
+                plugin_id="hello_plugin", version="1.2.0", bundle_digest=BUNDLE_DIGEST
+            ),
+            "https://plugins.example.test/hello_plugin/1.2.0/" + BUNDLE_DIGEST + "/index.html",
+        )
+
+    def test_environment_allowlist_enables_http_static_origin_end_to_end(self) -> None:
+        document = _config()
+        document["sources"][0]["static_origin"] = self._http_static_origin()
+        env = _environment(document)
+        env[publication.DEV_HTTP_ALLOWLIST_ENV] = json.dumps([self.DEV_ORIGIN])
+        config = publication.PublicationConfig.from_environment(env)
+        static = config.sources[0].static_origin
+        self.assertIsNotNone(static)
+        assert static is not None
+        url = static.url_for(
+            plugin_id="hello_plugin", version="1.2.0", bundle_digest=BUNDLE_DIGEST
+        )
+        self.assertTrue(
+            url.startswith(self.DEV_ORIGIN + "/internal/plugin-static/v1/bundles/")
+        )
+
+    def test_formatted_url_cannot_escape_the_allowlisted_origin(self) -> None:
+        origin = publication.StaticOriginConfig(
+            url_template=self.DEV_TEMPLATE,
+            plugin_shell_origin="https://agentscale.example.test",
+            security_headers=dict(STATIC_HEADERS),
+        )
+        with self.assertRaises(publication.PublicationBlocked) as denied:
+            origin.url_for(
+                plugin_id="hello_plugin", version="1.2.0", bundle_digest=BUNDLE_DIGEST
+            )
+        self.assertEqual(denied.exception.code, "CSP_ORIGIN_INVALID")
+        allowed = publication.StaticOriginConfig(
+            url_template=self.DEV_TEMPLATE,
+            plugin_shell_origin="https://agentscale.example.test",
+            security_headers=dict(STATIC_HEADERS),
+            dev_allowlist=frozenset({self.DEV_ORIGIN}),
+        )
+        url = allowed.url_for(
+            plugin_id="hello_plugin", version="1.2.0", bundle_digest=BUNDLE_DIGEST
+        )
+        parsed = parse.urlsplit(url)
+        self.assertEqual(f"http://{parsed.hostname}:{parsed.port}", self.DEV_ORIGIN)
+
+    def test_userinfo_query_fragment_and_other_schemes_are_denied(self) -> None:
+        for template in (
+            self.DEV_TEMPLATE.replace(
+                "http://", "http://user:pass@"
+            ),
+            self.DEV_TEMPLATE + "?token=x",
+            self.DEV_TEMPLATE + "#frag",
+            self.DEV_TEMPLATE.replace("http://", "ftp://"),
+        ):
+            with self.subTest(template=template):
+                with self.assertRaises(publication.PublicationBlocked) as denied:
+                    publication.StaticOriginConfig.parse(
+                        self._http_static_origin(template),
+                        dev_allowlist=frozenset({self.DEV_ORIGIN}),
+                    )
+                self.assertEqual(denied.exception.code, "CSP_CONFIG_INVALID")
+
+    def test_wildcard_allowlist_entries_are_rejected(self) -> None:
+        for entry in (
+            "http://*.svc.cluster.local",
+            "http://*",
+            "http://plugin-static.*:8081",
+        ):
+            with self.subTest(entry=entry):
+                with self.assertRaises(publication.PublicationBlocked) as denied:
+                    publication._parse_dev_allowlist(json.dumps([entry]))
+                self.assertEqual(denied.exception.code, "DEV_ALLOWLIST_INVALID")
+
 
 if __name__ == "__main__":
     unittest.main()

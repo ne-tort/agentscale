@@ -78,8 +78,9 @@ import importlib
 import inspect
 import logging
 import os
+from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any, Final, Mapping
+from typing import Any, Final
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +286,33 @@ class _UnwiredPort:
 
         refuse.__name__ = method
         return refuse
+
+
+class _StaticOriginNotConfigured:
+    """Fail-closed static-origin port: НЕ подставлять plugin backend под статику.
+
+    Отдельный static-origin (§5.2/§13.3) — always-running, БЕЗ cookie и БЕЗ
+    capability-токена. Молчаливый fallback ``static_http = runtime.backend_http``
+    нарушал эту изоляцию: статика уходила на plugin backend. Здесь — тот же
+    контракт, что ``wiring/platform.py`` (``GatewayProxy(static_http=None)``):
+    любой запрос статики получает ``GatewayError(STATIC_ORIGIN_NOT_CONFIGURED)``
+    (503), а не проксирование на backend и не «молчаливый успех». Порт
+    опционален на конструкторе, поэтому в ``plugin_unwired_ports`` НЕ
+    добавляется (это не долг обязательной привязки, а штатный fail-closed).
+    """
+
+    __slots__ = ()
+
+    async def send(self, _request: Any) -> Any:
+        from prodavan.application.plugins.gateway.errors import (
+            GatewayError,
+            GatewayErrorCode,
+        )
+
+        raise GatewayError(
+            GatewayErrorCode.STATIC_ORIGIN_NOT_CONFIGURED,
+            detail="plugin static origin is not configured (fail-closed)",
+        )
 
 
 class _TenantDbAdminLifecycle:
@@ -1814,8 +1842,12 @@ def _gateway_runtime(
     Автоматически (реализации ЕСТЬ): ``hmac_verifier`` (``Sha256HmacAdapter``),
     ``rate_limit`` (``RedisRateLimitAdapter(redis)``), ``audit`` (``AuditAdapter``
     поверх append-only SQL-sink через тонкий ``write``-адаптер), ``activation``
-    (``ActivationAdapter`` -> ``PluginActivator``), ``backend_http``/``static_http``
-    из ``RuntimePorts``. У ``SessionPort``/``GrantPort``/``SecretPort`` нет
+    (``ActivationAdapter`` -> ``PluginActivator``), ``backend_http``
+    из ``RuntimePorts``. ``static_http`` НЕ берётся из ``RuntimePorts``: без
+    явного override ``gateway_static_http`` ставится fail-closed
+    ``_StaticOriginNotConfigured`` (STATIC_ORIGIN_NOT_CONFIGURED при запросе,
+    как platform path), а НЕ молчаливое проксирование статики на plugin
+    backend. У ``SessionPort``/``GrantPort``/``SecretPort`` нет
     прод-фабрики (A10/родитель) -> ``_UnwiredPort`` с явным отказом при вызове.
     """
 
@@ -1910,7 +1942,11 @@ def _gateway_runtime(
         "hmac_verifier": ov.get("gateway_hmac_port") or Sha256HmacAdapter(),
         "activation": activation,
         "backend_http": ov.get("gateway_backend_http") or runtime.backend_http,
-        "static_http": ov.get("gateway_static_http") or runtime.backend_http,
+        # НЕ fallback на runtime.backend_http: отдельный static-origin (§5.2/
+        # §13.3) — always-running, БЕЗ cookie/capability-токена. Без явного
+        # override — fail-closed STATIC_ORIGIN_NOT_CONFIGURED при запросе
+        # статики, как в wiring/platform.py (GatewayProxy(static_http=None)).
+        "static_http": ov.get("gateway_static_http") or _StaticOriginNotConfigured(),
         "limits": ov.get("gateway_limits") or DEFAULT_LIMITS,
         "shell_origin": config.shell_origin,
     }
@@ -2229,12 +2265,12 @@ def _job_integration_override(
 ) -> dict[str, Any]:
     """Build the manifest/digest resolver and concrete Celery queue adapter."""
 
+    from prodavan.application.plugins.capabilities.adapters.jobs import CeleryJobsAdapter
     from prodavan.application.plugins.jobs.tasks import (
         JobTaskError,
         ManifestJobTasks,
         RedisJobExecutionStore,
     )
-    from prodavan.application.plugins.capabilities.adapters.jobs import CeleryJobsAdapter
     from prodavan.core.infra.worker_manager import get_celery_app, get_worker_manager
     from prodavan.core.jobs.async_runner import run_async
     from prodavan.infrastructure.plugins.capabilities.redis import ManagerRedisClient
@@ -2407,10 +2443,10 @@ def _platform_overrides(
     # One lifecycle-managed Redis wrapper and one claim registry are shared by
     # publish, per-subscription factories, raw DLQ and jobs. Explicit test or
     # standalone overrides are preserved without creating a second registry.
-    from prodavan.infrastructure.plugins.capabilities.redis import ManagerRedisClient
     from prodavan.infrastructure.plugins.adapters.redis_event_claims import (
         RedisDeliveryClaimStore,
     )
+    from prodavan.infrastructure.plugins.capabilities.redis import ManagerRedisClient
 
     if ov.get("redis_client") is None and redis is None:
         raise PluginCompositionError(

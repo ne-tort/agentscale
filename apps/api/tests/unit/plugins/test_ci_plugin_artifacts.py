@@ -217,7 +217,7 @@ def test_release_is_protected_and_oidc_validated_before_credentials() -> None:
     _, _, release = _workflow_sections()
     publication = PUBLICATION_SCRIPT.read_text(encoding="utf-8")
     assert "github.event_name == 'workflow_dispatch'" in release
-    assert "github.event_name == 'workflow_call'" in release
+    assert "inputs.trusted_workflow_ref != '' && inputs.enable_release == true" in release
     assert "github.event.repository.default_branch" in release
     assert "environment: plugin-release" in release
     assert release.index("Validate GitHub OIDC source and workflow trust before any write") < release.index(

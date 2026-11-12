@@ -1003,6 +1003,208 @@ class WorkflowStaticTests(unittest.TestCase):
             'if [[ -f "$SOURCE_DIR/apps/api/tests/unit/plugins/$TEST_FILE" ]]', step
         )
 
+class ReleaseGateConditionTests(unittest.TestCase):
+    """Release gate решает по reusable-INPUT, а не по event_name propagation.
+
+    Внутри workflow_call GitHub может отдать как событие caller'а, так и
+    'workflow_call', поэтому direct-vs-reusable нельзя выводить из event_name.
+    Direct release требует ПУСТОЙ reusable input и push/workflow_dispatch на
+    защищённой default branch; reusable release требует непустой pinned
+    trusted_workflow_ref И явный enable_release. Protected trust/OIDC гейты
+    внутри job неизменны и продолжают отказывать fail-closed.
+    """
+
+    CANONICAL = (
+        "github.event_name != 'pull_request' && "
+        "github.event_name != 'pull_request_target' && "
+        "((inputs.trusted_workflow_ref == '' && (github.event_name == 'workflow_dispatch' || "
+        "(github.event_name == 'push' && github.ref == "
+        "format('refs/heads/{0}', github.event.repository.default_branch)))) || "
+        "(inputs.trusted_workflow_ref != '' && inputs.enable_release == true))"
+    )
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        block = workflow[workflow.index("\n  release:") :]
+        marker = "    if: >-\n"
+        start = block.index(marker) + len(marker)
+        # The folded condition spans 6-space continuation lines; it ends at the
+        # first 4-space-indented job-attribute line (key or comment) that follows.
+        end = start + re.search(r"(?m)^ {4}(?=\S)", block[start:]).start()
+        cls.condition = " ".join(block[start:end].split())
+
+    def _evaluate(
+        self,
+        *,
+        event_name: str,
+        ref: str,
+        default_branch: str,
+        trusted_ref: str,
+        enable_release: bool,
+    ) -> bool:
+        expression = (
+            self.condition.replace(
+                "github.event.repository.default_branch", "default_branch"
+            )
+            .replace("github.event_name", "event_name")
+            .replace("github.ref", "ref")
+            .replace("inputs.trusted_workflow_ref", "trusted_ref")
+            .replace("inputs.enable_release", "enable_release")
+            .replace(" == true", " == True")
+            .replace(
+                "format('refs/heads/{0}', default_branch)",
+                "(f'refs/heads/{default_branch}')",
+            )
+            .replace("&&", "and")
+            .replace("||", "or")
+        )
+        return bool(
+            eval(  # noqa: S307 - evaluates only the pinned canonical gate above
+                expression,
+                {"__builtins__": {}},
+                {
+                    "event_name": event_name,
+                    "ref": ref,
+                    "default_branch": default_branch,
+                    "trusted_ref": trusted_ref,
+                    "enable_release": enable_release,
+                },
+            )
+        )
+
+    def test_condition_matches_the_input_gated_contract(self) -> None:
+        self.assertEqual(self.condition, self.CANONICAL)
+
+    def test_reusable_release_never_depends_on_event_name(self) -> None:
+        # Ни одна ветка условия не может опираться на 'workflow_call': результат
+        # обязан совпадать при любой семантике propagation события caller'а.
+        self.assertNotIn("workflow_call", self.condition)
+        self.assertEqual(self.condition.count("inputs.enable_release"), 1)
+        self.assertIn(
+            "inputs.trusted_workflow_ref != '' && inputs.enable_release == true",
+            self.condition,
+        )
+        self.assertNotIn("enable_release == true && github.event_name", self.condition)
+        self.assertNotIn(
+            "inputs.enable_release == true && github.event_name == 'workflow_call'",
+            self.condition,
+        )
+
+    def test_direct_branch_requires_empty_reusable_input(self) -> None:
+        # push/workflow_dispatch с непустым reusable input не попадают в direct
+        # branch: клауза dispatch/push стоит строго внутри конъюнкции
+        # inputs.trusted_workflow_ref == ''.
+        direct = (
+            "inputs.trusted_workflow_ref == '' && (github.event_name == 'workflow_dispatch' || "
+            "(github.event_name == 'push' && github.ref == "
+            "format('refs/heads/{0}', github.event.repository.default_branch)))"
+        )
+        self.assertIn(direct, self.condition)
+        self.assertLess(
+            self.condition.index("inputs.trusted_workflow_ref == ''"),
+            self.condition.index("'workflow_dispatch'"),
+        )
+        self.assertLess(
+            self.condition.index("inputs.trusted_workflow_ref == ''"),
+            self.condition.index("github.event_name == 'push'"),
+        )
+
+    def test_direct_push_and_dispatch_with_empty_input_are_allowed(self) -> None:
+        self.assertTrue(
+            self._evaluate(
+                event_name="push",
+                ref="refs/heads/main",
+                default_branch="main",
+                trusted_ref="",
+                enable_release=False,
+            )
+        )
+        self.assertTrue(
+            self._evaluate(
+                event_name="workflow_dispatch",
+                ref="refs/heads/main",
+                default_branch="main",
+                trusted_ref="",
+                enable_release=False,
+            )
+        )
+
+    def test_caller_event_with_empty_reusable_input_is_denied(self) -> None:
+        # Direct branch открывают только push/workflow_dispatch; workflow_call
+        # с пустым input (и любой push вне default branch) остаётся закрыт.
+        self.assertFalse(
+            self._evaluate(
+                event_name="workflow_call",
+                ref="refs/heads/main",
+                default_branch="main",
+                trusted_ref="",
+                enable_release=True,
+            )
+        )
+        self.assertFalse(
+            self._evaluate(
+                event_name="push",
+                ref="refs/heads/feature",
+                default_branch="main",
+                trusted_ref="",
+                enable_release=True,
+            )
+        )
+
+    def test_reusable_caller_events_never_reach_the_direct_branch(self) -> None:
+        # Непустой reusable input = workflow_call контекст даже когда событие
+        # caller'а проявляется как push/workflow_dispatch; без явного
+        # enable_release release запрещён при любом event_name.
+        trusted_ref = (
+            "ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@" + "1" * 40
+        )
+        for event_name in ("push", "workflow_dispatch", "workflow_call"):
+            with self.subTest(event_name=event_name):
+                self.assertFalse(
+                    self._evaluate(
+                        event_name=event_name,
+                        ref="refs/heads/main",
+                        default_branch="main",
+                        trusted_ref=trusted_ref,
+                        enable_release=False,
+                    )
+                )
+
+    def test_reusable_release_requires_explicit_enable_release(self) -> None:
+        trusted_ref = (
+            "ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@" + "1" * 40
+        )
+        for event_name in ("push", "workflow_dispatch", "workflow_call"):
+            with self.subTest(event_name=event_name):
+                self.assertTrue(
+                    self._evaluate(
+                        event_name=event_name,
+                        ref="refs/heads/main",
+                        default_branch="main",
+                        trusted_ref=trusted_ref,
+                        enable_release=True,
+                    )
+                )
+
+    def test_pr_events_stay_excluded(self) -> None:
+        trusted_ref = (
+            "ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@" + "1" * 40
+        )
+        for event_name in ("pull_request", "pull_request_target"):
+            for enable_release in (False, True):
+                with self.subTest(event_name=event_name, enable_release=enable_release):
+                    self.assertFalse(
+                        self._evaluate(
+                            event_name=event_name,
+                            ref="refs/heads/main",
+                            default_branch="main",
+                            trusted_ref=trusted_ref if enable_release else "",
+                            enable_release=enable_release,
+                        )
+                    )
+
+
 class DockerfileBaseArgResolution(unittest.TestCase):
     """FROM ${ARG} — штатная форма; отвергать её значит ломать корректный Dockerfile."""
 
