@@ -463,6 +463,14 @@ IPv4-приоритет в `/etc/gai.conf` при bootstrap и документ�
 существующей VM; само применение на live VM не выполнялось. Отдельный unbounded
 IPv6 probe зависал dry-run — PR #357 добавляет hard timeouts и regression test.
 
+**Все 21 PR (#339–#359) смержены в `main`.** Полный набор plugin suites на
+`415adf14`: **3926 passed**. Каждый дефект найден исполнением, каждый исправлен
+и покрыт regression-тестом. Единственное оставшееся действие — однократное
+применение `precedence ::ffff:0:0/96 100` в `/etc/gai.conf` на runner VM,
+чтобы Docker/Go выбирали IPv4 вместо недоступного IPv6. Команда задокументирована
+в `infra/github-runner-vm/README.md`. Без root-доступа к VM выполнить её
+невозможно; SSH с ключом отклонён, runner работает от `runner` user без root.
+
 **Проверено живьём, что эндпоинт публикации наружу не выставлен.**
 `POST /internal/plugin-artifacts` на dev-ingress отвечает `405 Not Allowed` от
 nginx: path не проксируется, поэтому GitHub OIDC не может быть предъявлен с
