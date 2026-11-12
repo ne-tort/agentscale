@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
-from pathlib import Path
 import re
 import sys
+import tempfile
+from pathlib import Path
 from types import ModuleType
 
 import pytest
-
 from prodavan.application.plugins.artifacts.verification import (
     _semver_key as backend_semver_key,
 )
@@ -41,6 +41,18 @@ SCHEMA = REPO_ROOT / "packages" / "schemas" / "plugin-manifest" / "v1" / "schema
 @pytest.fixture(scope="session")
 def ci_module() -> ModuleType:
     spec = importlib.util.spec_from_file_location("plugin_verify_under_test", CI_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="session")
+def builder() -> ModuleType:
+    spec = importlib.util.spec_from_file_location(
+        "plugin_manifest_builder_under_test", BUILDER_SCRIPT
+    )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -293,3 +305,304 @@ def test_platform_register_is_real_fail_closed_publication() -> None:
     assert release.index("Reverify actual release refs and copied referrers") < release.index(
         "Verify independent release evidence and publish through platform OIDC"
     )
+
+
+def test_supplied_digest_pinned_arg_without_default_is_accepted(
+    builder: ModuleType,
+) -> None:
+    """CI may prove an ARG without a default through the supplied pinned value."""
+    with tempfile.TemporaryDirectory() as tmp:
+        dockerfile = Path(tmp) / "Dockerfile"
+        dockerfile.write_text(
+            "ARG PYTHON_BASE_IMAGE\nFROM " + "$" + "{PYTHON_BASE_IMAGE}\n",
+            encoding="utf-8",
+        )
+        builder._validate_dockerfile_bases(
+            dockerfile,
+            {"PYTHON_BASE_IMAGE": "python:3.13-slim@sha256:" + "a" * 64},
+        )
+
+
+def test_mutable_supplied_arg_without_default_is_rejected(builder: ModuleType) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        dockerfile = Path(tmp) / "Dockerfile"
+        dockerfile.write_text(
+            "ARG PYTHON_BASE_IMAGE\nFROM " + "$" + "{PYTHON_BASE_IMAGE}\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(builder.ManifestError) as exc_info:
+            builder._validate_dockerfile_bases(
+                dockerfile,
+                {"PYTHON_BASE_IMAGE": "python:3.13-slim"},
+            )
+        assert exc_info.value.code == builder.ManifestErrorCode.INVALID_LAYOUT
+
+
+def test_real_hello_plugin_prepare_is_offline_and_byte_deterministic(
+    builder: ModuleType, tmp_path: Path
+) -> None:
+    """The real package is read-only; all prepared payloads stay in temp dirs."""
+    package = REPO_ROOT / "packages" / "plugins" / "hello-plugin"
+    assert package.is_dir(), "hello plugin fixture package must exist"
+    manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
+    base_image = "python:3.13-slim@sha256:" + "a" * 64
+
+    first = builder.prepare_package(
+        str(REPO_ROOT),
+        "packages/plugins/hello-plugin",
+        "",
+        str(tmp_path / "first"),
+        base_image_arg=base_image,
+    )
+    for key in ("canonical_manifest", "frontend_archive", "migrations_archive"):
+        assert Path(first[key]).is_file(), key
+    assert Path(first["canonical_manifest"]).read_bytes() == (
+        builder.canonical_manifest_bytes(manifest)
+    )
+
+    second = builder.prepare_package(
+        str(REPO_ROOT),
+        "packages/plugins/hello-plugin",
+        "",
+        str(tmp_path / "second"),
+        base_image_arg=base_image,
+    )
+    for key in ("canonical_manifest", "frontend_archive", "migrations_archive"):
+        assert Path(second[key]).read_bytes() == Path(first[key]).read_bytes(), key
+
+
+def test_manifest_json_with_duplicate_keys_is_rejected(
+    builder: ModuleType, tmp_path: Path
+) -> None:
+    duplicate = tmp_path / "duplicate.json"
+    duplicate.write_text(
+        '{"plugin_id":"hello_plugin","plugin_id":"hello_plugin"}',
+        encoding="utf-8",
+    )
+    with pytest.raises(builder.ManifestError) as exc_info:
+        builder._read_json(duplicate)
+    assert exc_info.value.code == builder.ManifestErrorCode.INVALID_MANIFEST
+    assert "duplicate JSON key" in str(exc_info.value)
+
+
+def _signed_source(*, capabilities: tuple[str, ...] = ("cache",)) -> dict:
+    return {
+        "plugin_id": "hello_plugin",
+        "version": "0.1.0",
+        "protocol": "plugin-rpc/1",
+        "frontend": {"entry": "index.html", "base_path": "/"},
+        "backend": {"port": 8080, "health": "/health"},
+        "capabilities": list(capabilities),
+        "migrations": {"engine": "liquibase", "path": "migrations/changelog.xml"},
+        "egress_ref": "grant:hello_plugin",
+        "public_pages": [],
+        "webhooks": ["/webhook/ping"],
+        "min_platform_version": "4.0.0",
+    }
+
+
+def _signed_manifest(
+    builder: ModuleType,
+    tmp_path: Path,
+    *,
+    source: dict | None = None,
+    backend_digest: str | None = None,
+    mutate=None,
+) -> dict:
+    source = _signed_source() if source is None else source
+    backend_digest = backend_digest or "sha256:" + "b" * 64
+    backend_ref = "ghcr.io/ne-tort/plugins/hello_plugin/backend@" + backend_digest
+    canonical = tmp_path / "canonical-manifest.json"
+    canonical.write_bytes(builder.canonical_manifest_bytes(source))
+    frontend = tmp_path / "frontend-dist.tar.gz"
+    migrations = tmp_path / "migrations.tar.gz"
+    frontend.write_bytes(b"frontend")
+    migrations.write_bytes(b"migrations")
+    manifest = builder.build_bundle_manifest(
+        source,
+        backend_ref,
+        str(canonical),
+        str(frontend),
+        str(migrations),
+        "ne-tort/agentscale",
+        "c" * 40,
+    )
+    if mutate is not None:
+        mutate(manifest)
+    return manifest
+
+
+def test_signed_manifest_rejects_duplicate_layer_role(
+    builder: ModuleType, tmp_path: Path
+) -> None:
+    manifest = _signed_manifest(builder, tmp_path)
+    manifest["layers"].append(dict(manifest["layers"][0]))
+    with pytest.raises(builder.ManifestError) as exc_info:
+        builder.validate_signed_manifest(manifest, backend_digest="sha256:" + "b" * 64)
+    assert exc_info.value.code == builder.ManifestErrorCode.INVALID_LAYERS
+
+
+def test_signed_manifest_accepts_required_layer_media_types(
+    builder: ModuleType, tmp_path: Path
+) -> None:
+    manifest = _signed_manifest(builder, tmp_path)
+    summary = builder.validate_signed_manifest(
+        manifest, backend_digest="sha256:" + "b" * 64
+    )
+    media_types = {
+        layer["annotations"][builder.A_LAYER_ROLE]: layer["mediaType"]
+        for layer in manifest["layers"]
+    }
+    assert media_types[builder.ROLE_MANIFEST] == builder.PLUGIN_MANIFEST_MEDIA_TYPE
+    assert media_types[builder.ROLE_FRONTEND] == builder.FRONTEND_MEDIA_TYPE
+    assert media_types[builder.ROLE_MIGRATIONS] == builder.MIGRATIONS_MEDIA_TYPE
+    assert summary["layer_count"] == 3
+
+
+@pytest.mark.parametrize("role", ["frontend-dist", "migrations"])
+def test_signed_manifest_rejects_wrong_required_layer_media_type(
+    builder: ModuleType, tmp_path: Path, role: str
+) -> None:
+    manifest = _signed_manifest(builder, tmp_path)
+    layer = next(
+        item
+        for item in manifest["layers"]
+        if item["annotations"][builder.A_LAYER_ROLE] == role
+    )
+    layer["mediaType"] = (
+        builder.MIGRATIONS_MEDIA_TYPE
+        if role == builder.ROLE_FRONTEND
+        else builder.FRONTEND_MEDIA_TYPE
+    )
+    with pytest.raises(builder.ManifestError) as exc_info:
+        builder.validate_signed_manifest(manifest, backend_digest="sha256:" + "b" * 64)
+    assert exc_info.value.code == builder.ManifestErrorCode.INVALID_LAYERS
+
+
+def test_signed_manifest_extension_role_contract_is_bounded(
+    builder: ModuleType, tmp_path: Path
+) -> None:
+    def add_extension(manifest: dict) -> None:
+        manifest["layers"].append(
+            {
+                "mediaType": "application/octet-stream",
+                "digest": "sha256:" + "e" * 64,
+                "size": 1,
+                "annotations": {
+                    builder.A_LAYER_ROLE: "extension/docs",
+                    "org.opencontainers.image.title": "docs.tar",
+                },
+            }
+        )
+
+    accepted = _signed_manifest(builder, tmp_path, mutate=add_extension)
+    summary = builder.validate_signed_manifest(
+        accepted, backend_digest="sha256:" + "b" * 64
+    )
+    assert summary["layer_count"] == 4
+
+    def add_unknown_role(manifest: dict) -> None:
+        manifest["layers"].append(
+            {
+                "mediaType": "application/octet-stream",
+                "digest": "sha256:" + "e" * 64,
+                "size": 1,
+                "annotations": {
+                    builder.A_LAYER_ROLE: "unexpected",
+                    "org.opencontainers.image.title": "docs.tar",
+                },
+            }
+        )
+
+    with pytest.raises(builder.ManifestError) as exc_info:
+        builder.validate_signed_manifest(
+            _signed_manifest(builder, tmp_path, mutate=add_unknown_role),
+            backend_digest="sha256:" + "b" * 64,
+        )
+    assert exc_info.value.code == builder.ManifestErrorCode.INVALID_LAYERS
+
+
+def test_signed_manifest_rejects_missing_required_source_roles(
+    builder: ModuleType, tmp_path: Path
+) -> None:
+    source = _signed_source()
+    manifest = _signed_manifest(builder, tmp_path, source=source)
+    manifest["layers"] = [
+        layer
+        for layer in manifest["layers"]
+        if layer["annotations"][builder.A_LAYER_ROLE] != builder.ROLE_FRONTEND
+    ]
+    with pytest.raises(builder.ManifestError) as exc_info:
+        builder.validate_signed_manifest(
+            manifest,
+            backend_digest="sha256:" + "b" * 64,
+            source_manifest=source,
+        )
+    assert exc_info.value.code == builder.ManifestErrorCode.INVALID_LAYERS
+
+
+def test_signed_manifest_rejects_capabilities_mismatch(
+    builder: ModuleType, tmp_path: Path
+) -> None:
+    source = _signed_source(capabilities=("objects",))
+    manifest = _signed_manifest(builder, tmp_path, source=source)
+    manifest["annotations"][builder.A_CAPABILITIES] = "cache"
+    with pytest.raises(builder.ManifestError) as exc_info:
+        builder.validate_signed_manifest(
+            manifest,
+            backend_digest="sha256:" + "b" * 64,
+            source_manifest=source,
+        )
+    assert exc_info.value.code == builder.ManifestErrorCode.INVALID_CAPABILITIES
+
+
+def test_signed_manifest_rejects_manifest_digest_config_mismatch(
+    builder: ModuleType, tmp_path: Path
+) -> None:
+    manifest = _signed_manifest(builder, tmp_path)
+    manifest["config"]["digest"] = "sha256:" + "d" * 64
+    with pytest.raises(builder.ManifestError) as exc_info:
+        builder.validate_signed_manifest(manifest, backend_digest="sha256:" + "b" * 64)
+    assert exc_info.value.code == builder.ManifestErrorCode.INVALID_DIGEST
+
+
+def test_signed_manifest_rejects_backend_ref_digest_mismatch(
+    builder: ModuleType, tmp_path: Path
+) -> None:
+    expected_digest = "sha256:" + "b" * 64
+    manifest = _signed_manifest(builder, tmp_path, backend_digest=expected_digest)
+    manifest["annotations"][builder.A_BACKEND_IMAGE_REF] = (
+        "ghcr.io/ne-tort/plugins/hello_plugin/backend@sha256:" + "e" * 64
+    )
+    with pytest.raises(builder.ManifestError) as exc_info:
+        builder.validate_signed_manifest(
+            manifest,
+            backend_digest=expected_digest,
+            backend_ref="ghcr.io/ne-tort/plugins/hello_plugin/backend@" + expected_digest,
+        )
+    assert exc_info.value.code == builder.ManifestErrorCode.INVALID_DIGEST
+
+
+def test_artifact_ref_grammar_is_strict_without_breaking_docker_bases(
+    builder: ModuleType,
+) -> None:
+    digest = "sha256:" + "a" * 64
+    docker_bases = (
+        "python:3.13-slim@" + digest,
+        "ghcr.io/ne-tort/python:3.13-slim@" + digest,
+    )
+    for reference in docker_bases:
+        assert builder._REF_RE.fullmatch(reference), reference
+
+    valid_artifact = "ghcr.io/ne-tort/plugins/hello_plugin/backend@" + digest
+    assert builder._require_backend_ref(valid_artifact) == (valid_artifact, digest)
+
+    invalid_artifacts = (
+        *docker_bases,
+        "backend@" + digest,
+        "ghcr.io/ne-tort/plugins/hello_plugin/backend:v1@" + digest,
+    )
+    for reference in invalid_artifacts:
+        with pytest.raises(builder.ManifestError) as exc_info:
+            builder._require_backend_ref(reference)
+        assert exc_info.value.code == builder.ManifestErrorCode.INVALID_DIGEST

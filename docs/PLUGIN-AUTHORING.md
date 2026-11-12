@@ -426,6 +426,34 @@ ACTIVE status. New/revoked/update grant требует exact approval; successfu
 saga отмечает `consumed_at`. Exact ACTIVE replay отдельно обеспечивает
 Deployment/routes без второго grant или secret rotation.
 
+Approval привязан к **exact bundle digest**: rerun/новая сборка с другим digest
+не покрывается прежним approval и требует нового durable approval с независимым
+review. Same-commit resume (**B2**) **statically implemented** в release
+workflow (шаг `Resume preflight for same-commit quarantine artifacts`, id
+`resume_preflight`), но **live не подтверждён**:
+
+- Preflight (после trust/ORAS/prepare/GHCR login, до backend build) резолвит
+  только exact quarantine refs `$QUAR_BACKEND:sha-$GITHUB_SHA` и
+  `$QUAR_BUNDLE:sha-$GITHUB_SHA`. **Both absent** → обычный first-run
+  build/sign; **both present** → resume без rebuild; **partial state** и любые
+  transient/auth/network ошибки — fail-closed, НЕ rebuild (absence признаётся
+  только по явному not-found/404/manifest unknown).
+- Resume вызывает `plugin_quarantine_resume.py resume`: `oras manifest fetch
+  --output` (raw bytes, не pretty re-serialization) и `oras blob fetch
+  --output` для config blob; offline проверяются sha256(raw)==resolved bundle
+  digest, config digest/size и byte-identity с локально пересозданным canonical
+  manifest, а signed backend_image_ref аннотация сверяется с expected release
+  pin. Exact backend+bundle digest pair сохраняется; expected/pushed manifest
+  намеренно одинаковы (integrity = raw digest + полный verify, а не diff).
+- Пропускаются только пять build/evidence/sign steps;
+  `quarantine_verify` выполняется **всегда** (полный cosign verify +
+  evidence + canonical + compatibility gate), promote/reverify/publish общие.
+  Helper — НЕ evidence и НЕ decision: доверие даёт только полный verify.
+- **Operator flow:** первый run печатает exact digest pair в step summary →
+  оператор выдаёт durable approval на этот exact digest → rerun того же
+  commit → resume с неизменной digest pair → publication. Успешный live
+  rerun/publication **не заявлен** (verification freeze не снят).
+
 Approval/grant/list DTO сохраняют один exact six-field `QuotaSet`:
 `ops_per_minute`, `max_rows`, `max_bytes`, `max_keys`,
 `max_object_bytes`, `max_egress_bytes`. Quotas и egress не помещаются в
@@ -499,25 +527,93 @@ caller-параметров. Полный список — ровно эти д�
 ```
 
 `static_origin`, если он указан, принимает ровно `url_template`,
-`plugin_shell_origin` и `security_headers`; `null` означает, что CSP-проба для
-этого источника не выполняется. `scanner_image` обязан иметь и точную версию, и
+`plugin_shell_origin` и `security_headers`. **`null` НЕ пропускает CSP-пробу**:
+`plugin_publication.py publish` fail-closed останавливается с
+`CSP_EVIDENCE_REQUIRED` ещё до platform POST, поэтому пример с `null` выше —
+только иллюстрация схемы, а не публикующая конфигурация. `scanner_image` обязан
+иметь и точную версию, и
 привязку по digest (`aquasec/trivy:<semver>@sha256:…`) — одно без другого
 отвергается. `trusted_workflow_ref` — **только** канонический workflow платформы
 с суффиксом `@<40-hex-sha>` или `@refs/heads/<branch>`, причём для direct push
 ветка обязана совпасть с `ref`.
 Это описание **статической схемы**, а не evidence выполненной публикации.
 
-После digest promotion отдельный `release_verify` повторно проверяет actual
-release refs/referrers. Затем `plugin_publication.py publish`:
+Backend дополнительно связывает OIDC `event_name` с формой workflow identity:
 
-1. запускает pinned Trivy для **actual release backend** и валидирует report
-   против scanner image/backend ref и scan policy;
-2. делает HEAD на protected static-origin URL с bundle digest в path, требует
-   configured CSP/security headers и точный
-   `X-AgentScale-Bundle-Digest: sha256:<release-bundle>`;
-3. только после release verification + scan + CSP evidence получает GitHub OIDC
-   token и выполняет authenticated `POST /internal/plugin-artifacts`, проверяя
+- `push` и `workflow_dispatch` допускают **только direct protected-branch**
+  identity `...@refs/heads/<protected-default-branch>`; для текущего canonical
+  source это ровно `...@refs/heads/main`, совпадающее с expected source `ref`.
+- `workflow_call` допускает **только reusable workflow, pinned на полный
+  lowercase 40-hex commit SHA**: `...@<40 lowercase hex>`.
+
+Неправильные комбинации (`push`/`workflow_dispatch` с SHA и `workflow_call`
+с branch identity) backend отклоняет как `INVALID_CLAIM` с claim
+`job_workflow_ref` даже при валидной GitHub-подписи. Exact bindings
+`repository`, `repository_id`, `ref`, `sha`, `ref_protected="true"` и
+signer identity/issuer остаются обязательными и не ослабляются этой матрицей.
+
+В статической схеме миграция `2026111201` и ORM используют одинаковый workflow
+CHECK для `plugin_module_sources` и `plugin_source_reservations`. Operational
+следствие fail-closed DDL: upgrade валидирует существующие строки и на
+noncanonical rows обязан прерваться без silent rewrite/backfill; downgrade при
+наличии direct `refs/heads/main` rows также обязан прерваться, поскольку
+восстанавливаемый старый CHECK принимает только full SHA. Это контракт миграции,
+а не утверждение о выполненных live upgrade/downgrade.
+
+Promotion выполняется строго по digest refs и состоит из двух дополняющих
+копирований: `oras copy --recursive` переносит primary manifest и native OCI
+referrers, а `cosign copy --only=sig,att` — tag-based `.sig`/`.att` манифесты
+подписей и attestations, которые ORAS recursive не покрывает. После обоих
+копирований digest resolve checks подтверждают идентичность release refs, и
+отдельный `release_verify` обязательно повторно проверяет actual release
+refs/referrers — promotion без reverify не считается завершённым.
+
+Evidence-first порядок (**B4**, statically implemented в scripts и
+integrated в `plugin-artifacts.yml`; **UNVERIFIED live**, успешный CI run не
+заявлен):
+
+1. `plugin_release_evidence.py` выполняется ПОСЛЕ `quarantine_verify` и ДО
+   любого release GHCR write/promote: pinned Trivy сканирует exact
+   **quarantine backend digest**, protected static-origin CSP-проба проверяет
+   exact bundle digest (configured headers и
+   `X-AgentScale-Bundle-Digest: sha256:<bundle>`). Bounded JSON snapshot
+   фиксирует exact quarantine+release ref/digest pairs, scanner identity,
+   scan report digest и проверенные CSP facts. Шаг не запрашивает OIDC, не
+   делает platform POST и не выполняет registry write/promotion.
+2. Promotion по digest (два копирования выше) и обязательный `release_verify`.
+3. `plugin_publication.py publish --release-evidence` повторно валидирует
+   snapshot после release verify и **не повторяет scanner/CSP** перед POST:
+   GitHub OIDC token и authenticated `POST /internal/plugin-artifacts`
+   выполняются только при валидных snapshot/decision/manifest, с проверкой
    exact matching platform PUBLISHED response.
+
+**B4 integration — локально выполнена, UNVERIFIED:** в `plugin-artifacts.yml`
+отдельный шаг `Verify independent release evidence before promotion` стоит
+после `quarantine_verify` и до `id: promote`; publish-шаг сохраняет позицию
+после `release_verify` и передаёт `--release-evidence`, повторно валидируя
+snapshot без второго scanner/CSP. Статический guard
+`IndependentEvidenceBeforeReleaseWriteTests`
+(`apps/api/tests/unit/plugins/test_ci_plugin_publication.py`) больше не
+намеренно RED: ordering фиксирует evidence ДО promote, а no-write guard
+ограничен рамками самого evidence-шага (последующий promote пишет).
+Fail-closed семантика не ослабляется: scan findings/CSP mismatch = quarantine
+без platform POST. Успешный CI run и live publication по-прежнему не
+подтверждены.
+
+Форматы evidence различаются по происхождению: backend SBOM создаётся нативно
+BuildKit/Syft, и verifier принимает его как SPDX-2.2 (допустим также SPDX-2.3);
+bundle SBOM/provenance генерирует сам trusted builder, и bundle SBOM остаётся
+строго SPDX-2.3.
+
+**Operator blocker — static origin (B1, remains open).** HEAD-проба требует HTTP 200, точное
+совпадение configured security headers/CSP и заголовок
+`X-AgentScale-Bundle-Digest: sha256:<release-bundle>` для exact release bundle.
+Поэтому exact bundle обязан быть доставлен на static origin ДО platform POST.
+Текущий workflow такой доставки НЕ выполняет: шагов upload/sync на static
+origin в нём нет, и конкретный реальный origin здесь не указывается. Без
+предварительной доставки и provisioned origin конфигурации публикация
+остановится fail-closed (`CSP_EVIDENCE_REQUIRED`, `CSP_ORIGIN_HTTP_ERROR`,
+`CSP_SECURITY_HEADERS_FAILED` или `CSP_ARTIFACT_BINDING_MISMATCH`).
 
 Это порядок в текущих workflow/scripts, **не evidence выполненного release**.
 Protected publication config/source mapping, scanner digest, static-origin
@@ -541,6 +637,16 @@ Deployment create, retry/replay и private/public DTO. Они также сод�
 Пишите локальные проверки **до передачи source в trusted CI**. Во время
 verification freeze этот репозиторий их не запускает; наличие тестов не отмечает
 acceptance.
+
+Trusted CI дополнительно содержит offline stdlib-модули в
+`apps/api/tests/unit/plugins/`: `test_ci_plugin_supply_chain.py`,
+`test_ci_plugin_publication.py`, `test_ci_plugin_network.py`,
+`test_ci_plugin_archive_safety.py` и `test_ci_plugin_promotion.py`; dry-run
+workflow перечисляет их с безопасным `[[ -f ]]` guard для historical trees.
+Они проверяют статические контракты workflow/scripts (supply chain, publication
+gate, bounded network operations, archive safety, quarantine→release promotion),
+но **freeze не снят**: модули написаны и не выполнялись, их наличие не является
+test result или acceptance.
 
 | Контракт | Минимальная проверка после явного снятия freeze |
 |---|---|

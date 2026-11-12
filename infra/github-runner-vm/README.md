@@ -48,6 +48,23 @@ ssh -t www@172.31.156.203 "sudo python3 -c 'from pathlib import Path; p=Path(\"/
 Ограничение: host `/etc/gai.conf` действует на пользователей glibc `getaddrinfo`.
 Go binary с resolver `netgo` и контейнеры с собственным `/etc/gai.conf` могут его
 игнорировать; такой случай требует отдельной настройки соответствующего runtime.
+Для plugin-сборок это закрыто на уровне образа: общий `python-base` stage
+[`packages/plugins/hello-plugin/backend/Dockerfile`](../../packages/plugins/hello-plugin/backend/Dockerfile)
+до первого сетевого RUN идемпотентно добавляет то же правило в `/etc/gai.conf`
+**самого образа**, поэтому pip/apt/curl внутри BuildKit предпочитают IPv4
+независимо от host-файла. IPv6 не отключается; live-сборка не подтверждена.
+
+## HTTPS для apt mirrors при bootstrap
+
+Egress VM блокирует plain HTTP (впервые наблюдалось с deb.debian.org), а
+дефолтные Ubuntu 24.04 deb822-источники указывают на `http://archive.ubuntu.com`.
+`01-base.py` перед первым `apt-get update` идемпотентно переводит
+`archive.ubuntu.com`/`security.ubuntu.com` на HTTPS в существующих
+`sources.list`/`*.list`/`*.sources`: только схема, без новых репозиториев,
+без отключения проверки подписей и без правки чужих хостов. На уже
+развёрнутой VM повторный bootstrap не требуется; для новой VM это снимает
+зависимость от blocked port 80. Применять на live VM в рамках этой задачи
+не выполнялось.
 
 ## Кэши (цель миграции — чтобы каждый PR не качал и не пересобирал всё заново)
 

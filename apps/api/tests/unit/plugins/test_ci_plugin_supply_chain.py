@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.util
 import json
-from pathlib import Path
 import re
 import sys
 import tarfile
 import tempfile
 import types
 import unittest
+from pathlib import Path
 
 
 def _repo_root() -> Path:
@@ -124,7 +125,7 @@ def _backend_predicates(tmp: str, fixture: dict) -> tuple[dict, dict]:
         "predicateType": builder.SPDX_PREDICATE_TYPE,
         "subject": subject,
         "predicate": {
-            "spdxVersion": "SPDX-2.3",
+            "spdxVersion": "SPDX-2.2",
             "documentNamespace": "https://example.test/backend-sbom",
             "SPDXID": "SPDXRef-DOCUMENT",
             "packages": [{"SPDXID": "SPDXRef-image", "name": "backend"}],
@@ -369,7 +370,26 @@ class CanonicalLayoutTests(unittest.TestCase):
 
 
 class VerificationTests(unittest.TestCase):
-    def _verify(self, fixture: dict, tmp: str, *, release: bool = False, tamper: str = "") -> dict:
+    def _verify(
+        self,
+        fixture: dict,
+        tmp: str,
+        *,
+        release: bool = False,
+        tamper: str = "",
+        artifact_ref: str | None = None,
+        backend_ref: str | None = None,
+        backend_digest: str | None = None,
+        platform_version: str = "4.0.0",
+        granted_capabilities: list[str] | tuple[str, ...] | None = None,
+        certificate_identity: str | None = None,
+        certificate_oidc_issuer: str | None = None,
+        bundle_sbom_output: str | None = None,
+        bundle_provenance_output: str | None = None,
+        evidence_sink: dict | None = None,
+        expected_verify: int | None = None,
+        expected_attestations: int | None = None,
+    ) -> dict:
         backend_sbom, backend_provenance = _backend_predicates(tmp, fixture)
         bundle_sbom, bundle_provenance = builder.build_bundle_evidence(
             fixture["source"],
@@ -380,18 +400,29 @@ class VerificationTests(unittest.TestCase):
             fixture["builder_id"],
             "run-1",
         )
-        backend_ref = fixture["backend_ref"]
-        artifact_ref = fixture["artifact_ref"]
+        if evidence_sink is not None:
+            evidence_sink.update(sbom=bundle_sbom, provenance=bundle_provenance)
+        backend_ref = fixture["backend_ref"] if backend_ref is None else backend_ref
+        artifact_ref = fixture["artifact_ref"] if artifact_ref is None else artifact_ref
         if release:
             backend_ref = backend_ref.replace("/plugins-quarantine/", "/plugins/")
             artifact_ref = artifact_ref.replace("/plugins-quarantine/", "/plugins/")
+        if granted_capabilities is None:
+            granted_capabilities = fixture["source"]["capabilities"]
+        if certificate_identity is None:
+            certificate_identity = "https://github.com/" + fixture["builder_id"]
         calls: list[list[str]] = []
+        self.cosign_calls = calls
 
         def fake_cosign(argv: list[str]) -> dict:
             calls.append(argv)
             if argv[1] == "verify":
+                if tamper == "signature":
+                    return {"returncode": 1, "stderr": "invalid signature"}
                 return {"returncode": 0, "stdout": ""}
             self.assertEqual(argv[1], "verify-attestation")
+            if tamper == "empty_attestation":
+                return {"returncode": 0, "stdout": ""}
             ref = argv[-1]
             evidence_type = argv[argv.index("--type") + 1]
             is_backend = ref == backend_ref
@@ -403,6 +434,24 @@ class VerificationTests(unittest.TestCase):
                 predicate_type = "https://slsa.dev/provenance/v0.2"
             if tamper == "builder" and is_backend and evidence_type == "slsaprovenance":
                 predicate["builder"]["id"] = "https://github.com/untrusted/workflow@main"
+            if tamper == "provenance_uri" and is_backend and evidence_type == "slsaprovenance":
+                predicate["invocation"]["configSource"]["uri"] = (
+                    "git+https://github.com/example/untrusted@" + fixture["source_sha"]
+                )
+            if tamper == "provenance_sha1" and is_backend and evidence_type == "slsaprovenance":
+                predicate["invocation"]["configSource"]["digest"]["sha1"] = "0" * 40
+            if tamper == "bundle_sbom_checksums" and not is_backend and evidence_type == "spdxjson":
+                bundle_package = next(
+                    package for package in predicate["packages"]
+                    if package["SPDXID"] == "SPDXRef-bundle"
+                )
+                bundle_package.pop("checksums")
+            if (
+                tamper == "bundle_provenance_build_type"
+                and not is_backend
+                and evidence_type == "slsaprovenance"
+            ):
+                predicate["buildType"] = "https://agentscale.dev/plugin-backend-buildx/v1"
             digest = ref.rsplit("@sha256:", 1)[1]
             if tamper == "subject":
                 digest = "0" * 64
@@ -416,7 +465,7 @@ class VerificationTests(unittest.TestCase):
 
         result = verifier.verify_artifact(
             str(fixture["expected_path"]),
-            fixture["backend_digest"],
+            fixture["backend_digest"] if backend_digest is None else backend_digest,
             cosign_runner=fake_cosign,
             artifact_ref=artifact_ref,
             backend_ref=backend_ref,
@@ -426,12 +475,29 @@ class VerificationTests(unittest.TestCase):
             source_repository="ne-tort/agentscale",
             source_sha=fixture["source_sha"],
             builder_identity=fixture["builder_id"],
-            platform_version="4.0.0",
-            granted_capabilities=fixture["source"]["capabilities"],
-            certificate_identity="https://github.com/" + fixture["builder_id"],
+            platform_version=platform_version,
+            granted_capabilities=granted_capabilities,
+            certificate_identity=certificate_identity,
+            certificate_oidc_issuer=certificate_oidc_issuer,
+            bundle_sbom_output=bundle_sbom_output,
+            bundle_provenance_output=bundle_provenance_output,
         )
-        self.assertEqual(len([call for call in calls if call[1] == "verify"]), 2)
-        expected_attestations = {"builder": 2, "subject": 1}.get(tamper, 4)
+        if expected_verify is None:
+            expected_verify = 1 if tamper == "signature" else 2
+        self.assertEqual(
+            len([call for call in calls if call[1] == "verify"]),
+            expected_verify,
+        )
+        if expected_attestations is None:
+            expected_attestations = {
+                "builder": 2,
+                "subject": 1,
+                "signature": 0,
+                "empty_attestation": 1,
+                "provenance_uri": 2,
+                "provenance_sha1": 2,
+                "bundle_sbom_checksums": 3,
+            }.get(tamper, 4)
         self.assertEqual(
             len([call for call in calls if call[1] == "verify-attestation"]),
             expected_attestations,
@@ -460,6 +526,325 @@ class VerificationTests(unittest.TestCase):
             fixture = _make_oci(tmp)
             wrong_subject = self._verify(fixture, tmp, tamper="subject")
             self.assertEqual(wrong_subject["decision"], verifier.DECISION_QUARANTINE)
+
+    def test_validated_bundle_evidence_exports_exact_builder_bytes(self) -> None:
+        for preexisting in (False, True):
+            with self.subTest(preexisting=preexisting):
+                with tempfile.TemporaryDirectory() as tmp:
+                    fixture = _make_oci(tmp)
+                    sbom_output = Path(tmp) / "exported-bundle-sbom.json"
+                    provenance_output = Path(tmp) / "exported-bundle-provenance.json"
+                    if preexisting:
+                        sbom_output.write_bytes(b"stale\n")
+                        provenance_output.write_bytes(b"stale\n")
+                    else:
+                        self.assertFalse(sbom_output.exists())
+                        self.assertFalse(provenance_output.exists())
+                    evidence: dict = {}
+                    result = self._verify(
+                        fixture,
+                        tmp,
+                        bundle_sbom_output=str(sbom_output),
+                        bundle_provenance_output=str(provenance_output),
+                        evidence_sink=evidence,
+                    )
+                    self.assertEqual(result["decision"], verifier.DECISION_PUBLISH)
+                    expected_sbom = Path(tmp) / "expected-sbom.json"
+                    expected_provenance = Path(tmp) / "expected-provenance.json"
+                    builder._write_json(str(expected_sbom), evidence["sbom"])
+                    builder._write_json(str(expected_provenance), evidence["provenance"])
+                    self.assertEqual(sbom_output.read_bytes(), expected_sbom.read_bytes())
+                    self.assertEqual(
+                        provenance_output.read_bytes(),
+                        expected_provenance.read_bytes(),
+                    )
+                    self.assertEqual(
+                        hashlib.sha256(sbom_output.read_bytes()).hexdigest(),
+                        hashlib.sha256(expected_sbom.read_bytes()).hexdigest(),
+                    )
+                    self.assertEqual(
+                        hashlib.sha256(provenance_output.read_bytes()).hexdigest(),
+                        hashlib.sha256(expected_provenance.read_bytes()).hexdigest(),
+                    )
+
+    def test_tampered_evidence_or_quarantine_exports_nothing(self) -> None:
+        cases = (
+            {"tamper": "builder"},
+            {"platform_version": ""},
+        )
+        for overrides in cases:
+            with self.subTest(**overrides):
+                with tempfile.TemporaryDirectory() as tmp:
+                    fixture = _make_oci(tmp)
+                    sbom_output = Path(tmp) / "must-not-exist-sbom.json"
+                    provenance_output = Path(tmp) / "must-not-exist-provenance.json"
+                    result = self._verify(
+                        fixture,
+                        tmp,
+                        bundle_sbom_output=str(sbom_output),
+                        bundle_provenance_output=str(provenance_output),
+                        **overrides,
+                    )
+                    self.assertEqual(result["decision"], verifier.DECISION_QUARANTINE)
+                    self.assertFalse(sbom_output.exists())
+                    self.assertFalse(provenance_output.exists())
+
+    def test_wrong_bundle_predicate_is_not_exported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _make_oci(tmp)
+            sbom_output = Path(tmp) / "wrong-predicate-sbom.json"
+            provenance_output = Path(tmp) / "wrong-predicate-provenance.json"
+            result = self._verify(
+                fixture,
+                tmp,
+                tamper="bundle_provenance_build_type",
+                bundle_sbom_output=str(sbom_output),
+                bundle_provenance_output=str(provenance_output),
+            )
+            self._assert_quarantine(result, verifier.VerifyErrorCode.INVALID_EVIDENCE)
+            self.assertFalse(sbom_output.exists())
+            self.assertFalse(provenance_output.exists())
+
+    def _symlink_or_skip(self, target: Path, link: Path) -> None:
+        try:
+            link.symlink_to(target)
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"symlinks are unavailable on this host: {exc}")
+
+    def test_symlinked_bundle_output_fails_closed_without_cosign(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _make_oci(tmp)
+            target = Path(tmp) / "export-target.json"
+            target.write_bytes(b"sentinel\n")
+            sbom_output = Path(tmp) / "symlinked-sbom.json"
+            provenance_output = Path(tmp) / "must-not-exist-provenance.json"
+            self._symlink_or_skip(target, sbom_output)
+            result = self._verify(
+                fixture,
+                tmp,
+                bundle_sbom_output=str(sbom_output),
+                bundle_provenance_output=str(provenance_output),
+                expected_verify=0,
+                expected_attestations=0,
+            )
+            self._assert_quarantine(result, verifier.VerifyErrorCode.MISSING_INPUT)
+            self.assertTrue(sbom_output.is_symlink())
+            self.assertEqual(target.read_bytes(), b"sentinel\n")
+            self.assertFalse(provenance_output.exists())
+
+    def _assert_quarantine(self, result: dict, code: str) -> None:
+        self.assertEqual(result["decision"], verifier.DECISION_QUARANTINE, result)
+        self.assertEqual(result["code"], code, result)
+
+    def test_pushed_layer_digest_diff_is_invalid_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _make_oci(tmp)
+            pushed = copy.deepcopy(fixture["oci"])
+            pushed["layers"][0]["digest"] = "sha256:" + "0" * 64
+            fixture["pushed_path"].write_text(
+                json.dumps(pushed, sort_keys=True),
+                encoding="utf-8",
+            )
+            result = self._verify(fixture, tmp, expected_attestations=0)
+            self._assert_quarantine(result, verifier.VerifyErrorCode.INVALID_MANIFEST)
+
+    def test_canonical_manifest_bytes_mismatch_is_invalid_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _make_oci(tmp)
+            Path(fixture["resolved"]["canonical_manifest"]).write_bytes(b"{}\n")
+            result = self._verify(fixture, tmp, expected_attestations=0)
+            self._assert_quarantine(result, verifier.VerifyErrorCode.INVALID_MANIFEST)
+
+    def test_failed_signature_stops_before_attestation_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _make_oci(tmp)
+            result = self._verify(fixture, tmp, tamper="signature")
+            self._assert_quarantine(result, verifier.VerifyErrorCode.VERIFY_FAILED)
+            self.assertEqual([call[1] for call in self.cosign_calls], ["verify"])
+
+    def test_wrong_certificate_identity_or_issuer_is_missing_input(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _make_oci(tmp)
+            cases = (
+                {"certificate_identity": "https://github.com/example/untrusted/workflow@main"},
+                {"certificate_oidc_issuer": "https://issuer.example.test"},
+            )
+            for overrides in cases:
+                with self.subTest(**overrides):
+                    result = self._verify(
+                        fixture,
+                        tmp,
+                        expected_verify=0,
+                        expected_attestations=0,
+                        **overrides,
+                    )
+                    self._assert_quarantine(result, verifier.VerifyErrorCode.MISSING_INPUT)
+                    self.assertEqual(self.cosign_calls, [])
+
+    def test_digest_and_quarantine_release_conflicts_are_digest_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _make_oci(tmp)
+            cases = (
+                {
+                    "name": "identical_refs",
+                    "overrides": {"artifact_ref": fixture["backend_ref"]},
+                },
+                {
+                    "name": "identical_digests",
+                    "overrides": {
+                        "artifact_ref": fixture["artifact_ref"].replace(
+                            fixture["artifact_digest"],
+                            fixture["backend_digest"],
+                        )
+                    },
+                },
+                {
+                    "name": "backend_ref_digest_mismatch",
+                    "overrides": {"backend_digest": "sha256:" + "a" * 64},
+                },
+                {
+                    "name": "release_bundle_with_quarantine_backend",
+                    "overrides": {
+                        "artifact_ref": fixture["artifact_ref"].replace(
+                            "/plugins-quarantine/",
+                            "/plugins/",
+                        )
+                    },
+                },
+                {
+                    "name": "release_backend_with_quarantine_bundle",
+                    "overrides": {
+                        "backend_ref": fixture["backend_ref"].replace(
+                            "/plugins-quarantine/",
+                            "/plugins/",
+                        )
+                    },
+                },
+            )
+            for case in cases:
+                with self.subTest(case=case["name"]):
+                    result = self._verify(
+                        fixture,
+                        tmp,
+                        expected_verify=0,
+                        expected_attestations=0,
+                        **case["overrides"],
+                    )
+                    self._assert_quarantine(result, verifier.VerifyErrorCode.DIGEST_CONFLICT)
+                    self.assertEqual(self.cosign_calls, [])
+
+    def test_missing_capability_grant_has_concrete_incompatible_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _make_oci(tmp)
+            result = self._verify(fixture, tmp, granted_capabilities=("cache",))
+            self._assert_quarantine(result, verifier.VerifyErrorCode.INCOMPATIBLE)
+            self.assertIn("capability_grant", result["reason"])
+            self.assertIn("objects", result["reason"])
+            failed = [item for item in result["checks"] if not item["ok"]]
+            self.assertEqual([item["name"] for item in failed], ["gate:capability_grant"])
+            evidence = result["quarantine_evidence"]
+            self.assertEqual(evidence["code"], verifier.VerifyErrorCode.INCOMPATIBLE)
+            self.assertEqual(evidence["checks"], result["checks"])
+
+    def test_empty_platform_version_has_concrete_incompatible_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _make_oci(tmp)
+            result = self._verify(fixture, tmp, platform_version="")
+            self._assert_quarantine(result, verifier.VerifyErrorCode.INCOMPATIBLE)
+            failed = {item["name"] for item in result["checks"] if not item["ok"]}
+            self.assertEqual(failed, {"gate:platform_version", "gate:min_platform_version"})
+            self.assertIn("platform_version", result["reason"])
+            self.assertIn("min_platform_version", result["reason"])
+            evidence = result["quarantine_evidence"]
+            self.assertEqual(evidence["code"], verifier.VerifyErrorCode.INCOMPATIBLE)
+            self.assertEqual(evidence["checks"], result["checks"])
+
+    def test_provenance_config_source_uri_or_sha1_tamper_is_invalid_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _make_oci(tmp)
+            for tamper in ("provenance_uri", "provenance_sha1"):
+                with self.subTest(tamper=tamper):
+                    result = self._verify(fixture, tmp, tamper=tamper)
+                    self._assert_quarantine(result, verifier.VerifyErrorCode.INVALID_EVIDENCE)
+
+    def test_bundle_sbom_missing_required_checksum_is_invalid_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _make_oci(tmp)
+            result = self._verify(fixture, tmp, tamper="bundle_sbom_checksums")
+            self._assert_quarantine(result, verifier.VerifyErrorCode.INVALID_EVIDENCE)
+            self.assertIn("bundle", result["reason"])
+
+    def test_bundle_provenance_wrong_build_type_is_invalid_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _make_oci(tmp)
+            result = self._verify(fixture, tmp, tamper="bundle_provenance_build_type")
+            self._assert_quarantine(result, verifier.VerifyErrorCode.INVALID_EVIDENCE)
+            self.assertIn("bundle", result["reason"])
+
+    def test_empty_attestation_stdout_is_invalid_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _make_oci(tmp)
+            result = self._verify(fixture, tmp, tamper="empty_attestation")
+            self._assert_quarantine(result, verifier.VerifyErrorCode.INVALID_EVIDENCE)
+            self.assertEqual(
+                [call[1] for call in self.cosign_calls],
+                ["verify", "verify", "verify-attestation"],
+            )
+
+
+class SbomVersionContractTests(unittest.TestCase):
+    def _validate_version(self, kind: str, version: str | None) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _make_oci(tmp)
+            if kind == "backend":
+                predicate, _ = _backend_predicates(tmp, fixture)
+                ref = fixture["backend_ref"]
+            elif kind == "bundle":
+                predicate, _ = builder.build_bundle_evidence(
+                    fixture["source"],
+                    fixture["oci"],
+                    fixture["artifact_digest"],
+                    "ne-tort/agentscale",
+                    fixture["source_sha"],
+                    fixture["builder_id"],
+                    "run-1",
+                )
+                ref = fixture["artifact_ref"]
+            else:
+                raise ValueError(f"unknown evidence kind: {kind}")
+            if version is None:
+                predicate.pop("spdxVersion", None)
+            else:
+                predicate["spdxVersion"] = version
+            verifier._validate_sbom_predicate(
+                predicate,
+                kind=kind,
+                ref=ref,
+                source_repository="ne-tort/agentscale",
+                source_sha=fixture["source_sha"],
+                manifest_digest=fixture["oci"]["config"]["digest"],
+            )
+
+    def test_native_backend_accepts_spdx_2_2_and_2_3(self) -> None:
+        for version in ("SPDX-2.2", "SPDX-2.3"):
+            with self.subTest(version=version):
+                self._validate_version("backend", version)
+
+    def test_self_generated_bundle_rejects_spdx_2_2(self) -> None:
+        with self.assertRaises(verifier.VerifyError) as denied:
+            self._validate_version("bundle", "SPDX-2.2")
+        self.assertEqual(denied.exception.code, verifier.VerifyErrorCode.INVALID_EVIDENCE)
+
+    def test_missing_and_unsupported_spdx_versions_are_rejected(self) -> None:
+        for kind in ("backend", "bundle"):
+            for version in (None, "SPDX-2.1", "SPDX-3.0"):
+                with self.subTest(kind=kind, version=version):
+                    with self.assertRaises(verifier.VerifyError) as denied:
+                        self._validate_version(kind, version)
+                    self.assertEqual(
+                        denied.exception.code,
+                        verifier.VerifyErrorCode.INVALID_EVIDENCE,
+                    )
 
 
 class WorkflowStaticTests(unittest.TestCase):
@@ -515,6 +900,108 @@ class WorkflowStaticTests(unittest.TestCase):
         self.assertIn('"$CI_DIR/plugin_publication.py" publish', self.release)
         self.assertNotIn("if: ${{ false }}", self.release)
         self.assertNotIn("backend contract exists", self.release)
+
+    def test_release_job_excludes_pr_events_and_scopes_write_permissions(self) -> None:
+        import yaml
+
+        workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+        jobs = workflow["jobs"]
+        self.assertIn("dry-run", jobs)
+        self.assertIn("release", jobs)
+        self.assertEqual(jobs["release"]["permissions"]["packages"], "write")
+        self.assertEqual(jobs["release"]["permissions"]["id-token"], "write")
+        for permission in ("packages", "id-token"):
+            self.assertNotEqual(workflow.get("permissions", {}).get(permission), "write")
+        for job_name, job in jobs.items():
+            if job_name == "release":
+                continue
+            with self.subTest(job=job_name):
+                permissions = job.get("permissions", {})
+                self.assertNotEqual(permissions.get("packages"), "write")
+                self.assertNotEqual(permissions.get("id-token"), "write")
+        release_if = jobs["release"]["if"]
+        self.assertIn("github.event_name != 'pull_request'", release_if)
+        self.assertIn("github.event_name != 'pull_request_target'", release_if)
+        self.assertIs(workflow["concurrency"]["cancel-in-progress"], False)
+        for job_name in ("dry-run", "release"):
+            with self.subTest(timeout_job=job_name):
+                timeout = jobs[job_name]["timeout-minutes"]
+                self.assertIsInstance(timeout, int)
+                self.assertNotIsInstance(timeout, bool)
+                self.assertGreater(timeout, 0)
+
+    def test_release_verifies_require_nonempty_protected_inputs(self) -> None:
+        for step_name in (
+            "Verify signatures and all evidence before any release write",
+            "Reverify actual release refs and copied referrers",
+        ):
+            with self.subTest(step=step_name):
+                self.assertEqual(self.release.count(step_name), 1)
+        for environment_variable in ("PLATFORM_VERSION", "PLUGIN_GRANTED_CAPABILITIES"):
+            with self.subTest(environment_variable=environment_variable):
+                self.assertEqual(
+                    self.release.count(
+                        environment_variable + ': ${{ vars.' + environment_variable + " || '' }}"
+                    ),
+                    2,
+                )
+                flag = (
+                    "--platform-version"
+                    if environment_variable == "PLATFORM_VERSION"
+                    else "--granted-capabilities"
+                )
+                self.assertEqual(
+                    self.release.count(flag + ' "$' + environment_variable + '"'),
+                    2,
+                )
+        guard = '[[ -n "$PLATFORM_VERSION" && -n "$PLUGIN_GRANTED_CAPABILITIES" ]] || {'
+        self.assertEqual(self.release.count(guard), 1)
+        self.assertLess(self.release.index(guard), self.release.index("id: promote"))
+
+    def test_push_and_pr_paths_cover_plugin_code_workflow_and_tests(self) -> None:
+        import yaml
+
+        workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+        expected_paths = {
+            "packages/plugins/**",
+            ".github/workflows/plugin-artifacts.yml",
+            ".github/scripts/plugin_*.py",
+            "apps/api/tests/unit/plugins/test_ci_plugin_*.py",
+        }
+        triggers = workflow.get("on", workflow.get(True))
+        for trigger in ("push", "pull_request"):
+            with self.subTest(trigger=trigger):
+                self.assertLessEqual(expected_paths, set(triggers[trigger]["paths"]))
+
+    def test_offline_stdlib_modules_are_discovered_once_they_exist(self) -> None:
+        start = self.dry.index("- name: Run stdlib focused and module contract tests")
+        step = self.dry[start : self.dry.index("- name: Diagnose runner egress", start)]
+        loop = re.search(r"for TEST_FILE in ([^;]+); do", step)
+        self.assertIsNotNone(loop)
+        discovered = set(loop.group(1).split())
+        # Promotion discovery already has a dedicated regression in
+        # test_ci_plugin_promotion.py; do not duplicate it here.
+        modules = (
+            "supply_chain",
+            "publication",
+            "network",
+            "archive_safety",
+            "resume",
+            "release_evidence",
+        )
+        for module in modules:
+            with self.subTest(module=module):
+                test_path = (
+                    ROOT / "apps" / "api" / "tests" / "unit" / "plugins"
+                    / f"test_ci_plugin_{module}.py"
+                )
+                self.assertTrue(
+                    not test_path.is_file() or f"test_ci_plugin_{module}.py" in discovered,
+                    f"{test_path} exists but is not discovered",
+                )
+        self.assertIn(
+            'if [[ -f "$SOURCE_DIR/apps/api/tests/unit/plugins/$TEST_FILE" ]]', step
+        )
 
 class DockerfileBaseArgResolution(unittest.TestCase):
     """FROM ${ARG} — штатная форма; отвергать её значит ломать корректный Dockerfile."""
@@ -721,7 +1208,7 @@ class WorkflowDockerConfigPath(unittest.TestCase):
         self.assertIn(assignment, run)
         self.assertIn(check, run)
         self.assertLess(run.index(assignment), run.index(check))
-        self.assertLess(run.index(check), run.index('plugin_publication.py" publish'))
+        self.assertLess(run.index(check), run.index('plugin_release_evidence.py"'))
 
 
 class WorkflowProvenanceIdentity(unittest.TestCase):
@@ -759,8 +1246,8 @@ class WorkflowProvenanceIdentity(unittest.TestCase):
         self.assertIn("provenance builder identity mismatch", verify)
         self.assertIn("provenance source URI mismatch", verify)
         self.assertIn("provenance source SHA mismatch", verify)
-        self.assertIn("wrong backend provenance buildType", verify)
-        self.assertIn("wrong bundle provenance buildType", verify)
+        self.assertIn("wrong {kind} provenance buildType", verify)
+        self.assertIn("expected_build_type", verify)
         self.assertIn("SLSA v0.2 invocation.parameters are missing", verify)
 
 class WorkflowBundlePushPaths(unittest.TestCase):

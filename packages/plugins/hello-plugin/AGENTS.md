@@ -141,7 +141,12 @@
   Mirror создан через `oras copy --recursive` из Docker Hub; digest совпадает
   (проверено `imagetools inspect`). Пустое значение, tag-only или другая база
   запрещены. Debian sources переводятся на HTTPS перед `apt-get update`,
-  потому что VM может достать CDN по HTTPS, но не по HTTP.
+  потому что VM может достать CDN по HTTPS, но не по HTTP. Общий
+  `python-base` stage до первого сетевого RUN идемпотентно добавляет
+  `precedence ::ffff:0:0/96 100` в `/etc/gai.conf` самого образа: RUN-шаги
+  BuildKit читают gai.conf образа, а не хоста, поэтому pip/apt/curl сборки
+  предпочитают IPv4 при unreachable IPv6. IPv6 не отключается. Это
+  статический контракт репозитория, live-сборка на VM не подтверждена.
   `LIQUIBASE_VERSION` закреплена на `4.24.0`, а `LIQUIBASE_SHA256` обязан
   совпасть с скачанным tar.gz до распаковки.
   Наблюдённое значение для `v4.24.0` (два независимых скачивания дали одинаковый

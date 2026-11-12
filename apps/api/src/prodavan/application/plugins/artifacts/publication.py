@@ -8,6 +8,13 @@ the current artifact registry publish. This module reads a durable administrativ
 PluginPublicationApproval, never creates CapabilityGrant, never performs
 install/deploy, and never trusts caller
 capability claims.
+
+B3 idempotent exact replay: when the approval is already consumed but the
+registry holds the exact same PUBLISHED source binding (plugin/version/digest,
+refs, canonical fingerprint, CI metadata, signer trust), the retry returns the
+same PUBLISHED response contract instead of APPROVAL_CONSUMED. All earlier
+source/OIDC/OCI/canonical/scope gates still run; no second verification,
+registry/lifecycle write or approval mutation happens on that path.
 """
 
 from __future__ import annotations
@@ -24,13 +31,6 @@ from urllib.parse import urlsplit
 import httpx
 
 from prodavan.application.dynamic_app_registry.contracts import RegistryOutcome
-from prodavan.application.plugins.artifacts.oci import is_valid_digest, parse_oci_ref
-from prodavan.application.plugins.artifacts.oidc import GITHUB_ACTIONS_ISSUER
-from prodavan.application.plugins.artifacts.oidc import GitHubActionsClaims
-from prodavan.application.plugins.artifacts.oidc import OidcValidationError
-from prodavan.application.plugins.artifacts.registry import PluginArtifactRegistry
-from prodavan.application.plugins.artifacts.registry import PublicationMetadata
-from prodavan.application.plugins.artifacts.verification import ArtifactVerifier
 from prodavan.application.plugins.admin.contracts import (
     CapabilityGrantRecord,
     PluginInstanceRecord,
@@ -41,16 +41,19 @@ from prodavan.application.plugins.admin.ports import (
     InstanceStorePort,
     PublicationApprovalReaderPort,
 )
+from prodavan.application.plugins.artifacts.oci import OciArtifactRef, is_valid_digest, parse_oci_ref
+from prodavan.application.plugins.artifacts.oidc import GITHUB_ACTIONS_ISSUER, GitHubActionsClaims, OidcValidationError
+from prodavan.application.plugins.artifacts.registry import PluginArtifactRegistry, PublicationMetadata
+from prodavan.application.plugins.artifacts.verification import ArtifactVerifier, manifest_fingerprint
 from prodavan.application.plugins.sources.ports import ModuleSourceRepositoryPort
 from prodavan.application.plugins.sources.repository import ModuleSourceRepositoryError
-from prodavan.application.plugins.sources.types import ModuleSource
-from prodavan.application.plugins.sources.types import ModuleSourceStatus
+from prodavan.application.plugins.sources.types import ModuleSource, ModuleSourceStatus
 from prodavan.domain.plugins.helpers import plugin_instance_id_for
 from prodavan.domain.plugins.scopes import validate_plugin_instance_scopes
 from prodavan.domain.plugins.types import (
+    PLUGIN_ID_PATTERN,
     POD_SCOPE_MAX_LENGTH,
     POD_SCOPE_PATTERN,
-    PLUGIN_ID_PATTERN,
     SEMVER_PATTERN,
     PluginManifest,
 )
@@ -835,6 +838,21 @@ class PluginCiPublicationService:
                 tuple(canonical_manifest["capabilities"]),
             )
         except _ApprovalError as exc:
+            if exc.code is PublicationErrorCode.APPROVAL_CONSUMED:
+                # B3: a late CI retry/rerun of the exact same already PUBLISHED
+                # digest is an idempotent replay, not a new publication. Serve
+                # it instead of the consumed rejection, before the verifier and
+                # any registry write. Every identity mismatch, partial record or
+                # non-PUBLISHED state keeps the original typed 422 unchanged.
+                replay = await self._exact_published_replay(
+                    command,
+                    source=source,
+                    bundle_ref=bundle_ref,
+                    backend_ref=backend_ref,
+                    canonical_manifest=canonical_manifest,
+                )
+                if replay is not None:
+                    return replay
             return PublicationResponse.quarantined(command, exc.code.value)
 
         try:
@@ -942,6 +960,65 @@ class PluginCiPublicationService:
         if record.capabilities != manifest_capabilities:
             raise _ApprovalError(PublicationErrorCode.APPROVAL_BINDING_MISMATCH)
         return record
+
+    async def _exact_published_replay(
+        self,
+        command: ArtifactPublicationCommand,
+        *,
+        source: ModuleSource,
+        bundle_ref: OciArtifactRef,
+        backend_ref: OciArtifactRef,
+        canonical_manifest: Mapping[str, Any],
+    ) -> PublicationResponse | None:
+        """Idempotent success for an exact retry of a PUBLISHED digest (B3).
+
+        Runs only when the consumed-approval gate fired, i.e. after every
+        source/OIDC/run-url/OCI/canonical/scope gate has already passed for
+        this request. The stored record must reproduce the full immutable
+        binding: plugin/version/digest, digest-pinned bundle and backend refs,
+        canonical manifest fingerprint (covers capabilities and every signed
+        manifest field), CI source metadata (source id binds company/plugin,
+        commit sha) and the persisted signer identity/issuer trust. run_url is
+        deliberately not compared: a rerun has a new run, while the digest
+        already pins commit_sha and both image refs.
+
+        Fail-closed: any deviation, missing/partial record or non-PUBLISHED
+        status returns None so the original typed APPROVAL_CONSUMED error
+        stands. A registry read failure quarantines as REGISTRY_UNAVAILABLE.
+        The consumed approval is never rewritten or revived, and this path
+        performs no registry, lifecycle or approval writes.
+        """
+        try:
+            record = await self._registry.get_async(command.plugin_id, command.version)
+        except Exception:
+            return PublicationResponse.quarantined(
+                command,
+                PublicationErrorCode.REGISTRY_UNAVAILABLE,
+            )
+        if record is None:
+            return None
+        publication = record.publication
+        verification = record.verification
+        if (
+            record.plugin_id == command.plugin_id
+            and record.version == command.version
+            and record.digest == command.bundle_digest
+            and record.image_ref == bundle_ref.image_ref()
+            and record.published
+            and record.outcome is RegistryOutcome.APPLIED
+            and record.quarantine is None
+            and verification is not None
+            and verification.identity == source.expected_signer_identity
+            and verification.issuer == GITHUB_ACTIONS_ISSUER
+            and publication is not None
+            and publication.source_id == source.id
+            and publication.commit_sha == command.commit_sha
+            and publication.backend_digest == command.backend_digest
+            and publication.backend_image_ref == backend_ref.image_ref()
+            and record.manifest_fingerprint == manifest_fingerprint(canonical_manifest)
+        ):
+            return PublicationResponse.published(command)
+        return None
 
     @staticmethod
     def _run_url_matches(

@@ -43,6 +43,37 @@ def ensure_ipv4_egress_preference(path: Path = GAI_CONF) -> None:
     )
 
 
+APT_ROOT = Path("/etc/apt")
+UBUNTU_HTTP_MIRRORS = ("archive.ubuntu.com", "security.ubuntu.com")
+
+
+def ensure_apt_sources_https(apt_root: Path = APT_ROOT) -> None:
+    """Point existing Ubuntu apt sources at HTTPS before the first update.
+
+    CI egress on this VM blocks plain HTTP (first observed with
+    deb.debian.org), while Ubuntu 24.04 deb822 defaults still use
+    http://archive.ubuntu.com. Rewrite only the scheme of the Ubuntu mirror
+    hosts in source files that already exist. Signature verification stays
+    enabled, no repositories are added and non-Ubuntu hosts are untouched.
+    Idempotent: https entries match nothing and unchanged files are not
+    rewritten, so re-running bootstrap is safe.
+    """
+    source_files = [apt_root / "sources.list"]
+    sources_d = apt_root / "sources.list.d"
+    if sources_d.is_dir():
+        source_files.extend(sorted(sources_d.glob("*.list")))
+        source_files.extend(sorted(sources_d.glob("*.sources")))
+    for path in source_files:
+        if not path.is_file():
+            continue
+        original = path.read_text(encoding="utf-8")
+        updated = original
+        for host in UBUNTU_HTTP_MIRRORS:
+            updated = updated.replace(f"http://{host}", f"https://{host}")
+        if updated != original:
+            path.write_text(updated, encoding="utf-8")
+
+
 def sh(cmd: str) -> None:
     print(f"+ {cmd}")
     subprocess.run(["bash", "-c", cmd], check=True)
@@ -56,6 +87,9 @@ def run(args: list[str]) -> None:
 def main() -> None:
     print("==> getaddrinfo: prefer IPv4 for runner egress")
     ensure_ipv4_egress_preference()
+
+    print("==> apt sources: Ubuntu mirrors over HTTPS (plain HTTP blocked)")
+    ensure_apt_sources_https()
 
     print("==> apt base packages")
     sh(

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
-from datetime import UTC, datetime
 import importlib.util
-from pathlib import Path
+import json
 import sys
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -14,11 +16,8 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-
 from prodavan.application.plugins.artifacts import oidc as oidc_module
-from prodavan.application.plugins.artifacts.oidc import GitHubActionsOidcValidator
-from prodavan.application.plugins.artifacts.oidc import OidcErrorCode
-from prodavan.application.plugins.artifacts.oidc import OidcValidationError
+from prodavan.application.plugins.artifacts.oidc import GitHubActionsOidcValidator, OidcErrorCode, OidcValidationError
 from prodavan.application.plugins.sources.types import ModuleSource, ModuleSourceStatus
 
 NOW = 1_800_000_000
@@ -60,8 +59,15 @@ def key_material() -> tuple[Any, dict[str, Any]]:
 
 
 class FakeJwks:
-    def __init__(self, *documents: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        *documents: dict[str, Any],
+        failures: dict[int, Exception] | None = None,
+        yield_control: bool = False,
+    ) -> None:
         self.documents = documents
+        self.failures = failures or {}
+        self.yield_control = yield_control
         self.calls = 0
         self.urls: list[str] = []
 
@@ -69,6 +75,11 @@ class FakeJwks:
         self.urls.append(url)
         index = min(self.calls, len(self.documents) - 1)
         self.calls += 1
+        if self.yield_control:
+            await asyncio.sleep(0)
+        failure = self.failures.get(self.calls)
+        if failure is not None:
+            raise failure
         return self.documents[index]
 
 
@@ -142,8 +153,10 @@ async def test_valid_oidc_binds_source_and_lazy_jwks(
     validator = _validator(fetcher)
     assert fetcher.calls == 0, "constructing the validator must not perform network/JWKS I/O"
 
+    token_claims = _claims()
+    token_claims["event_name"] = "workflow_call"
     claims = await validator.validate_for_source(
-        _token(key),
+        _token(key, token_claims),
         source=_source(),
         commit_sha=COMMIT,
         ref="refs/heads/main",
@@ -153,26 +166,95 @@ async def test_valid_oidc_binds_source_and_lazy_jwks(
     assert claims.run_id == "99"
     assert fetcher.calls == 1
 
-    await validator.validate(_token(key))
+    await validator.validate(_token(key, token_claims))
     assert fetcher.calls == 1, "fresh cached JWKS must be reused"
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("event_name", ["push", "workflow_dispatch", "workflow_call"])
-async def test_supported_release_events_bind_full_sha_workflow(
-    key_material: tuple[Any, dict[str, Any]], event_name: str
+async def test_reusable_workflow_call_binds_full_sha_workflow(
+    key_material: tuple[Any, dict[str, Any]],
 ) -> None:
     key, jwk = key_material
     claims = _claims()
-    claims["event_name"] = event_name
+    claims["event_name"] = "workflow_call"
     validated = await _validator(FakeJwks({"keys": [jwk]})).validate_for_source(
         _token(key, claims),
         source=_source(),
         commit_sha=COMMIT,
         ref="refs/heads/main",
     )
-    assert validated.event_name == event_name
+    assert validated.event_name == "workflow_call"
     assert validated.job_workflow_ref == WORKFLOW
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("event_name", "full_name", "workflow"),
+    [
+        ("push", "ne-tort/example", WORKFLOW),
+        ("workflow_dispatch", "ne-tort/example", WORKFLOW),
+        ("workflow_call", "ne-tort/agentscale", DIRECT_WORKFLOW),
+    ],
+)
+async def test_event_must_match_workflow_identity_kind(
+    key_material: tuple[Any, dict[str, Any]],
+    event_name: str,
+    full_name: str,
+    workflow: str,
+) -> None:
+    key, jwk = key_material
+    source = _source(full_name=full_name, workflow=workflow)
+    claims = _claims()
+    claims.update(
+        repository=source.full_name,
+        event_name=event_name,
+        job_workflow_ref=workflow,
+    )
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(FakeJwks({"keys": [jwk]})).validate_for_source(
+            _token(key, claims),
+            source=source,
+            commit_sha=COMMIT,
+            ref=source.expected_ref,
+        )
+    assert caught.value.code is OidcErrorCode.INVALID_CLAIM
+    assert caught.value.claim == "job_workflow_ref"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("event_name", "full_name", "source_workflow", "token_workflow"),
+    [
+        ("workflow_call", "ne-tort/agentscale", DIRECT_WORKFLOW, WORKFLOW),
+        ("workflow_call", "ne-tort/example", WORKFLOW, DIRECT_WORKFLOW),
+        ("push", "ne-tort/agentscale", DIRECT_WORKFLOW, WORKFLOW),
+        ("push", "ne-tort/example", WORKFLOW, DIRECT_WORKFLOW),
+    ],
+)
+async def test_workflow_source_mismatch_is_denied_before_mode_matrix(
+    key_material: tuple[Any, dict[str, Any]],
+    event_name: str,
+    full_name: str,
+    source_workflow: str,
+    token_workflow: str,
+) -> None:
+    key, jwk = key_material
+    source = _source(full_name=full_name, workflow=source_workflow)
+    claims = _claims()
+    claims.update(
+        repository=source.full_name,
+        event_name=event_name,
+        job_workflow_ref=token_workflow,
+    )
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(FakeJwks({"keys": [jwk]})).validate_for_source(
+            _token(key, claims),
+            source=source,
+            commit_sha=COMMIT,
+            ref=source.expected_ref,
+        )
+    assert caught.value.code is OidcErrorCode.SOURCE_BINDING_MISMATCH
+    assert caught.value.claim == "job_workflow_ref"
 
 
 @pytest.mark.asyncio
@@ -364,6 +446,20 @@ async def test_future_iat_and_nbf_are_denied(key_material: tuple[Any, dict[str, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("claim", ["exp", "iat", "nbf"])
+async def test_huge_numeric_date_is_typed_invalid_claim(
+    key_material: tuple[Any, dict[str, Any]], claim: str
+) -> None:
+    key, jwk = key_material
+    claims = _claims()
+    claims[claim] = 10**400
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(FakeJwks({"keys": [jwk]})).validate(_token(key, claims))
+    assert caught.value.code is OidcErrorCode.INVALID_CLAIM
+    assert caught.value.claim == claim
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("event_name", ["push", "workflow_dispatch", "workflow_call"])
 @pytest.mark.parametrize("protected", [True, "false", "1"])
 async def test_ref_protected_must_be_github_true_string_for_every_event(
@@ -408,6 +504,332 @@ async def test_expired_cache_is_refetched(key_material: tuple[Any, dict[str, Any
     ticks[0] = 11.0
     await validator.validate(_token(key))
     assert fetcher.calls == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "kty_oct",
+        "private_d",
+        "use_enc",
+        "duplicate_kid",
+        "key_ops_sign",
+        "alg_outside_allowlist",
+        "empty_keys",
+    ],
+)
+async def test_malicious_or_empty_jwks_is_unavailable(
+    key_material: tuple[Any, dict[str, Any]], mutation: str
+) -> None:
+    key, jwk = key_material
+    candidate = dict(jwk)
+    document: dict[str, Any] = {"keys": [candidate]}
+    if mutation == "kty_oct":
+        candidate["kty"] = "oct"
+    elif mutation == "private_d":
+        candidate["d"] = "private-key-material"
+    elif mutation == "use_enc":
+        candidate["use"] = "enc"
+    elif mutation == "duplicate_kid":
+        document = {"keys": [candidate, dict(candidate)]}
+    elif mutation == "key_ops_sign":
+        candidate["key_ops"] = ["sign"]
+    elif mutation == "alg_outside_allowlist":
+        candidate["alg"] = "RS512"
+    elif mutation == "empty_keys":
+        document = {"keys": []}
+    else:
+        raise AssertionError(f"unknown JWKS mutation: {mutation}")
+
+    fetcher = FakeJwks(document)
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(fetcher).validate(_token(key))
+    assert caught.value.code is OidcErrorCode.JWKS_UNAVAILABLE
+    assert fetcher.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_unknown_kid_is_denied_after_exactly_one_refresh(
+    key_material: tuple[Any, dict[str, Any]],
+) -> None:
+    key, jwk = key_material
+    fetcher = FakeJwks({"keys": [jwk]})
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(fetcher).validate(_token(key, kid="kid-absent"))
+    assert caught.value.code is OidcErrorCode.UNKNOWN_KEY
+    assert fetcher.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_kid_algorithm_mismatch_is_denied_without_fallback(
+    key_material: tuple[Any, dict[str, Any]],
+) -> None:
+    key, jwk = key_material
+    mismatched_jwk = dict(jwk)
+    mismatched_jwk["alg"] = "RS512"
+    fetcher = FakeJwks({"keys": [mismatched_jwk]})
+    validator = GitHubActionsOidcValidator(
+        audience=AUDIENCE,
+        jwks_fetcher=fetcher,
+        clock=lambda: NOW,
+        allowed_algorithms=frozenset({"RS256", "RS512"}),
+    )
+    with pytest.raises(OidcValidationError) as caught:
+        await validator.validate(_token(key))
+    assert caught.value.code is OidcErrorCode.UNKNOWN_KEY
+    assert fetcher.calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kid", "expected_code"),
+    [
+        (None, OidcErrorCode.UNKNOWN_KEY),
+        (17, OidcErrorCode.TOKEN_MALFORMED),
+        ("x" * 257, OidcErrorCode.UNKNOWN_KEY),
+    ],
+)
+async def test_missing_nonstring_or_oversized_kid_is_denied_before_fetch(
+    key_material: tuple[Any, dict[str, Any]], kid: Any, expected_code: OidcErrorCode
+) -> None:
+    key, jwk = key_material
+    # PyJWT validates its own header before signing, so malformed/non-string
+    # kid values are encoded manually: the validator must reject them before
+    # JWKS I/O, without relying on a signature that is already valid.
+    header = {"alg": "RS256", "typ": "JWT"}
+    if kid is not None:
+        header["kid"] = kid
+    encoded_header = base64.urlsafe_b64encode(
+        json.dumps(header, separators=(",", ":")).encode("ascii")
+    ).rstrip(b"=").decode("ascii")
+    signed = jwt.encode(_claims(), key, algorithm="RS256")
+    token = f"{encoded_header}.{signed.split('.', 1)[1]}"
+    fetcher = FakeJwks({"keys": [jwk]})
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(fetcher).validate(token)
+    assert caught.value.code is expected_code
+    assert fetcher.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_wrong_signature_with_same_kid_is_denied(
+    key_material: tuple[Any, dict[str, Any]],
+) -> None:
+    key, jwk = key_material
+    other_key, _ = _key("kid-1")
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(FakeJwks({"keys": [jwk]})).validate(
+            _token(other_key, kid="kid-1")
+        )
+    assert caught.value.code is OidcErrorCode.INVALID_SIGNATURE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"exp": NOW + 10, "iat": NOW + 10, "nbf": NOW - 20},
+        {"exp": NOW, "iat": NOW + 10, "nbf": NOW - 20},
+        {"exp": NOW + 10, "iat": NOW - 10, "nbf": NOW + 10},
+        {"exp": NOW + 10, "iat": NOW - 10, "nbf": NOW + 20},
+    ],
+)
+async def test_invalid_numeric_date_order_is_typed_invalid_claim(
+    key_material: tuple[Any, dict[str, Any]], overrides: dict[str, int]
+) -> None:
+    key, jwk = key_material
+    claims = _claims()
+    claims.update(overrides)
+    validator = GitHubActionsOidcValidator(
+        audience=AUDIENCE,
+        jwks_fetcher=FakeJwks({"keys": [jwk]}),
+        clock=lambda: NOW,
+        leeway_seconds=30,
+    )
+    with pytest.raises(OidcValidationError) as caught:
+        await validator.validate(_token(key, claims))
+    assert caught.value.code is OidcErrorCode.INVALID_CLAIM
+    assert caught.value.claim == "exp"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claim", ["exp", "iat", "nbf"])
+@pytest.mark.parametrize("value", [True, "1800000000", float("nan")])
+async def test_bool_string_and_nan_numeric_dates_are_typed_invalid_claims(
+    key_material: tuple[Any, dict[str, Any]], claim: str, value: Any
+) -> None:
+    key, jwk = key_material
+    claims = _claims()
+    claims[claim] = value
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(FakeJwks({"keys": [jwk]})).validate(_token(key, claims))
+    assert caught.value.code is OidcErrorCode.INVALID_CLAIM
+    assert caught.value.claim == claim
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claim", ["job_workflow_ref", "sha"])
+async def test_missing_required_source_claim_is_token_malformed(
+    key_material: tuple[Any, dict[str, Any]], claim: str
+) -> None:
+    key, jwk = key_material
+    claims = _claims()
+    claims.pop(claim)
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(FakeJwks({"keys": [jwk]})).validate(_token(key, claims))
+    assert caught.value.code is OidcErrorCode.TOKEN_MALFORMED
+
+
+@pytest.mark.asyncio
+async def test_nonstring_repository_id_is_denied(
+    key_material: tuple[Any, dict[str, Any]],
+) -> None:
+    key, jwk = key_material
+    claims = _claims()
+    claims["repository_id"] = 123456
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(FakeJwks({"keys": [jwk]})).validate(_token(key, claims))
+    assert caught.value.code is OidcErrorCode.INVALID_CLAIM
+    assert caught.value.claim == "repository_id"
+
+
+@pytest.mark.asyncio
+async def test_single_element_audience_list_is_accepted(
+    key_material: tuple[Any, dict[str, Any]],
+) -> None:
+    key, jwk = key_material
+    claims = _claims()
+    claims["aud"] = [AUDIENCE]
+    validated = await _validator(FakeJwks({"keys": [jwk]})).validate(
+        _token(key, claims)
+    )
+    assert validated.sha == COMMIT
+
+
+@pytest.mark.asyncio
+async def test_short_commit_is_denied_before_token_or_jwks_io(
+    key_material: tuple[Any, dict[str, Any]],
+) -> None:
+    key, jwk = key_material
+    fetcher = FakeJwks({"keys": [jwk]})
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(fetcher).validate_for_source(
+            _token(key),
+            source=_source(),
+            commit_sha="c" * 39,
+            ref="refs/heads/main",
+        )
+    assert caught.value.code is OidcErrorCode.INVALID_CLAIM
+    assert caught.value.claim == "sha"
+    assert fetcher.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_fetch_failure_is_not_cached_and_retry_succeeds(
+    key_material: tuple[Any, dict[str, Any]],
+) -> None:
+    key, jwk = key_material
+    fetcher = FakeJwks(
+        {"keys": [jwk]},
+        failures={1: httpx.ConnectError("temporary JWKS outage")},
+    )
+    validator = _validator(fetcher)
+    token = _token(key)
+    with pytest.raises(OidcValidationError) as caught:
+        await validator.validate(token)
+    assert caught.value.code is OidcErrorCode.JWKS_UNAVAILABLE
+
+    claims = await validator.validate(token)
+    assert claims.sha == COMMIT
+    assert fetcher.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_concurrent_cold_start_fetches_jwks_once(
+    key_material: tuple[Any, dict[str, Any]],
+) -> None:
+    key, jwk = key_material
+    fetcher = FakeJwks({"keys": [jwk]}, yield_control=True)
+    validator = _validator(fetcher)
+    token = _token(key)
+    results = await asyncio.gather(*(validator.validate(token) for _ in range(8)))
+    assert [claims.sha for claims in results] == [COMMIT] * 8
+    assert fetcher.calls == 1
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"audience": ""},
+        {"audience": " agentscale-plugin-ci "},
+        {"jwks_url": "http://token.actions.githubusercontent.com/.well-known/jwks"},
+        {"allowed_algorithms": frozenset()},
+        {"allowed_algorithms": frozenset({"HS256"})},
+        {"allowed_algorithms": frozenset({"none"})},
+        {"allowed_algorithms": frozenset({"ROT13"})},
+        {"cache_ttl_seconds": 0},
+        {"leeway_seconds": -1},
+        {"leeway_seconds": 31},
+    ],
+)
+def test_unsafe_constructor_configuration_is_rejected(overrides: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        GitHubActionsOidcValidator(**overrides)
+
+
+@pytest.mark.asyncio
+async def test_denial_messages_redact_token_jwk_and_upstream_body(
+    key_material: tuple[Any, dict[str, Any]],
+) -> None:
+    key, jwk = key_material
+    malformed = "not-a-jwt-with-secret-token-material"
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(FakeJwks({"keys": [jwk]})).validate(malformed)
+    assert malformed not in str(caught.value)
+
+    private_jwk = dict(jwk)
+    private_jwk["d"] = "secret-jwk-private-material"
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(FakeJwks({"keys": [private_jwk]})).validate(_token(key))
+    assert private_jwk["d"] not in str(caught.value)
+
+    upstream_body = "secret-upstream-response-body"
+    fetcher = FakeJwks(
+        {"keys": [jwk]},
+        failures={1: ValueError(upstream_body)},
+    )
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(fetcher).validate(_token(key))
+    assert upstream_body not in str(caught.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "token",
+    [None, 17, "", "   ", "not-a-jwt", "a.b", "a.b.c.d"],
+)
+async def test_malformed_token_shapes_are_denied_before_fetch(
+    key_material: tuple[Any, dict[str, Any]], token: Any
+) -> None:
+    _, jwk = key_material
+    fetcher = FakeJwks({"keys": [jwk]})
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(fetcher).validate(token)
+    assert caught.value.code is OidcErrorCode.TOKEN_MALFORMED
+    assert fetcher.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_whitespace_wrapped_valid_token_is_denied_before_fetch(
+    key_material: tuple[Any, dict[str, Any]],
+) -> None:
+    key, jwk = key_material
+    fetcher = FakeJwks({"keys": [jwk]})
+    with pytest.raises(OidcValidationError) as caught:
+        await _validator(fetcher).validate(f"  {_token(key)}  ")
+    assert caught.value.code is OidcErrorCode.TOKEN_MALFORMED
+    assert fetcher.calls == 0
 
 
 def test_import_does_not_construct_http_client_or_fetch_jwks(

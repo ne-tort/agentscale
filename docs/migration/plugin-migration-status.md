@@ -14,6 +14,57 @@ origin/CSP handoff changes; historical independent audit относился к H
 > Наличие production factories, integration tests или real adapter classes не
 > является live readiness, live evidence или человеческим разрешением на deploy.
 
+## Release addendum 2026-11-12 — не acceptance и не публикация
+
+- Историческая база поставки: PR **#339–#359** влиты в `main`; известный
+  baseline — `415adf14`. Датированные disposable/offline доказательства ниже
+  (включая 2026-11-10) остаются историей и не выдаются за свежий прогон.
+- Release run **43144913547** дошёл до **release verify** и остановился на
+  `INVALID_EVIDENCE`: фактический cosign predicate содержал
+  `metadata.buildInvocationID`, а verifier принимал только
+  `metadata.buildInvocationId`. Локальный fix разрешает оба написания и требует
+  непустое run identity, но **успешного main run после него ещё нет**.
+- Поэтому **verify/promote/reverify/publication успешными не заявляются**:
+  фактического successful run evidence нет, platform POST/`PUBLISHED` не
+  объявляется.
+- Локально выявлены и исправляются, но **не проверены и не опубликованы**:
+  native BuildKit SPDX-2.2 compatibility; cosign tag-based promotion
+  signature/attestation после ORAS recursive copy; migrations symlink fail-closed
+  staging; image-level IPv4 preference; bounded downloads/git; Ubuntu apt HTTPS.
+- **B2 same-commit resume statically implemented:** release preflight резолвит
+  exact quarantine refs `sha-$GITHUB_SHA` для backend/bundle; both absent →
+  обычный first-run build; both present → `plugin_quarantine_resume.py`
+  восстанавливает raw manifest/config blob с сохранением exact digest pair
+  (offline digest/config/canonical/annotation checks); partial state и
+  transient/auth/network ошибки — fail-closed без rebuild; пять
+  build/evidence/sign steps пропускаются только при resume,
+  `quarantine_verify` не пропускается никогда; promote/reverify/publish
+  общие. Operator flow: exact digest pair в step summary → durable approval на
+  этот exact digest → rerun того же commit → resume → publication.
+  **Успешный live rerun/publication НЕ подтверждён.**
+- **B4 pre-promotion evidence statically implemented и integrated в workflow,
+  UNVERIFIED live:** `plugin_release_evidence.py` (pinned Trivy по exact
+  quarantine backend digest + static-origin CSP по exact bundle digest ДО
+  release GHCR write/promote, bounded JSON snapshot, без OIDC/POST/registry
+  write) вызывается отдельным шагом `Verify independent release evidence before
+  promotion` после `quarantine_verify` и до `id: promote`;
+  `publish --release-evidence` повторно валидирует snapshot после release
+  verify без повторного scanner/CSP до POST. Guard
+  `IndependentEvidenceBeforeReleaseWriteTests` больше не намеренно RED:
+  ordering требует evidence ДО promote, no-write guard ограничен рамками
+  evidence-шага. Успешный CI run и live publication не заявлены.
+- **B3:** exact `PUBLISHED` replay идемпотентен ТОЛЬКО для exact immutable
+  binding (source/plugin/version/digest pair/evidence); любой другой digest
+  требует нового durable approval и replay'ем не покрывается.
+- **B1 remains open:** protected static-origin provisioning и доставка exact
+  bundle digest на origin не выполнены workflow; без них CSP-проба fail-closed
+  останавливает publication (`CSP_EVIDENCE_REQUIRED`/`CSP_ORIGIN_HTTP_ERROR`/
+  `CSP_SECURITY_HEADERS_FAILED`/`CSP_ARTIFACT_BINDING_MISMATCH`).
+- Live VM host `gai.conf` **не применён** из-за отсутствия доступа; полную
+  сетевую стабильность объявлять нельзя.
+- Действует verification freeze: новые тесты написаны, но намеренно не запущены.
+  **STOP-SHIP, live production unverified и prod untouched сохраняются.**
+
 ## Текущая static implementation — не acceptance
 
 | Область | Что видно в текущем коде | Граница утверждения |
@@ -47,7 +98,7 @@ origin/CSP handoff changes; historical independent audit относился к H
 | **Event delivery ownership + Kafka assignment fence** | `_event_delivery_claims` подключает `RedisDeliveryClaimStore` через shared `event_redis`/`redis_client` без in-memory default. Typed `ConsumerAssignment` проверяется при record ownership, после wake и непосредственно перед handler, во время lease heartbeat/renew и перед completion/commit; missing/mismatched assignment отклоняется без backend/ACK/DLQ, uncertain side effects не подтверждаются. Mandatory after-wake rebalance scenario без xfail проверяет stale denial и recovery через нового owner. | Real disposable Redpanda + PostgreSQL + Redis + localhost backend: **16 collected / 16 passed / 0 skipped**, complete gate `KAFKA_PLUGIN_ACCEPTANCE_REQUIRE_COMPLETE=1` ([JUnit](../../reports/module-audit/kafka/junit-final.xml), [summary](../../reports/module-audit/kafka/acceptance-summary.json)); targeted Kafka adapter units — **23 passed** ([JUnit](../../reports/module-audit/kafka/unit-kafka-adapters.xml)). Mandatory after-wake scenario без xfail подтвердил typed stale denial с zero backend/commit/DLQ и owner-only recovery с ровно одним real 2xx/commit ([rebalance evidence](../../reports/module-audit/kafka/rebalance-evidence.log)). Live SealedSecret/K8s wake и production configuration остаются blockers. |
 | **Objects STS async post-probe + canary** | `objects.scoped_credentials` остаётся typed-unwired по умолчанию: `sts_probe_enabled=false`, config flags не дают availability. `MinioSts.probe` делает bounded async AssumeRole с canary-only session policy: unconditioned `s3:ListBucket` только на dedicated configured probe bucket и `s3:GetObject` только на fixed canary key, без tenant data/Put/Delete/foreign buckets; credentials отбрасываются и сохраняется только success timestamp; `_probe_lock` даёт singleflight, freshness/retry/revalidation и close/error инвалидируют доступ. Fixed canary после fix требует dedicated provisioned bucket (`HeadBucket=200`) и fixed zero-byte object (`HEAD=200`, `ContentLength=0`). `NoSuchBucket`/`NoSuchKey`/ambiguous `404` или response остаются unwired. Foreign-key `HEAD` и foreign `ListBucket` обязаны быть `403`. Standalone worker не является отдельным consumer gate и это не pass. | Real disposable MinIO: **29 collected / 29 passed / 0 failed / 0 errors / 0 skipped** ([JUnit](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/minio-plugin-acceptance-junit.xml), [summary](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/summary.json)); targeted MinIO units — **230 passed**. STS TTL 900..3600, canary-only HeadBucket=200/fixed HEAD=200+zero, foreign HEAD/List=403 и tenant unscoped List denial подтверждены; missing 403/404 остаются unwired. API/Gateway lifespan и live production остаются unverified; presign/static fallback запрещён. |
 | **Objects exact-key presign + strict SigV4** | Typed `objects.presign` принимает полный exact key в server-derived `tenant-<company>` + `module-<plugin>/` scope, только GET/PUT/HEAD и TTL 60..3600. Adapter отклоняет wildcard/traversal/encoded scope escape и проверяет bucket/key в URL. Query authentication обязана содержать ровно шесть однозначных SigV4 fields: `X-Amz-Algorithm`, `X-Amz-Credential`, `X-Amz-Date`, `X-Amz-Expires`, `X-Amz-SignedHeaders`, `X-Amz-Signature`; unknown/case-variant/repeated/session-token fields, невалидные algorithm/date/credential scope/signature и неточный TTL отклоняются. `X-Amz-Secret-Key` и `AWSAccessKeyId` явно отклоняются как credential leak. `MinioPresigner` передаёт exact `HttpMethod` и подписывает отдельным principal, не admin. URL возвращается только авторизованному caller и не копируется в audit; `objects.scoped_credentials` остаётся STS-only. | Real disposable MinIO IAM/method/key/expiry и strict six-field validation подтверждены в составе **29/29 passed, 0 skipped** ([JUnit](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/minio-plugin-acceptance-junit.xml)); presigner isolation и no-signature/no-secret logs проверены. Revocation и production/live остаются pending. |
-| **CI publication** | Release использует protected environment `vars.PLUGIN_PLATFORM_PUBLICATION_CONFIG`, а не caller `source_id`/capabilities/approval booleans. После release reverify запускается pinned Trivy scan фактического release backend и HEAD protected static-origin: проверяются configured security headers/CSP и `X-AgentScale-Bundle-Digest` равный release bundle digest. Только затем получается GitHub OIDC token и выполняется authenticated `POST /internal/plugin-artifacts`. | Workflow/scripts есть, но protected live inputs и успешный run отсутствуют в evidence. Missing config/scanner/static-origin/OIDC input остаётся blocker; никакой platform POST или PUBLISHED результат не заявляется. |
+| **CI publication** | Release использует protected environment `vars.PLUGIN_PLATFORM_PUBLICATION_CONFIG`, а не caller `source_id`/capabilities/approval booleans. Evidence-first контракт: `plugin_release_evidence.py` (pre-promotion pinned Trivy по exact quarantine backend digest + HEAD protected static-origin с configured security headers/CSP и exact `X-AgentScale-Bundle-Digest`, bounded JSON snapshot, без OIDC/POST/registry write) → promote → `release_verify` → `publish --release-evidence` (повторная валидация snapshot, затем GitHub OIDC token и authenticated `POST /internal/plugin-artifacts` без повторного scanner/CSP). B2 same-commit resume preflight восстанавливает exact digest pair из уже подписанных quarantine artifacts без rebuild; quarantine_verify обязателен всегда. | Workflow/scripts integrated локально: evidence собирается отдельным шагом ДО `id: promote`, publish после release_verify переиспользует snapshot через `--release-evidence`; guard `IndependentEvidenceBeforeReleaseWriteTests` больше не намеренно RED, но это UNVERIFIED static integration, а не успешный run. Release run **43144913547** (актуализация 2026-11-12) дошёл до release verify и остановился на `INVALID_EVIDENCE` из-за `buildInvocationID`; локальный fix ещё не дал successful main run. Protected live inputs, успешный post-fix run, live resume rerun и publication не подтверждены; никакой platform POST или PUBLISHED результат не заявляется. |
 | **Real acceptance harnesses — PostgreSQL/Redis/K8s/Kafka/MinIO done; entrypoint not run** | `tests/migration/plugin_postgres` содержит upgrades до `2026110909`, xact lock и rollback cycles; `redis_plugin_acceptance` — MCP NX/jobs/quota; `kafka_plugin_acceptance` — signed events/rebalance; `minio_plugin_acceptance` — STS/presign/expiry; `tests/e2e/k8s/plugin_acceptance` — real TokenRequest/Deployment/SecretProjection; `entrypoint_acceptance` — два uvicorn + standalone Celery worker и real PostgreSQL/Redis/Mongo/Kafka/MinIO/K8s. Точные package-specific `--confcutdir`, early `-p` и required env собраны в [invocation contracts](#real-harness-invocation-contracts--не-acceptance). | K8s harness выполнен 2026-11-10 на fresh disposable kind v1.37.0: **19 collected / 19 passed / 0 skipped** ([fix-report](../../reports/module-audit/k8s/fix-report.md), [JUnit](../../reports/module-audit/k8s/plugin-k8s-junit-fixed-rerun.xml)); targeted runtime units — **101 passed**. Kafka/Redpanda harness выполнен на disposable resources: **16 collected / 16 passed / 0 skipped** ([JUnit](../../reports/module-audit/kafka/junit-final.xml), [summary](../../reports/module-audit/kafka/acceptance-summary.json)); targeted units — **23 passed** ([JUnit](../../reports/module-audit/kafka/unit-kafka-adapters.xml)). PostgreSQL plugin_postgres 2026-11-10: **27 collected / 27 passed / 0 skipped**; Redis redis_plugin_acceptance: **22 collected / 22 passed / 0 skipped** ([JUnit PG](../../reports/module-audit/postgres-redis/plugin-postgres-junit.xml), [JUnit Redis](../../reports/module-audit/postgres-redis/redis-plugin-acceptance-junit.xml), [summary](../../reports/module-audit/postgres-redis/summary.md), [SHA256](../../reports/module-audit/postgres-redis/sha256-manifest.json)). Entrypoint harness code/scenarios **не запускались**, их collected/JUnit/live evidence отсутствует. MinIO выполнен: **29 collected / 29 passed / 0 skipped** ([JUnit](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/minio-plugin-acceptance-junit.xml), [summary](../../reports/module-audit/minio/mpa-sts900-20261110t070710z-3a2675d3/summary.json)); targeted MinIO units — **230 passed**. `PLUGIN_JOB_DECLARATIONS`, real SealedSecret, CI/hello build/new signed bundle и live STS остаются blockers. |
 | **Pods + secret delivery** | Optional `pods.allowlist` содержит 1..256 exact `{plugin_instance_id, project_id, job_id}` tuples; omitted declaration не даёт pod access. Optional `secret_delivery` имеет только `mode: k8s_secret` и 1..256 canonical `vault://`/`file://` refs. Отдельный per-instance delivery Secret имеет hashed `SECRET_*` keys, value-version digests, ownership/CAS/exact-set reconcile; Deployment монтирует его read-only `0400` в `/var/run/agentscale/capability-secrets`, а cleanup отзывает refs и удаляет только owned delivery Secret. | Это не четырёхключевой runtime Secret и не plaintext в manifest. Disposable K8s acceptance подтвердил delivery/rotation/revoke/delete и RBAC ([JUnit](../../reports/module-audit/k8s/plugin-k8s-junit-fixed-rerun.xml)); pods execution остаётся pending. Hello не объявляет `pods` или `secret_delivery`. |
 | **Legacy dynamic host cleanup** | Host-only web files удалены как **завершённый static cleanup**. Сохранены renderer/schema/protocol/policy/registry-client и dynamic-app inventory; `PRESERVED_DYNAMIC_GUARDS` и `legacy-host-import-graph.test.ts` запрещают возврат host modules/imports и охраняют current plugin path. | Guards не запускались; это не browser/live acceptance и не разрешение declarative DB cutover/removal. |
@@ -202,7 +253,10 @@ integration runs на реальном составе, затем воспрои
     consumer gate неприменим и не evidence;
 14. CI publication: protected config/source mapping, pinned Trivy release report,
     static-origin CSP+digest evidence и фактический OIDC POST только после release
-    verify с точным platform response. Для shell handoff требуется новый signed
+    verify с точным platform response. На 2026-11-12 release run **43144913547**
+    остановился на release verify (`INVALID_EVIDENCE`, `buildInvocationID`);
+    successful post-fix main run, promote/reverify и фактический platform POST/
+    `PUBLISHED` не подтверждены. Для shell handoff требуется новый signed
     hello bundle с handoff consumer и matching bundle/backend digests; старый
     artifact, hello build без нового bundle или отсутствующие live/CI inputs
     остаются blockers;
