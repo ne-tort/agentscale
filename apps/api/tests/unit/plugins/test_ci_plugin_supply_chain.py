@@ -743,6 +743,26 @@ class WorkflowProvenanceIdentity(unittest.TestCase):
         )
         self.assertNotIn("--provenance=mode=max --sbom", run)
 
+    def test_provenance_run_identity_is_required_under_either_camel_spelling(self) -> None:
+        """SLSA builders spell the run key differently; the verifier must accept
+        either canonical camelCase form but never treat a missing/empty run
+        identity as verified evidence."""
+
+        verify = (ROOT / ".github" / "scripts" / "plugin_verify.py").read_text(encoding="utf-8")
+        self.assertIn('metadata.get("buildInvocationId")', verify)
+        self.assertIn('metadata.get("buildInvocationID")', verify)
+        self.assertIn("provenance run identity is missing", verify)
+        # Пустое значение под любым из ключей не должно считаться валидным run identity.
+        self.assertNotIn('metadata.get("buildInvocationId", "")', verify)
+        self.assertNotIn('metadata.get("buildInvocationID", "")', verify)
+        # Не ослабляем остальные проверки provenance.
+        self.assertIn("provenance builder identity mismatch", verify)
+        self.assertIn("provenance source URI mismatch", verify)
+        self.assertIn("provenance source SHA mismatch", verify)
+        self.assertIn("wrong backend provenance buildType", verify)
+        self.assertIn("wrong bundle provenance buildType", verify)
+        self.assertIn("SLSA v0.2 invocation.parameters are missing", verify)
+
 class WorkflowBundlePushPaths(unittest.TestCase):
     def test_bundle_file_references_are_relative_to_the_prepare_parent(self) -> None:
         """ORAS rejects absolute file refs; keep path validation enabled instead."""
