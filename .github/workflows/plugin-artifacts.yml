@@ -102,7 +102,7 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
-      packages: none
+      packages: read
       id-token: none
     outputs:
       plugin_dir: ${{ steps.inputs.outputs.plugin_dir }}
@@ -261,6 +261,15 @@ jobs:
             https://fulcio.sigstore.dev/api/v1/signingCert || true
           echo '== docker info network =='
           docker info --format '{{json .DriverStatus}}' || true
+
+      - name: Login to GHCR for base mirror (read-only)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Base mirror is a private GHCR package; the token grants read only.
+          # No registry writes happen in this dry-run job.
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
       - name: Create fresh ephemeral builder and build locally without push
         id: local_build

@@ -467,7 +467,7 @@ caller-параметров. Полный список — ровно эти д�
 
 | Переменная | Зачем | Формат |
 |---|---|---|
-| `PLUGIN_PYTHON_BASE_IMAGE` | база backend-образа | `python:3.13-slim@sha256:<64 hex>` |
+| `PLUGIN_PYTHON_BASE_IMAGE` | база backend-образа | `python:3.13-slim@sha256:<64 hex>` или GHCR mirror с тем же digest |
 | `PLUGIN_LIQUIBASE_SHA256` | контрольная сумма архива Liquibase | `<64 hex>` |
 | `PLUGIN_BUILDKIT_IMAGE` | driver buildx | `moby/buildkit:v<semver>@sha256:<64 hex>` |
 | `PLUGIN_COSIGN_2_4_1_LINUX_AMD64_SHA256` | контрольная сумма cosign | `<64 hex>` |

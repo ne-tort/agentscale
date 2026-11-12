@@ -13,8 +13,8 @@ ARG PYTHON_BASE_IMAGE
 FROM ${PYTHON_BASE_IMAGE} AS python-base
 ARG PYTHON_BASE_IMAGE
 RUN set -eu; \
-    if ! printf '%s\n' "${PYTHON_BASE_IMAGE:-}" | grep -Eq '^python:3\.13-slim@sha256:[0-9a-f]{64}$'; then \
-        printf '%s\n' 'FATAL: PYTHON_BASE_IMAGE must be python:3.13-slim@sha256:<64 lowercase hex>; no tag-only or empty base is allowed.' >&2; \
+    if ! printf '%s\n' "${PYTHON_BASE_IMAGE:-}" | grep -Eq '^(python|ghcr.io/ne-tort/python):3\.13-slim@sha256:[0-9a-f]{64}$'; then \
+        printf '%s\n' 'FATAL: PYTHON_BASE_IMAGE must be python or ghcr.io/ne-tort/python:3.13-slim@sha256:<64 lowercase hex>.' >&2; \
         exit 1; \
     fi
 
@@ -49,6 +49,14 @@ RUN set -eu; \
         printf '%s\n' 'FATAL: LIQUIBASE_SHA256 must contain the verified lowercase SHA256 of liquibase-4.24.0.tar.gz.' >&2; \
         exit 1; \
     fi; \
+    # The VM can reach the Debian CDN over HTTPS but not plain HTTP.
+    # Convert debian.org URLs before any package operation instead of failing
+    # on port 80 with 'connection timed out'.
+    for file in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do \
+        if [ -f "$file" ]; then \
+            sed -i 's|http://deb.debian.org|https://deb.debian.org|g' "$file"; \
+        fi; \
+    done; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl; \
     rm -rf /var/lib/apt/lists/*; \
@@ -74,6 +82,11 @@ ENV LIQUIBASE_HOME=/opt/liquibase \
 # JRE нужен только Liquibase. /bin/sh необходим контейнерному entrypoint;
 # curl и другие download tools в runtime не копируются и не устанавливаются.
 RUN set -eu; \
+    for file in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do \
+        if [ -f "$file" ]; then \
+            sed -i 's|http://deb.debian.org|https://deb.debian.org|g' "$file"; \
+        fi; \
+    done; \
     apt-get update; \
     apt-get install -y --no-install-recommends default-jre-headless ca-certificates; \
     rm -rf /var/lib/apt/lists/*; \

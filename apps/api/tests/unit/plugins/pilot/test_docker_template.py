@@ -49,9 +49,9 @@ def test_docker_has_no_mutable_syntax_or_tag_only_base() -> None:
     assert "FROM ${PYTHON_BASE_IMAGE} AS python-base" in instructions
     assert not re.search(r"(?m)^FROM\s+python:", instructions)
     assert not re.search(r"(?im)^FROM\s+\S*:latest(?:\s|$)", instructions)
-    # Проверка входного ARG — regex полного tag+digest, без fallback.
-    assert "^python:3\\.13-slim@sha256:[0-9a-f]{64}$" in instructions
-    assert "no tag-only or empty base is allowed" in instructions
+    # Digest-pinned base: Docker Hub или content-identical GHCR mirror.
+    assert "^(python|ghcr.io/ne-tort/python):3\\.13-slim@sha256:[0-9a-f]{64}$" in instructions
+    assert "PYTHON_BASE_IMAGE must be python or ghcr.io/ne-tort/python" in instructions
 
 
 def test_liquibase_requires_checksum_before_unpack_and_never_pipes_to_shell() -> None:
