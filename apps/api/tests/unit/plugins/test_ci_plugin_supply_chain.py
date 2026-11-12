@@ -635,6 +635,36 @@ class WorkflowBundlePushPaths(unittest.TestCase):
             self.assertIn(relative, run)
         self.assertNotIn("--disable-path-validation", run)
 
+class WorkflowProvenanceIdentity(unittest.TestCase):
+    def test_backend_provenance_accepts_both_invocation_id_casings(self) -> None:
+        """The real cosign attestation carries buildInvocationID (capital ID)."""
+
+        predicate = {
+        "buildType": "https://agentscale.dev/plugin-backend-buildx/v1",
+        "builder": {"id": "https://github.com/ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@refs/heads/main"},
+        "invocation": {
+            "configSource": {
+                "uri": "git+https://github.com/ne-tort/agentscale@" + "1" * 40,
+                "digest": {"sha1": "1" * 40},
+            },
+            "parameters": {"buildxProvenance": {"builder": {"id": "x"}, "buildType": "y"}},
+        },
+        "metadata": {},
+    }
+        kwargs = dict(
+            kind="backend",
+            source_repository="ne-tort/agentscale",
+            source_sha="1" * 40,
+            builder_identity="ne-tort/agentscale/.github/workflows/plugin-artifacts.yml@refs/heads/main",
+            manifest_digest="sha256:" + "0" * 64,
+        )
+        with self.assertRaises(verifier.VerifyError):
+            verifier._validate_provenance_predicate(predicate, **kwargs)
+        predicate["metadata"]["buildInvocationId"] = "run-1"
+        verifier._validate_provenance_predicate(predicate, **kwargs)
+        predicate["metadata"] = {"buildInvocationID": "run-1"}
+        verifier._validate_provenance_predicate(predicate, **kwargs)
+
 if __name__ == "__main__":
     unittest.main()
 

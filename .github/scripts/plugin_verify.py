@@ -396,7 +396,8 @@ def _validate_provenance_predicate(
         raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "provenance source URI mismatch")
     if source.get("digest", {}).get("sha1") != source_sha:
         raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "provenance source SHA mismatch")
-    if not predicate.get("metadata", {}).get("buildInvocationId"):
+    metadata = predicate.get("metadata", {})
+    if not (metadata.get("buildInvocationId") or metadata.get("buildInvocationID")):
         raise VerifyError(VerifyErrorCode.INVALID_EVIDENCE, "provenance run identity is missing")
     internal = predicate.get("invocation", {}).get("parameters")
     if not isinstance(internal, dict):
