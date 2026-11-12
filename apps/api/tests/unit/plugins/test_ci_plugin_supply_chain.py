@@ -471,9 +471,10 @@ class WorkflowStaticTests(unittest.TestCase):
         cls.release = cls.workflow[cls.workflow.index("  release:") :]
 
     def test_pr_has_no_writes_or_persistent_credentials(self) -> None:
-        self.assertIn("packages: none", self.dry)
+        # Dry-run may read from the GHCR base mirror, never write to a registry.
+        self.assertIn("packages: read", self.dry)
         self.assertIn("id-token: none", self.dry)
-        for value in ("docker login", "oras push", "--push", "packages: write", "id-token: write"):
+        for value in ("oras push", "--push", "packages: write", "id-token: write"):
             self.assertNotIn(value, self.dry)
         self.assertNotIn("agentscale-ci", self.workflow)
         self.assertNotIn("GHCR_PUSH_TOKEN", self.workflow)

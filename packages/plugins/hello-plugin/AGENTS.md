@@ -135,10 +135,15 @@
 
 ## 8. Воспроизводимая сборка: текущий fail-closed blocker
 
-- `PYTHON_BASE_IMAGE` обязан быть полным
-  `python:3.13-slim@sha256:<64 lowercase hex>`; пустое значение, tag-only или
-  другая база запрещены. `LIQUIBASE_VERSION` закреплена на `4.24.0`, а
-  `LIQUIBASE_SHA256` обязан совпасть с скачанным tar.gz до распаковки.
+- `PYTHON_BASE_IMAGE` обязан быть digest-pinned reference: либо
+  `python:3.13-slim@sha256:<64 lowercase hex>`, либо content-identical mirror
+  `ghcr.io/ne-tort/python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90`.
+  Mirror создан через `oras copy --recursive` из Docker Hub; digest совпадает
+  (проверено `imagetools inspect`). Пустое значение, tag-only или другая база
+  запрещены. Debian sources переводятся на HTTPS перед `apt-get update`,
+  потому что VM может достать CDN по HTTPS, но не по HTTP.
+  `LIQUIBASE_VERSION` закреплена на `4.24.0`, а `LIQUIBASE_SHA256` обязан
+  совпасть с скачанным tar.gz до распаковки.
   Наблюдённое значение для `v4.24.0` (два независимых скачивания дали одинаковый
   hash): `6ecf638a75b501b798189da824e167f29db93477186109f2549508c6266d0b2a`.
   Официального `*.sha256` в релизе **нет**, поэтому это проверенная

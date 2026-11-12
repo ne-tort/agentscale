@@ -189,10 +189,11 @@ def test_builder_uses_canonical_plugin_id_and_semver_grammar() -> None:
 
 def test_pr_dry_run_has_no_registry_or_oidc_write_capability() -> None:
     _, dry, _ = _workflow_sections()
-    assert "packages: none" in dry
+    # Dry-run может читать private GHCR base mirror, но не имеет write-capabilities.
+    assert "packages: read" in dry
     assert "id-token: none" in dry
     for forbidden in (
-        "packages: write", "id-token: write", "docker login", "oras push",
+        "packages: write", "id-token: write", "oras push",
         "cosign sign", "--push", "GHCR_PUSH_TOKEN", "agentscale-ci",
     ):
         assert forbidden not in dry

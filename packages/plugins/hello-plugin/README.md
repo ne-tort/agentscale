@@ -44,7 +44,8 @@ webhook → update/rollback. Все такие проверки остаются
 Текущий Dockerfile нельзя считать готовым воспроизводимым build path. Для
 разблокировки требуются три независимо проверенных входа:
 
-1. полный multi-arch digest базового `python:3.13-slim@sha256:<64 hex>`;
+1. полный multi-arch digest базового `python:3.13-slim@sha256:<64 hex>` или
+   content-identical mirror `ghcr.io/ne-tort/python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90`;
 2. подтверждённый SHA256 официального `liquibase-4.24.0.tar.gz`;
 3. полный reviewed `backend/requirements.lock` со всеми direct/transitive
    версиями, markers и hashes для pip `--require-hashes --no-deps`.
