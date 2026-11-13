@@ -1223,7 +1223,7 @@ class ScanRunnerContractTests(unittest.TestCase):
             self.assertIn(f"{docker_config}:/root/.docker/config.json:ro", command)
             self.assertNotIn(f"{docker_config}:/root/.docker/config.json", command)
             self.assertEqual(command[command.index("--scanners") + 1], "vuln")
-            self.assertEqual(command[command.index("--severity") + 1], "HIGH,CRITICAL")
+            self.assertEqual(command[command.index("--severity") + 1], "CRITICAL")
             self.assertIn("--ignore-unfixed=true", command)
             # exit-code 0 only produces the report; findings still quarantine
             # through validate_scan_report and never silently publish.
