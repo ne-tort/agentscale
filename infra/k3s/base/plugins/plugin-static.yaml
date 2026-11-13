@@ -20,10 +20,12 @@
 #   /internal/plugin-static/v1/bundles/{plugin_id}/{version}/{bundle_digest}/ready
 # prodavan.main_plugin_static реально digest-верифицирует OCI manifest,
 # canonical config JSON и frontend tar.gz из quarantine GHCR (release fallback)
-# через HttpxOciArtifactLoader + GhcrRegistryAuthorizer; успешный ответ несёт
-# server-owned StaticResponsePolicy-заголовки. /health/ready — configured-gate:
-# 200 только при composed loader+policy, иначе typed 503. Отсутствие
-# auth/digest-свидетельства = NotReady (fail-closed), а не «ready по умолчанию».
+# через HttpxOciArtifactLoader + авторизатор (GitHub App preferred; dev-only
+# fallback — см. PLUGIN_STATIC_GHCR_DOCKER_CONFIG_PATH ниже); успешный ответ
+# несёт server-owned StaticResponsePolicy-заголовки. /health/ready —
+# configured-gate: 200 только при composed loader+policy, иначе typed 503.
+# Отсутствие auth/digest-свидетельства = NotReady (fail-closed), а не «ready
+# по умолчанию».
 #
 # GitHub App registry_read auth: используются ТИПИРОВАННЫЕ настройки
 # PLUGIN_MODULE_SOURCE_* из prodavan/config/settings.py. В Git НЕТ ни ключа,
@@ -78,8 +80,10 @@ data:
   # managed-установку (PLUGIN_MODULE_SOURCE_GITHUB_APP_ID,
   # PLUGIN_MODULE_SOURCE_GITHUB_APP_INSTALLATION_ID, template/trust значения)
   # dev-патчем ОДНОВРЕМЕННО с запечатанным ключом
-  # (plugin-module-source-github-app.sealed.yaml.example). Отсутствие валидной
-  # конфигурации = typed 503 на readiness/evidence, а не «работа без auth».
+  # (plugin-module-source-github-app.sealed.yaml.example). Пока полный managed
+  # контур отсутствует, допустим ТОЛЬКО явный read-only dockerconfigjson
+  # fallback ниже; без пути и при недопустимом auth — typed 503, без
+  # anonymous-чтения приватных пакетов.
   PLUGIN_MODULE_SOURCE_ENABLED: "false"
   # Не-секретная часть registry_read: организация App = владелец GHCR-реестра.
   PLUGIN_MODULE_SOURCE_GITHUB_APP_ORGANIZATION: "ne-tort"
@@ -92,6 +96,11 @@ data:
   # задаёт префикс реестра артефактов, а не расширяет allowlist.
   PLUGIN_OCI_REGISTRY: "ghcr.io/ne-tort/plugins"
   PLUGIN_ARTIFACT_PIN_MODE: "digest"
+  # Dev fallback: путь к КОНФИГУРАЦИИ, не секретное значение. Значение
+  # монтируется из Secret ghcr-pull ниже как config.json. Приложение читает
+  # файл на каждый запрос и не кладёт dockerconfigjson в env/логи. Значение
+  # не активирует fallback без полного отсутствия GitHub App managed config.
+  PLUGIN_STATIC_GHCR_DOCKER_CONFIG_PATH: "/var/run/secrets/ghcr-pull/config.json"
   # Секретов здесь НЕТ И НЕ БУДЕТ: PLUGIN_MODULE_SOURCE_GITHUB_APP_*_SECRET_REF
   # придёт env'ом Deployment (k8s-secret:// REF), приватный ключ — только
   # смонтированным SealedSecret'ом. ConfigMap читается любым субъектом
@@ -180,6 +189,12 @@ spec:
             - name: github-app-private-key
               mountPath: /var/run/secrets/plugin-module-source-github-app
               readOnly: true
+            # Явно смонтированный существующий read-only GHCR dockerconfigjson
+            # (тот же Secret, что imagePullSecrets). Он НЕ становится env и
+            # не расширяет права: adapter принимает только auths.ghcr.io.auth.
+            - name: ghcr-pull-config
+              mountPath: /var/run/secrets/ghcr-pull
+              readOnly: true
           startupProbe:
             httpGet:
               path: /health/live
@@ -236,6 +251,19 @@ spec:
             items:
               - key: private-key
                 path: private-key
+        # Существующий dockerconfigjson Secret переиспользуется ТОЛЬКО как
+        # файловая монтирование с проекцией .dockerconfigjson -> config.json.
+        # optional: true сохраняет старт dev-пода, fallback продолжает быть
+        # fail-closed при отсутствии/невалидности auth. imagePullSecrets не
+        # используется как источник env.
+        - name: ghcr-pull-config
+          secret:
+            secretName: ghcr-pull
+            defaultMode: 0440
+            optional: true
+            items:
+              - key: .dockerconfigjson
+                path: config.json
 ---
 apiVersion: v1
 kind: Service

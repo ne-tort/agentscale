@@ -8,6 +8,8 @@ kubectl и Git. Контур B1 — CI evidence, НЕ публичный browser
   readOnlyRootFilesystem, явные probes/resources;
 * GitHub App registry_read auth ТОЛЬКО через k8s-secret:// REF смонтированного
   SealedSecret'а — никаких inline-ключей/PAT/литералов секретов;
+* dev fallback — существующий Secret ghcr-pull только как readOnly-файл
+  config.json и путь в ConfigMap; dockerconfigjson никогда не становится env;
 * egress NP: kube-dns + внешний TCP 443 (api.github.com/ghcr.io, hostname-pinning
   в приложении), БЕЗ tenant DB/MinIO/внутренних сервисов;
 * prod-оверлей и Ingress-объекты плагинов к plugin-static не подключены;
@@ -203,6 +205,42 @@ def test_github_app_auth_is_mounted_secret_ref_only() -> None:
     assert not [doc for doc in docs if doc.get("kind") == "Secret"]
 
 
+def test_docker_config_fallback_is_explicit_mounted_file_only() -> None:
+    """ghcr-pull переиспользуется только как read-only файл, а не env."""
+    docs = _static_docs()
+    pod = _one(docs, "Deployment", "plugin-static")["spec"]["template"]["spec"]
+    container = pod["containers"][0]
+
+    # Значение пути — не секрет и приходит через существующий ConfigMap envFrom.
+    assert container["envFrom"] == [
+        {"configMapRef": {"name": "plugin-static-config"}}
+    ]
+    # Dockerconfigjson не проецируется в переменные окружения и secretRef env
+    # не появляется: остаются только REF приватного ключа GitHub App.
+    env_names = [item["name"] for item in container["env"]]
+    assert env_names == ["PLUGIN_MODULE_SOURCE_GITHUB_APP_PRIVATE_KEY_SECRET_REF"]
+    assert not any("ghcr-pull" in str(item) for item in container["env"])
+
+    mounts = {mount["name"]: mount for mount in container["volumeMounts"]}
+    docker_mount = mounts["ghcr-pull-config"]
+    assert docker_mount["mountPath"] == "/var/run/secrets/ghcr-pull"
+    assert docker_mount["readOnly"] is True
+
+    volumes = {volume["name"]: volume for volume in pod["volumes"]}
+    secret_volume = volumes["ghcr-pull-config"]["secret"]
+    assert secret_volume["secretName"] == "ghcr-pull"
+    assert secret_volume["defaultMode"] in (0o440, "0440")
+    assert secret_volume["optional"] is True
+    assert secret_volume["items"] == [
+        {"key": ".dockerconfigjson", "path": "config.json"}
+    ]
+
+    # imagePullSecrets остаётся назначением kubelet, а не источником env/auth;
+    # отдельного Secret-объекта в Git по-прежнему нет.
+    assert pod["imagePullSecrets"] == [{"name": "ghcr-pull"}]
+    assert not [doc for doc in docs if doc.get("kind") == "Secret"]
+
+
 def test_manifest_contains_no_secret_literals_or_tenant_credentials() -> None:
     text = MANIFEST.read_text(encoding="utf-8")
     for forbidden in (
@@ -249,8 +287,12 @@ def test_configmap_keeps_contour_fail_closed_and_digest_pinned() -> None:
         "PLUGIN_MODULE_SOURCE_GITHUB_APP_ORGANIZATION",
         "PLUGIN_OCI_REGISTRY",
         "PLUGIN_ARTIFACT_PIN_MODE",
+        "PLUGIN_STATIC_GHCR_DOCKER_CONFIG_PATH",
         "PLUGIN_SHELL_ORIGIN",
     }
+    assert data["PLUGIN_STATIC_GHCR_DOCKER_CONFIG_PATH"] == (
+        "/var/run/secrets/ghcr-pull/config.json"
+    )
 
 
 def test_service_is_cluster_internal_port_8081() -> None:

@@ -20,11 +20,13 @@ release repository ONLY after a proven 404 there - and answers:
 Composition mirrors the CI publication contour of ``wiring/install.py``:
 ``managed_config_from_settings`` + ``github_app_client_from_settings`` +
 ``ManagedOrganization``/``GitHubAppClient``, with the shared client closed
-on lifespan shutdown. When the trusted GitHub/GHCR configuration is absent
-(dev without the plugin source contour), composition degrades to an
-explicitly unconfigured service: liveness stays up, readiness and the
-evidence route answer typed 503 fail-closed. No new settings defaults are
-introduced; ``PLUGIN_OCI_REGISTRY`` and ``PLUGIN_SHELL_ORIGIN`` are reused.
+on lifespan shutdown. GitHub App remains the preferred registry auth path.
+Only when that managed composition is absent can an explicitly configured
+``PLUGIN_STATIC_GHCR_DOCKER_CONFIG_PATH`` select the read-only mounted
+``ghcr-pull`` dockerconfigjson fallback. Without that path, liveness stays up
+while readiness and evidence answer typed 503 fail-closed. No anonymous auth
+or credential-in-env fallback exists; ``PLUGIN_OCI_REGISTRY`` and
+``PLUGIN_SHELL_ORIGIN`` are reused.
 """
 
 from __future__ import annotations
@@ -32,7 +34,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import Any
+import os
+from typing import Any, Final
 
 import httpx
 from fastapi import FastAPI, Request
@@ -59,6 +62,9 @@ STATIC_EVIDENCE_READY_PATH: str = (
 STATIC_EVIDENCE_SERVICE_STATE: str = "plugin_static_evidence_service"
 STATIC_EVIDENCE_POLICY_STATE: str = "plugin_static_response_policy"
 STATIC_EVIDENCE_GITHUB_LIFESPAN_NAME: str = "plugin-static-github-app"
+PLUGIN_STATIC_GHCR_DOCKER_CONFIG_PATH_ENV: str = (
+    "PLUGIN_STATIC_GHCR_DOCKER_CONFIG_PATH"
+)
 
 _STATUS_BY_CODE: dict[StaticEvidenceErrorCode, int] = {
     StaticEvidenceErrorCode.BUNDLE_NOT_READY: 404,
@@ -68,7 +74,7 @@ _STATUS_BY_CODE: dict[StaticEvidenceErrorCode, int] = {
 
 
 class _StaticGitHubAppLifecycle:
-    """Sole owner of the composed GitHub contour: authorizer, then client."""
+    """Own the registry authorizer and optional GitHub App client."""
 
     __slots__ = ("_client", "_authorizer")
 
@@ -90,7 +96,8 @@ class _StaticGitHubAppLifecycle:
                 await self._authorizer.aclose()
             except Exception:  # noqa: BLE001 - shutdown must reach the client
                 logger.warning("plugin static GHCR authorizer close failed")
-        await self._client.aclose()
+        if self._client is not None:
+            await self._client.aclose()
 
     async def health(self) -> None:
         return None
@@ -200,13 +207,97 @@ class NotFoundAwareOciLoader:
             raise FileNotFoundError(str(exc)) from None
 
 
-def _compose_static_evidence(
-    app_settings: Any,
-) -> tuple[PluginStaticEvidenceService, StaticResponsePolicy, _StaticGitHubAppLifecycle | None]:
-    """Compose loader + authorizer + GitHub client exactly like install.py."""
+def _static_loader(config: StaticEvidenceConfig, authorizer: Any) -> NotFoundAwareOciLoader:
     from prodavan.application.plugins.artifacts.publication import (
         HttpxOciArtifactLoader,
     )
+
+    # Frontend tar.gz blobs exceed the default 1 MiB loader blob cap, so the
+    # frontend cap feeds max_blob_bytes; per-descriptor caps stay enforced.
+    # Only a proven registry 404 becomes an absence signal. Auth failures,
+    # including 401, propagate without anonymous retry or release fallback.
+    return NotFoundAwareOciLoader(
+        HttpxOciArtifactLoader(
+            allowed_registries=("ghcr.io",),
+            max_manifest_bytes=config.max_manifest_bytes,
+            max_blob_bytes=config.max_frontend_layer_bytes,
+            authorizer=authorizer,
+            client_factory=_proven404_client_factory,
+        ),
+    )
+
+
+def _compose_docker_config_fallback(
+    config: StaticEvidenceConfig,
+    policy: StaticResponsePolicy,
+) -> tuple[
+    PluginStaticEvidenceService,
+    StaticResponsePolicy,
+    _StaticGitHubAppLifecycle,
+]:
+    from prodavan.infrastructure.plugins.artifacts.docker_config_auth import (
+        GHCR_DOCKER_CONFIG_ORGANIZATION,
+        GhcrDockerConfigAuthorizer,
+    )
+    from prodavan.infrastructure.plugins.artifacts.ghcr_auth import (
+        GhcrAuthConfigurationError,
+    )
+
+    config_path = os.environ.get(PLUGIN_STATIC_GHCR_DOCKER_CONFIG_PATH_ENV)
+    if config_path is None or not config_path.strip():
+        raise GhcrAuthConfigurationError(
+            "GitHub App is unavailable and the GHCR docker config path is not set"
+        )
+    prefix_parts = config.release_repository_prefix.split("/")
+    if len(prefix_parts) < 3 or prefix_parts[1] != GHCR_DOCKER_CONFIG_ORGANIZATION:
+        raise GhcrAuthConfigurationError(
+            "GHCR docker config fallback requires the ne-tort repository owner"
+        )
+
+    authorizer = GhcrDockerConfigAuthorizer(config_path=config_path)
+    service = PluginStaticEvidenceService(
+        artifact_loader=_static_loader(config, authorizer),
+        config=config,
+    )
+    return service, policy, _StaticGitHubAppLifecycle(None, authorizer)
+
+
+_GITHUB_APP_TEXT_SETTINGS: Final = (
+    "plugin_module_source_github_app_organization",
+    "plugin_module_source_github_app_template_owner",
+    "plugin_module_source_github_app_template_name",
+    "plugin_module_source_github_app_template_agents_revision",
+    "plugin_module_source_github_app_template_security_revision",
+    "plugin_module_source_installation_credential_ref",
+    "plugin_module_source_trusted_workflow_ref",
+    "plugin_module_source_required_status_checks",
+    "plugin_module_source_default_branch",
+    "plugin_module_source_github_app_private_key_secret_ref",
+)
+_GITHUB_APP_INT_SETTINGS: Final = (
+    "plugin_module_source_github_app_id",
+    "plugin_module_source_github_app_installation_id",
+    "plugin_module_source_required_approving_review_count",
+)
+
+
+def _github_app_managed_config_absent(settings: Any) -> bool:
+    """True only when the full GitHub App contour has an unset component."""
+    for name in _GITHUB_APP_TEXT_SETTINGS:
+        value = getattr(settings, name, None)
+        if not isinstance(value, str) or not value.strip():
+            return True
+    for name in _GITHUB_APP_INT_SETTINGS:
+        value = getattr(settings, name, None)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            return True
+    return False
+
+
+def _compose_static_evidence(
+    app_settings: Any,
+) -> tuple[PluginStaticEvidenceService, StaticResponsePolicy, _StaticGitHubAppLifecycle | None]:
+    """Compose preferred GitHub App auth, then explicit dev-only file fallback."""
     from prodavan.application.plugins.wiring.module_sources import (
         github_app_client_from_settings,
         managed_config_from_settings,
@@ -217,6 +308,9 @@ def _compose_static_evidence(
 
     config = StaticEvidenceConfig.from_settings(app_settings)
     policy = StaticResponsePolicy(shell_origin=app_settings.plugin_shell_origin)
+    if _github_app_managed_config_absent(app_settings):
+        return _compose_docker_config_fallback(config, policy)
+
     source_config = managed_config_from_settings(app_settings)
     organization = source_config.organization
     github_app = github_app_client_from_settings(app_settings, source_config)
@@ -226,21 +320,7 @@ def _compose_static_evidence(
             installation_id=organization.installation_id,
             token_provider=github_app,
         )
-        # Frontend tar.gz blobs exceed the default 1 MiB loader blob cap, so
-        # the frontend cap config feeds max_blob_bytes; per-descriptor caps
-        # stay enforced by the service on every verified object. The
-        # NotFoundAwareOciLoader adapter is the ONLY release-fallback source:
-        # it converts a proven registry 404 into the typed absence signal,
-        # while outages/auth failures propagate unchanged (fail closed).
-        loader = NotFoundAwareOciLoader(
-            HttpxOciArtifactLoader(
-                allowed_registries=("ghcr.io",),
-                max_manifest_bytes=config.max_manifest_bytes,
-                max_blob_bytes=config.max_frontend_layer_bytes,
-                authorizer=authorizer,
-                client_factory=_proven404_client_factory,
-            ),
-        )
+        loader = _static_loader(config, authorizer)
     except Exception:
         _close_client_best_effort(github_app)
         raise
