@@ -135,7 +135,13 @@ def _environment(config: dict | None = None) -> dict[str, str]:
     }
 
 
-def _decision(*, bundle_ref: str, backend_ref: str, backend_digest: str) -> dict:
+def _decision(
+    *,
+    bundle_ref: str,
+    backend_ref: str,
+    backend_digest: str,
+    summary_backend_ref: str | None = None,
+) -> dict:
     return {
         "decision": "PUBLISH_ALLOWED",
         "publish_allowed": True,
@@ -147,7 +153,7 @@ def _decision(*, bundle_ref: str, backend_ref: str, backend_digest: str) -> dict
             "plugin_id": "hello_plugin",
             "version": "1.2.0",
             "manifest_content_verified": True,
-            "backend_image_ref": backend_ref,
+            "backend_image_ref": summary_backend_ref or backend_ref,
             "backend_digest": backend_digest,
         },
         "checks": [{"name": name, "ok": True} for name in EXPECTED_RELEASE_CHECKS],
@@ -248,6 +254,7 @@ class EvidenceFixture:
                     bundle_ref=QUAR_BUNDLE_REF,
                     backend_ref=QUAR_BACKEND_REF,
                     backend_digest=BACKEND_DIGEST,
+                    summary_backend_ref=RELEASE_BACKEND_REF,
                 )
             ),
             encoding="utf-8",
@@ -527,6 +534,7 @@ class ReleaseEvidenceCollectionTests(unittest.TestCase):
                 bundle_ref=QUAR_BUNDLE_REF,
                 backend_ref=QUAR_BACKEND_REF,
                 backend_digest=BACKEND_DIGEST,
+                summary_backend_ref=RELEASE_BACKEND_REF,
             )
             decision["checks"] = decision["checks"][:-1]
             fixture.quarantine_decision.write_text(json.dumps(decision), encoding="utf-8")
