@@ -96,6 +96,10 @@ jobs:
         working-directory: infra/ops
         run: poetry install --no-interaction
 
+      - name: Run prodavan-ops unit tests (after merge gate)
+        working-directory: infra/ops
+        run: poetry run pytest -q
+
       - name: Prepare Docker kubeconfig
         working-directory: infra/ops
         run: |

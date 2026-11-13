@@ -116,9 +116,13 @@ jobs:
         run: |
           set -euo pipefail
           SOURCE="$RUNNER_TEMP/plugin-source"
-          GIT_TERMINAL_PROMPT=0 git clone --filter=blob:none --no-checkout \
+          # Bounded HTTP: abort a stalled clone instead of hanging to the job
+          # timeout. Anonymous HTTPS fetch and SHA pinning are unchanged.
+          GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1024 GIT_HTTP_LOW_SPEED_TIME=30 \
+            git clone --filter=blob:none --no-checkout \
             "https://github.com/$GITHUB_REPOSITORY.git" "$SOURCE"
-          git -C "$SOURCE" -c advice.detachedHead=false checkout --detach "$GITHUB_SHA"
+          GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1024 GIT_HTTP_LOW_SPEED_TIME=30 \
+            git -C "$SOURCE" -c advice.detachedHead=false checkout --detach "$GITHUB_SHA"
           test "$(git -C "$SOURCE" rev-parse HEAD)" = "$GITHUB_SHA"
           echo "SOURCE_DIR=$SOURCE" >> "$GITHUB_ENV"
 
@@ -144,8 +148,11 @@ jobs:
             TRUSTED="$RUNNER_TEMP/trusted-plugin-ci"
             # Public read only. A private platform repository requires a future
             # short-lived GitHub App contract; no shared push token is accepted.
-            git clone --filter=blob:none --no-checkout               https://github.com/ne-tort/agentscale.git "$TRUSTED"
-            git -C "$TRUSTED" -c advice.detachedHead=false checkout --detach "$WORKFLOW_SHA"
+            # Bounded HTTP: abort a stalled clone instead of hanging to the job timeout.
+            GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1024 GIT_HTTP_LOW_SPEED_TIME=30 \
+              git clone --filter=blob:none --no-checkout               https://github.com/ne-tort/agentscale.git "$TRUSTED"
+            GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1024 GIT_HTTP_LOW_SPEED_TIME=30 \
+              git -C "$TRUSTED" -c advice.detachedHead=false checkout --detach "$WORKFLOW_SHA"
             test "$(git -C "$TRUSTED" rev-parse HEAD)" = "$WORKFLOW_SHA"
             CI_DIR="$TRUSTED/.github/scripts"
             BUILDER_ID="$EXPECTED"
@@ -170,7 +177,13 @@ jobs:
           if Path(plugin_dir).is_absolute() or ".." in Path(plugin_dir).parts:
               raise SystemExit("::error::plugin_dir must be a safe relative path")
           ci_dir = Path(os.environ["CI_DIR"])
-          for name in ("plugin_manifest_builder.py", "plugin_verify.py", "plugin_publication.py"):
+          for name in (
+              "plugin_manifest_builder.py",
+              "plugin_verify.py",
+              "plugin_publication.py",
+              "plugin_release_evidence.py",
+              "plugin_quarantine_resume.py",
+          ):
               if not (ci_dir / name).is_file():
                   raise SystemExit(f"::error::trusted CI script is missing: {name}")
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
@@ -221,7 +234,7 @@ jobs:
       - name: Run stdlib focused and module contract tests
         run: |
           set -euo pipefail
-          for TEST_FILE in test_ci_plugin_supply_chain.py test_ci_plugin_publication.py; do
+          for TEST_FILE in test_ci_plugin_supply_chain.py test_ci_plugin_publication.py test_ci_plugin_network.py test_ci_plugin_archive_safety.py test_ci_plugin_promotion.py test_ci_plugin_resume.py test_ci_plugin_release_evidence.py; do
             if [[ -f "$SOURCE_DIR/apps/api/tests/unit/plugins/$TEST_FILE" ]]; then
               PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover                 -s "$SOURCE_DIR/apps/api/tests/unit/plugins" -p "$TEST_FILE"
             fi
@@ -313,15 +326,17 @@ jobs:
   release:
     name: Quarantine sign/verify then promote by digest
     needs: dry-run
+    # Release gate keys on the reusable-workflow INPUTS, never on event_name
+    # propagation: inside a workflow_call the caller event may surface either as
+    # the caller event or as 'workflow_call'. Direct runs (empty reusable input)
+    # stay limited to push/workflow_dispatch on the protected default branch; a
+    # reusable caller must pass a non-empty pinned trusted_workflow_ref AND an
+    # explicit enable_release opt-in. Protected trust/OIDC gates inside the job
+    # are unchanged and still fail closed.
     if: >-
       github.event_name != 'pull_request' &&
       github.event_name != 'pull_request_target' &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) ||
-        (inputs.enable_release == true && github.event_name == 'workflow_call') ||
-        (inputs.enable_release == true && github.event_name == 'push')
-      )
+      ((inputs.trusted_workflow_ref == '' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)))) || (inputs.trusted_workflow_ref != '' && inputs.enable_release == true))
     # Как в ci-images.yml/ci-e2e.yml: сборка требует Docker daemon, которого на
     # чистый ubuntu-latest нет. Это же площадка с buildx и локальным реестром.
     runs-on: [self-hosted, linux, docker]
@@ -349,9 +364,13 @@ jobs:
         run: |
           set -euo pipefail
           SOURCE="$RUNNER_TEMP/plugin-source"
-          GIT_TERMINAL_PROMPT=0 git clone --filter=blob:none --no-checkout \
+          # Bounded HTTP: abort a stalled clone instead of hanging to the job
+          # timeout. Anonymous HTTPS fetch and SHA pinning are unchanged.
+          GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1024 GIT_HTTP_LOW_SPEED_TIME=30 \
+            git clone --filter=blob:none --no-checkout \
             "https://github.com/$GITHUB_REPOSITORY.git" "$SOURCE"
-          git -C "$SOURCE" -c advice.detachedHead=false checkout --detach "$GITHUB_SHA"
+          GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1024 GIT_HTTP_LOW_SPEED_TIME=30 \
+            git -C "$SOURCE" -c advice.detachedHead=false checkout --detach "$GITHUB_SHA"
           test "$(git -C "$SOURCE" rev-parse HEAD)" = "$GITHUB_SHA"
           echo "SOURCE_DIR=$SOURCE" >> "$GITHUB_ENV"
 
@@ -373,8 +392,11 @@ jobs:
               echo "::error::reusable workflow identity mismatch"; exit 1;
             }
             TRUSTED="$RUNNER_TEMP/trusted-plugin-ci"
-            git clone --filter=blob:none --no-checkout               https://github.com/ne-tort/agentscale.git "$TRUSTED"
-            git -C "$TRUSTED" -c advice.detachedHead=false checkout --detach "$WORKFLOW_SHA"
+            # Bounded HTTP: abort a stalled clone instead of hanging to the job timeout.
+            GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1024 GIT_HTTP_LOW_SPEED_TIME=30 \
+              git clone --filter=blob:none --no-checkout               https://github.com/ne-tort/agentscale.git "$TRUSTED"
+            GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1024 GIT_HTTP_LOW_SPEED_TIME=30 \
+              git -C "$TRUSTED" -c advice.detachedHead=false checkout --detach "$WORKFLOW_SHA"
             test "$(git -C "$TRUSTED" rev-parse HEAD)" = "$WORKFLOW_SHA"
             CI_DIR="$TRUSTED/.github/scripts"
           fi
@@ -382,6 +404,8 @@ jobs:
           test -f "$CI_DIR/plugin_manifest_builder.py"
           test -f "$CI_DIR/plugin_verify.py"
           test -f "$CI_DIR/plugin_publication.py"
+          test -f "$CI_DIR/plugin_release_evidence.py"
+          test -f "$CI_DIR/plugin_quarantine_resume.py"
 
       - name: Validate GitHub OIDC source and workflow trust before any write
         id: trust
@@ -485,9 +509,11 @@ jobs:
           }
           TOOLS="$RUNNER_TEMP/plugin-tools"
           mkdir -p "$TOOLS"
-          curl --proto '=https' --tlsv1.2 -fsSL             "https://github.com/sigstore/cosign/releases/download/v$COSIGN_VERSION/cosign-linux-amd64"             -o "$TOOLS/cosign"
+          # Bounded downloads: a stalled transfer fails fast instead of hanging
+          # to the job timeout. --proto/--tlsv1.2 requirements stay unchanged.
+          curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 10 --max-time 120 --retry 2 --retry-delay 2             "https://github.com/sigstore/cosign/releases/download/v$COSIGN_VERSION/cosign-linux-amd64"             -o "$TOOLS/cosign"
           echo "$COSIGN_LINUX_AMD64_SHA256  $TOOLS/cosign" | sha256sum -c -
-          curl --proto '=https' --tlsv1.2 -fsSL             "https://github.com/oras-project/oras/releases/download/v$ORAS_VERSION/oras_${ORAS_VERSION}_linux_amd64.tar.gz"             -o "$TOOLS/oras.tar.gz"
+          curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 10 --max-time 120 --retry 2 --retry-delay 2             "https://github.com/oras-project/oras/releases/download/v$ORAS_VERSION/oras_${ORAS_VERSION}_linux_amd64.tar.gz"             -o "$TOOLS/oras.tar.gz"
           echo "$ORAS_LINUX_AMD64_SHA256  $TOOLS/oras.tar.gz" | sha256sum -c -
           tar -xzf "$TOOLS/oras.tar.gz" -C "$TOOLS" oras
           chmod 0555 "$TOOLS/cosign" "$TOOLS/oras"
@@ -537,6 +563,86 @@ jobs:
           set -euo pipefail
           printf '%s' "$GH_TOKEN" | docker login "$REGISTRY"             --username "$GITHUB_ACTOR" --password-stdin
 
+      - name: Resume preflight for same-commit quarantine artifacts
+        id: resume_preflight
+        run: |
+          set -euo pipefail
+          # B2: a same-commit rerun must keep the exact backend/bundle digest
+          # pair that the durable PublicationApproval binds to. Only the
+          # deterministic sha-$GITHUB_SHA quarantine tags are probed, after
+          # trust, ORAS installation, GHCR login and the local prepare.
+          # probe rc: 0 = present, 1 = explicitly absent, 2 = any other error.
+          probe() {
+            local repository="$1" output
+            if output="$(oras resolve "$repository:sha-$GITHUB_SHA" 2>&1)"; then
+              if [[ "$output" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                printf '%s\n' "$output"
+                return 0
+              fi
+              echo "::error::ORAS returned an invalid digest for $repository" >&2
+              return 2
+            fi
+            # Absence is ONLY an explicit not-found response. Auth, network and
+            # transient failures are not absence and abort the release instead
+            # of rebuilding and overwriting an already-approved artifact.
+            if grep -Eqi 'not found|404|manifest unknown' <<<"$output"; then
+              return 1
+            fi
+            echo "::error::cannot resolve $repository:sha-$GITHUB_SHA (transient/auth/network error is not artifact absence): $output" >&2
+            return 2
+          }
+          backend_rc=0
+          bundle_rc=0
+          BACKEND_DIGEST=""
+          ARTIFACT_DIGEST=""
+          BACKEND_DIGEST="$(probe "$QUAR_BACKEND")" || backend_rc=$?
+          ARTIFACT_DIGEST="$(probe "$QUAR_BUNDLE")" || bundle_rc=$?
+          if [[ "$backend_rc" -gt 1 || "$bundle_rc" -gt 1 ]]; then
+            exit 1
+          fi
+          if [[ "$backend_rc" -ne "$bundle_rc" ]]; then
+            echo "::error::partial quarantine state for sha-$GITHUB_SHA (backend_rc=$backend_rc bundle_rc=$bundle_rc): refusing to rebuild or overwrite only one existing artifact" >&2
+            exit 1
+          fi
+          if [[ "$backend_rc" -eq 1 ]]; then
+            # Both absent: the ordinary first-run build/sign path is unchanged.
+            echo "resume=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Both present: resume the already-signed artifacts. Fetch the raw
+          # manifest bytes (never a pretty re-serialization) and the config
+          # blob; the helper proves offline byte-identity with the locally
+          # regenerated canonical manifest before writing any verify inputs.
+          RESUME_DIR="$RUNNER_TEMP/resume"
+          mkdir -p "$RESUME_DIR"
+          oras manifest fetch --output "$RESUME_DIR/bundle-manifest.json" "$QUAR_BUNDLE@$ARTIFACT_DIGEST"
+          CONFIG_DIGEST="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["config"]["digest"])' "$RESUME_DIR/bundle-manifest.json")"
+          [[ "$CONFIG_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "::error::resumed bundle manifest has no strict config.digest"; exit 1;
+          }
+          oras blob fetch --output "$RESUME_DIR/config-blob.json" "$QUAR_BUNDLE@$CONFIG_DIGEST"
+          python3 "$CI_DIR/plugin_quarantine_resume.py" resume             --bundle-manifest "$RESUME_DIR/bundle-manifest.json"             --config-blob "$RESUME_DIR/config-blob.json"             --local-canonical-manifest "$RUNNER_TEMP/plugin-prepare/canonical-manifest.json"             --backend-digest "$BACKEND_DIGEST"             --bundle-digest "$ARTIFACT_DIGEST"             --release-backend "$RELEASE_BACKEND"             --release-bundle "$RELEASE_BUNDLE"             --output-dir "$RUNNER_TEMP" > "$RESUME_DIR/result.json"
+          python3 - <<'PY'
+          import json
+          import os
+
+          result = json.load(open(os.environ["RUNNER_TEMP"] + "/resume/result.json", encoding="utf-8"))
+          backend_digest = result["BACKEND_DIGEST"]
+          artifact_digest = result["ARTIFACT_DIGEST"]
+          # The helper returns RELEASE refs for its annotation checks only.
+          # quarantine_verify below must address the QUARANTINE artifacts, so
+          # only digests and the resumed canonical path are taken from the
+          # helper; quarantine refs are rebuilt from QUAR_* repositories.
+          # RELEASE_*_REF is still exported exclusively by the promote step.
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              handle.write(f"BACKEND_DIGEST={backend_digest}\n")
+              handle.write(f"ARTIFACT_DIGEST={artifact_digest}\n")
+              handle.write(f"BACKEND_REF={os.environ['QUAR_BACKEND']}@{backend_digest}\n")
+              handle.write(f"ARTIFACT_REF={os.environ['QUAR_BUNDLE']}@{artifact_digest}\n")
+              handle.write(f"CANONICAL_MANIFEST={result['CANONICAL_MANIFEST']}\n")
+          PY
+          echo "resume=true" >> "$GITHUB_OUTPUT"
+
       - name: Create fresh ephemeral release builder
         run: |
           set -euo pipefail
@@ -555,6 +661,7 @@ jobs:
           docker buildx inspect --bootstrap "$BUILDER"
 
       - name: Build and push backend only to quarantine with buildx evidence
+        if: steps.resume_preflight.outputs.resume != 'true'
         id: backend_build
         run: |
           set -euo pipefail
@@ -574,6 +681,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Extract backend buildx SBOM and provenance from actual image descriptors
+        if: steps.resume_preflight.outputs.resume != 'true'
         run: |
           set -euo pipefail
           EVIDENCE="$RUNNER_TEMP/backend-evidence"
@@ -630,6 +738,7 @@ jobs:
           python3 "$CI_DIR/plugin_manifest_builder.py" backend-evidence             --evidence-dir "$EVIDENCE"             --backend-image-manifest-digest "$BACKEND_IMAGE_MANIFEST_DIGEST"             --source-repository "$GITHUB_REPOSITORY" --source-sha "$GITHUB_SHA"             --builder-id "$TRUSTED_BUILDER_ID" --run-id "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"             --output-sbom "$RUNNER_TEMP/backend-sbom.json"             --output-provenance "$RUNNER_TEMP/backend-provenance.json"
 
       - name: Sign and attest quarantined backend by digest
+        if: steps.resume_preflight.outputs.resume != 'true'
         run: |
           set -euo pipefail
           cosign sign --yes "$BACKEND_REF"
@@ -637,6 +746,7 @@ jobs:
           cosign attest --yes --predicate "$RUNNER_TEMP/backend-provenance.json"             --type slsaprovenance "$BACKEND_REF"
 
       - name: Build and push canonical OCI bundle only to quarantine
+        if: steps.resume_preflight.outputs.resume != 'true'
         id: bundle_build
         run: |
           set -euo pipefail
@@ -658,6 +768,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Generate independent bundle evidence, sign and attest by digest
+        if: steps.resume_preflight.outputs.resume != 'true'
         run: |
           set -euo pipefail
           python3 "$CI_DIR/plugin_manifest_builder.py" bundle-evidence             --source-manifest "$SOURCE_MANIFEST"             --oci-manifest "$RUNNER_TEMP/oci-manifest.json"             --bundle-digest "$ARTIFACT_DIGEST"             --source-repository "$GITHUB_REPOSITORY" --source-sha "$GITHUB_SHA"             --builder-id "$TRUSTED_BUILDER_ID" --run-id "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"             --output-sbom "$RUNNER_TEMP/bundle-sbom.json"             --output-provenance "$RUNNER_TEMP/bundle-provenance.json"
@@ -675,7 +786,21 @@ jobs:
           [[ -n "$PLATFORM_VERSION" && -n "$PLUGIN_GRANTED_CAPABILITIES" ]] || {
             echo "::error::protected platform version and independently reviewed grants are required"; exit 1;
           }
-          python3 "$CI_DIR/plugin_verify.py"             --manifest "$RUNNER_TEMP/oci-manifest.json"             --source-manifest "$SOURCE_MANIFEST"             --canonical-manifest "$CANONICAL_MANIFEST"             --pushed-manifest "$RUNNER_TEMP/pushed-manifest.json"             --backend-digest "$BACKEND_DIGEST"             --artifact-ref "$ARTIFACT_REF" --backend-ref "$BACKEND_REF"             --source-repository "$GITHUB_REPOSITORY" --source-sha "$GITHUB_SHA"             --builder-identity "$TRUSTED_BUILDER_ID"             --platform-version "$PLATFORM_VERSION"             --granted-capabilities "$PLUGIN_GRANTED_CAPABILITIES"             --certificate-identity "$SIGNER_IDENTITY"             --output "$RUNNER_TEMP/quarantine-decision.json"
+          python3 "$CI_DIR/plugin_verify.py"             --manifest "$RUNNER_TEMP/oci-manifest.json"             --source-manifest "$SOURCE_MANIFEST"             --canonical-manifest "$CANONICAL_MANIFEST"             --pushed-manifest "$RUNNER_TEMP/pushed-manifest.json"             --backend-digest "$BACKEND_DIGEST"             --artifact-ref "$ARTIFACT_REF" --backend-ref "$BACKEND_REF"             --source-repository "$GITHUB_REPOSITORY" --source-sha "$GITHUB_SHA"             --builder-identity "$TRUSTED_BUILDER_ID"             --platform-version "$PLATFORM_VERSION"             --granted-capabilities "$PLUGIN_GRANTED_CAPABILITIES"             --certificate-identity "$SIGNER_IDENTITY"             --output "$RUNNER_TEMP/quarantine-decision.json"             --bundle-sbom-output "$RUNNER_TEMP/bundle-sbom.json" --bundle-provenance-output "$RUNNER_TEMP/bundle-provenance.json"
+
+      - name: Verify independent release evidence before promotion
+        run: |
+          set -euo pipefail
+          export DOCKER_CONFIG_PATH="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
+          test -f "$DOCKER_CONFIG_PATH" || {
+            echo "::error::Docker credentials were not found after docker login"; exit 1;
+          }
+          # Independent release evidence is collected against the QUARANTINE
+          # backend/bundle digests BEFORE any release GHCR write. Future release
+          # refs reuse the same immutable digests (promotion is a repository
+          # copy). No OIDC token, no platform POST and no registry write/promote
+          # happens in this step; resume uses the identical quarantine refs.
+          python3 "$CI_DIR/plugin_release_evidence.py"             --plugin-id "$PLUGIN_ID" --plugin-version "$PLUGIN_VERSION"             --builder-identity "$TRUSTED_BUILDER_ID"             --quarantine-bundle-ref "$ARTIFACT_REF" --quarantine-bundle-digest "$ARTIFACT_DIGEST"             --quarantine-backend-ref "$BACKEND_REF" --quarantine-backend-digest "$BACKEND_DIGEST"             --release-bundle-ref "$RELEASE_BUNDLE@$ARTIFACT_DIGEST" --release-bundle-digest "$ARTIFACT_DIGEST"             --release-backend-ref "$RELEASE_BACKEND@$BACKEND_DIGEST" --release-backend-digest "$BACKEND_DIGEST"             --manifest "$RUNNER_TEMP/oci-manifest.json"             --quarantine-decision "$RUNNER_TEMP/quarantine-decision.json"             --scan-report "$RUNNER_TEMP/backend-release-scan.json"             --output "$RUNNER_TEMP/release-evidence.json"             --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Promote verified backend and bundle with all referrers by digest
         id: promote
@@ -683,6 +808,14 @@ jobs:
           set -euo pipefail
           oras copy --recursive "$QUAR_BACKEND@$BACKEND_DIGEST"             "$RELEASE_BACKEND@$BACKEND_DIGEST"
           oras copy --recursive "$QUAR_BUNDLE@$ARTIFACT_DIGEST"             "$RELEASE_BUNDLE@$ARTIFACT_DIGEST"
+          # ORAS --recursive carries native OCI referrers, but cosign stores
+          # signatures/attestations as tag-based .sig/.att manifests. cosign
+          # copy --only=sig,att (supported by the pinned v2.4.1) promotes
+          # exactly those for the SAME digests. No forced overwrite, no tag-only refs:
+          # both source and destination stay digest-qualified, so release
+          # reverify below validates the actual signed/attested release refs.
+          cosign copy --only=sig,att "$QUAR_BACKEND@$BACKEND_DIGEST"             "$RELEASE_BACKEND@$BACKEND_DIGEST"
+          cosign copy --only=sig,att "$QUAR_BUNDLE@$ARTIFACT_DIGEST"             "$RELEASE_BUNDLE@$ARTIFACT_DIGEST"
           test "$(oras resolve "$RELEASE_BACKEND@$BACKEND_DIGEST")" = "$BACKEND_DIGEST"
           test "$(oras resolve "$RELEASE_BUNDLE@$ARTIFACT_DIGEST")" = "$ARTIFACT_DIGEST"
           {
@@ -702,14 +835,11 @@ jobs:
       - name: Verify independent release evidence and publish through platform OIDC
         run: |
           set -euo pipefail
-          export DOCKER_CONFIG_PATH="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
-          test -f "$DOCKER_CONFIG_PATH" || {
-            echo "::error::Docker credentials were not found after docker login"; exit 1;
-          }
-          # The pinned Trivy scan targets the actual release backend. The CSP
-          # probe targets protected static-origin evidence for this exact release
-          # bundle. Either missing/failed input stops before the platform POST.
-          python3 "$CI_DIR/plugin_publication.py" publish             --plugin-id "$PLUGIN_ID" --plugin-version "$PLUGIN_VERSION"             --builder-identity "$TRUSTED_BUILDER_ID"             --bundle-ref "$RELEASE_ARTIFACT_REF" --bundle-digest "$ARTIFACT_DIGEST"             --backend-ref "$RELEASE_BACKEND_REF" --backend-digest "$BACKEND_DIGEST"             --manifest "$RUNNER_TEMP/oci-manifest.json"             --release-decision "$RUNNER_TEMP/release-decision.json"             --scan-report "$RUNNER_TEMP/backend-release-scan.json"             --bundle-sbom "$RUNNER_TEMP/bundle-sbom.json"             --bundle-provenance "$RUNNER_TEMP/bundle-provenance.json"             --summary "$GITHUB_STEP_SUMMARY"
+          # The pinned scan/CSP evidence was collected before promotion; this
+          # step only revalidates that exact snapshot against the verified
+          # release refs/digests (no second scanner run or CSP probe), then
+          # requests the OIDC token and performs the platform POST.
+          python3 "$CI_DIR/plugin_publication.py" publish             --plugin-id "$PLUGIN_ID" --plugin-version "$PLUGIN_VERSION"             --builder-identity "$TRUSTED_BUILDER_ID"             --bundle-ref "$RELEASE_ARTIFACT_REF" --bundle-digest "$ARTIFACT_DIGEST"             --backend-ref "$RELEASE_BACKEND_REF" --backend-digest "$BACKEND_DIGEST"             --manifest "$RUNNER_TEMP/oci-manifest.json"             --release-decision "$RUNNER_TEMP/release-decision.json"             --scan-report "$RUNNER_TEMP/backend-release-scan.json"             --bundle-sbom "$RUNNER_TEMP/bundle-sbom.json"             --bundle-provenance "$RUNNER_TEMP/bundle-provenance.json"             --release-evidence "$RUNNER_TEMP/release-evidence.json"             --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Logout and remove release builder
         if: always()

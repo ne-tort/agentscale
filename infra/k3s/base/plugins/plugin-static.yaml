@@ -1,0 +1,332 @@
+# Plugin Static — cluster-internal статический контур плагинов (Scope B1: CI evidence).
+#
+# ЗАЧЕМ ОТДЕЛЬНЫЙ Deployment/Service: plugin-gateway (:8080) — trust-контур
+# capability-proxy с RBAC activator'а и PLUGIN_PLATFORM_ENABLED=false. Статический
+# контур B1 — read-only metadata/readiness-проверка ПУБЛИКУЕМЫХ артефактов
+# (OCI manifest + frontend tar.gz) из quarantine/release GHCR с реальной
+# digest-верификацией (HttpxOciArtifactLoader + GhcrRegistryAuthorizer),
+# без write API, без БД, без MinIO и без RBAC к Kubernetes API.
+#
+# ЧТО ЭТО НЕ ЕСТЬ (важно):
+#   * НЕ публичный browser static hosting: никакого Ingress — Service
+#     cluster-internal (ClusterIP), доступ только из подов agentscale-dev
+#     (plugin-gateway / agentscale-api) на :8081 через NetworkPolicy.
+#   * НЕ prod: overlays/prod этот каталог не подключает (политика сред — dev only).
+#   * НЕ tenant plugin runtime: лейбл 'app: plugin' (цель plugin-egress NP)
+#     здесь НЕ используется — иначе emergency fail-closed NP плагинов накрыл
+#     бы и этот под. Собственный NetworkPolicy с podSelector 'app: plugin-static'.
+#
+# Readiness-контракт (GET/HEAD metadata readiness): evidence-маршрут
+#   /internal/plugin-static/v1/bundles/{plugin_id}/{version}/{bundle_digest}/ready
+# prodavan.main_plugin_static реально digest-верифицирует OCI manifest,
+# canonical config JSON и frontend tar.gz из quarantine GHCR (release fallback)
+# через HttpxOciArtifactLoader + GhcrRegistryAuthorizer; успешный ответ несёт
+# server-owned StaticResponsePolicy-заголовки. /health/ready — configured-gate:
+# 200 только при composed loader+policy, иначе typed 503. Отсутствие
+# auth/digest-свидетельства = NotReady (fail-closed), а не «ready по умолчанию».
+#
+# GitHub App registry_read auth: используются ТИПИРОВАННЫЕ настройки
+# PLUGIN_MODULE_SOURCE_* из prodavan/config/settings.py. В Git НЕТ ни ключа,
+# ни PAT, ни id'шников-«заглушек»: приватный ключ приходит ТОЛЬКО как
+# k8s-secret:// REF (env PLUGIN_MODULE_SOURCE_GITHUB_APP_PRIVATE_KEY_SECRET_REF,
+# читается K8sFileSecretStore из смонтированного Secret), сам Secret создаётся
+# оператором как SealedSecret
+# (overlays/dev/plugins/plugin-module-source-github-app.sealed.yaml.example,
+# НЕ подключён к kustomization). PLUGIN_MODULE_SOURCE_ENABLED=false до
+# заполнения установки App — fail-closed, как и PLUGIN_PLATFORM_ENABLED=false.
+#
+# Все kinds из whitelist infra/argocd/apps/00-project.yaml:
+# ServiceAccount / ConfigMap / Deployment / Service / NetworkPolicy.
+# Поле namespace намеренно НЕ задано — подставляет NamespaceTransformer оверлея.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: plugin-static
+  labels:
+    app: plugin-static
+    app.kubernetes.io/name: plugin-static
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-static
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+# Контур read-only к OCI: Kubernetes API-доступ не нужен вообще, RBAC не выдаётся.
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: plugin-static-config
+  labels:
+    app: plugin-static
+    app.kubernetes.io/name: plugin-static
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-static
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+data:
+  # Платформа plugin runtime остаётся emergency-disabled (fail-closed canon,
+  # plugin-gateway-config): этот ConfigMap её НЕ включает. Static-контур —
+  # read-only проверка артефактов, а не активация плагинов.
+  PLUGIN_PLATFORM_ENABLED: "false"
+  # Source-provisioning контур выключен: этот флаг НЕ включает managed
+  # source API. Сама static-композиция (main_plugin_static) читает managed
+  # конфигурацию из settings НЕЗАВИСИМО от флага и fail-closed без неё:
+  # managed_config_from_settings требует organization/installation_id,
+  # trusted template/workflow REF и branch policy, github_app_client_from_settings
+  # — APP_ID и k8s-secret:// REF приватного ключа. Оператор добавляет ВСЮ
+  # managed-установку (PLUGIN_MODULE_SOURCE_GITHUB_APP_ID,
+  # PLUGIN_MODULE_SOURCE_GITHUB_APP_INSTALLATION_ID, template/trust значения)
+  # dev-патчем ОДНОВРЕМЕННО с запечатанным ключом
+  # (plugin-module-source-github-app.sealed.yaml.example). Отсутствие валидной
+  # конфигурации = typed 503 на readiness/evidence, а не «работа без auth».
+  PLUGIN_MODULE_SOURCE_ENABLED: "false"
+  # Не-секретная часть registry_read: организация App = владелец GHCR-реестра.
+  PLUGIN_MODULE_SOURCE_GITHUB_APP_ORGANIZATION: "ne-tort"
+  # Server-owned CSP (frame-ancestors) для evidence-ответов StaticResponsePolicy:
+  # exact dev shell origin, публичное НЕ-секретное значение (как PLUGIN_SHELL_ORIGIN
+  # у plugin-gateway). Без валидного https-origin композиция policy fail-closed.
+  PLUGIN_SHELL_ORIGIN: "https://agentscale.dev"
+  # Артефакты: только digest-pinned чтение из ghcr.io/ne-tort/plugins.
+  # Allowed registries httpx-лоадера зашиты в коде ("ghcr.io",) — ConfigMap
+  # задаёт префикс реестра артефактов, а не расширяет allowlist.
+  PLUGIN_OCI_REGISTRY: "ghcr.io/ne-tort/plugins"
+  PLUGIN_ARTIFACT_PIN_MODE: "digest"
+  # Секретов здесь НЕТ И НЕ БУДЕТ: PLUGIN_MODULE_SOURCE_GITHUB_APP_*_SECRET_REF
+  # придёт env'ом Deployment (k8s-secret:// REF), приватный ключ — только
+  # смонтированным SealedSecret'ом. ConfigMap читается любым субъектом
+  # namespace с get — креденшелы в нём запрещены.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plugin-static
+  labels:
+    app: plugin-static
+    app.kubernetes.io/name: plugin-static
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-static
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: plugin-static
+  template:
+    metadata:
+      labels:
+        app: plugin-static
+        app.kubernetes.io/name: plugin-static
+        app.kubernetes.io/part-of: agentscale
+        app.kubernetes.io/component: plugin-static
+      annotations:
+        # envFrom не перекатывает под при смене ConfigMap/Secret — явная ревизия
+        # pod template'а (тот же паттерн, что plugin-gateway deployment).
+        agentscale.io/plugin-config-revision: "1"
+    spec:
+      serviceAccountName: plugin-static
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        # Смонтированные Secret-файлы получают группу 10001: без fsGroup
+        # non-root процесс не прочитал бы defaultMode 0440.
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      imagePullSecrets:
+        # Тот же платформенный pull-secret, что у plugin-gateway/agentscale-api.
+        # Отдельный tenant registry-read pull secret (sealed .example) здесь НЕ
+        # нужен: образ platform API публично читаем, а tenant-секреты контуру
+        # запрещены.
+        - name: ghcr-pull
+      containers:
+        - name: static
+          # Тот же образ platform API, отдельный read-only entrypoint.
+          image: ghcr.io/ne-tort/agentscale-api:latest
+          # :latest перезаливается CI Images при каждом push в main; IfNotPresent
+          # оставил бы закэшированный слой без entrypoint (паттерн plugin-gateway).
+          imagePullPolicy: Always
+          command:
+            - uvicorn
+            - prodavan.main_plugin_static:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8081"
+          ports:
+            - name: http
+              containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: plugin-static-config
+          env:
+            # REF, а НЕ ключ: K8sFileSecretStore резолвит
+            # k8s-secret://<secret>/<key> в /var/run/secrets/<secret>/<key>
+            # из readOnly-монтирования ниже. Inline-ключ/PAT в Git запрещены.
+            - name: PLUGIN_MODULE_SOURCE_GITHUB_APP_PRIVATE_KEY_SECRET_REF
+              value: k8s-secret://plugin-module-source-github-app/private-key
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: github-app-private-key
+              mountPath: /var/run/secrets/plugin-module-source-github-app
+              readOnly: true
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            # /health/ready = configured-gate: 200 только когда composed
+            # loader+policy (иначе typed 503). Реальная digest-верификация
+            # OCI manifest + frontend tar.gz выполняется evidence-маршрутом
+            # /internal/plugin-static/v1/bundles/{...}/{digest}/ready
+            # (HttpxOciArtifactLoader + GhcrRegistryAuthorizer), НЕ этой пробой:
+            # проба не должна ходить в GHCR. Период 30s — разумный интервал
+            # configured-gate без внешних вызовов.
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 4
+          livenessProbe:
+            # Дешёвая live-проверка: liveness НЕ должен ходить в GHCR.
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            # ЯВНЫЕ requests/limits: LimitRange max 4Gi / 2 CPU, квота 12Gi/45.
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        # Приватный ключ GitHub App. optional: true — под стартует и без
+        # запечатанного секрета (иначе CreateContainerConfigError валит sync
+        # всего plugin-platform), НО приложение fail-closed: RESOLUTION
+        # k8s-secret:// REF без файла даёт отказ compose/readiness.
+        # Создание — overlays/dev/plugins/plugin-module-source-github-app.sealed.yaml.example.
+        - name: github-app-private-key
+          secret:
+            secretName: plugin-module-source-github-app
+            defaultMode: 0440
+            optional: true
+            items:
+              - key: private-key
+                path: private-key
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: plugin-static
+  labels:
+    app: plugin-static
+    app.kubernetes.io/name: plugin-static
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-static
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  # ClusterIP по умолчанию — тип LoadBalancer/NodePort для этого Service
+  # запрещён regression-тестом: B1 — CI evidence, не публичный хостинг.
+  selector:
+    app: plugin-static
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: plugin-static-egress
+  labels:
+    app: plugin-static
+    app.kubernetes.io/name: plugin-static-egress
+    app.kubernetes.io/part-of: agentscale
+    app.kubernetes.io/component: plugin-static-network-policy
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  # ТОЛЬКО поды static-контура. НЕ 'app: plugin' (tenant-плагины со своей NP)
+  # и НЕ podSelector: {} (иначе накрыл бы весь namespace).
+  podSelector:
+    matchLabels:
+      app: plugin-static
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Внутренние потребители metadata/readiness: plugin-gateway (proxy static)
+    # и agentscale-api (bootstrap/admin DTO). Публичного входа НЕТ: Ingress-
+    # объекта для plugin-static не существует и не должен появляться.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agentscale-dev
+          podSelector:
+            matchLabels:
+              app: plugin-gateway
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agentscale-dev
+          podSelector:
+            matchLabels:
+              app: agentscale-api
+      ports:
+        - protocol: TCP
+          port: 8081
+  egress:
+    # 1) kube-dns: UDP 53 + TCP 53 (ответы >512 байт) — паттерн
+    #    base/agentscale-sandboxes-ks/networkpolicy.yaml.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 2) Внешний HTTPS 443 для api.github.com (mint installation token) и
+    #    ghcr.io (OCI manifest/blob). L3/L4 NetworkPolicy НЕ умеет матчить
+    #    DNS-имена: hostname-pinning живёт в приложении — GitHubAppClient
+    #    ходит только в api.github.com, HttpxOciArtifactLoader ограничен
+    #    allowed_registries=("ghcr.io",). Порт 80 явно запрещён, БД/MinIO/
+    #    внутренние Service'ы отсечены except'ом pod/service CIDR k3s.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.42.0.0/16 # pods
+              - 10.43.0.0/16 # services
+      ports:
+        - protocol: TCP
+          port: 443
+    # ЯВНО ЗАПРЕЩЕНО (правил НЕТ = fail-closed): tenant-postgres :5432,
+    # pgbouncer :6432, MinIO :9000, Redpanda :9092, pod-gateway :8001,
+    # plugin-gateway :8080 как egress, Kubernetes API (токен не смонтирован),
+    # внешний :80 и любой иной порт.

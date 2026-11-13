@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass, replace
-from datetime import UTC, datetime
 import hashlib
 import json
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
-
+from prodavan.application.dynamic_app_registry.contracts import RegistryOutcome
 from prodavan.application.plugins.admin.contracts import (
     CapabilityGrantRecord,
     EgressPolicy,
@@ -20,21 +21,21 @@ from prodavan.application.plugins.admin.contracts import (
     PluginPublicationApproval,
     QuotaSet,
 )
-from prodavan.application.plugins.artifacts.oidc import GitHubActionsClaims
-from prodavan.application.plugins.artifacts.publication import ArtifactPublicationCommand
+from prodavan.application.plugins.artifacts.oidc import GitHubActionsClaims, OidcErrorCode, OidcValidationError
 from prodavan.application.plugins.artifacts.publication import (
+    ArtifactPublicationCommand,
     DurablePluginInstanceScopeResolver,
+    LoadedOciObject,
+    PluginCiPublicationService,
+    PublicationErrorCode,
+    PublicationEvidence,
+    _LoaderError,
 )
-from prodavan.application.plugins.artifacts.publication import LoadedOciObject
-from prodavan.application.plugins.artifacts.publication import PluginCiPublicationService
-from prodavan.application.plugins.artifacts.publication import PublicationErrorCode
-from prodavan.application.plugins.artifacts.publication import PublicationEvidence
-from prodavan.application.plugins.artifacts.publication import _LoaderError
-from prodavan.application.plugins.artifacts.registry import InMemoryRegistryStore
-from prodavan.application.plugins.artifacts.registry import PluginArtifactRegistry
+from prodavan.application.plugins.artifacts.registry import InMemoryRegistryStore, PluginArtifactRegistry
 from prodavan.application.plugins.artifacts.verification import ArtifactVerifier, CompatibilityGate
 from prodavan.application.plugins.sources.types import ModuleSource, ModuleSourceStatus
 from prodavan.domain.plugins.validation import validate_manifest
+
 from .conftest import FakeCosign, valid_manifest
 
 COMMIT = "c" * 40
@@ -144,20 +145,27 @@ class FakeSourceRepository:
     def __init__(self, source: ModuleSource | None) -> None:
         self.source = source
         self.calls: list[str] = []
+        self.error: Exception | None = None
 
     async def get_by_id(self, source_id: str) -> ModuleSource | None:
         self.calls.append(source_id)
+        if self.error is not None:
+            raise self.error
         return self.source
 
 
 class FakeOidc:
     def __init__(self) -> None:
         self.calls = 0
+        self.error: Exception | None = None
+        self.claims: GitHubActionsClaims | None = None
 
     async def validate_for_source(self, token: str, **kwargs: Any) -> GitHubActionsClaims:
         self.calls += 1
         assert token == "fake-oidc-token"
-        return _claims()
+        if self.error is not None:
+            raise self.error
+        return self.claims or _claims()
 
 
 class FakeLoader:
@@ -165,11 +173,14 @@ class FakeLoader:
         self.remote = remote
         self.canonical = canonical
         self.blob_error: Exception | None = None
+        self.manifest_error: Exception | None = None
         self.manifest_calls = 0
         self.blob_calls = 0
 
     async def load_manifest(self, ref: object) -> LoadedOciObject:
         self.manifest_calls += 1
+        if self.manifest_error is not None:
+            raise self.manifest_error
         return LoadedOciObject(data=self.remote, digest=ref.digest, size=len(self.remote))
 
     async def load_blob(
@@ -195,6 +206,7 @@ class FakeScopeStore:
 class FakeApprovalReader:
     def __init__(self, record: PluginPublicationApproval | None) -> None:
         self.record = record
+        self.error: Exception | None = None
         self.create_calls = 0
         self.get_calls = 0
         self.consume_calls = 0
@@ -211,6 +223,8 @@ class FakeApprovalReader:
         assert (company_id, plugin_id) == ("company_1", "hello_plugin")
         assert manifest_version == "1.2.0"
         assert artifact_digest.startswith("sha256:")
+        if self.error is not None:
+            raise self.error
         return self.record
 
     async def create(self, **kwargs: Any) -> None:
@@ -234,6 +248,9 @@ class Fixture:
     cosign: FakeCosign
     canonical: dict[str, Any]
     oci: dict[str, Any]
+    source_repository: FakeSourceRepository
+    verifier: ArtifactVerifier
+    registry: PluginArtifactRegistry
 
 
 def _fixture(
@@ -351,8 +368,9 @@ def _fixture(
         grant_store=scope_grants,  # type: ignore[arg-type]
         instance_store=scope_instances,  # type: ignore[arg-type]
     )
+    source_repository = FakeSourceRepository(source)
     service = PluginCiPublicationService(
-        source_repository=FakeSourceRepository(source),
+        source_repository=source_repository,
         oidc_validator=oidc,
         artifact_loader=loader,
         verifier=verifier,
@@ -372,6 +390,9 @@ def _fixture(
         cosign=cosign,
         canonical=canonical,
         oci=oci,
+        source_repository=source_repository,
+        verifier=verifier,
+        registry=registry,
     )
 
 
@@ -754,3 +775,445 @@ async def test_repeated_publication_does_not_duplicate_artifact_or_create_grant(
     assert fixture.approval_reader.get_calls == 2
     assert fixture.approval_reader.create_calls == 0
     assert not hasattr(fixture.approval_reader.record, "status")
+
+# ---------------------------------------------------------------------------
+# Fail-closed регрессии доверенной границы CI -> platform (аудит P0-G/P1-H).
+# Каждый кейс изолирует ровно один дискриминатор и проверяет отсутствие
+# downstream-эффектов (loader/approval/registry), а не только код отказа.
+# ---------------------------------------------------------------------------
+
+
+def _assert_no_publication_downstream(fixture: Fixture) -> None:
+    """Ни OCI-загрузки, ни approval, ни записи в registry после отказа."""
+    assert fixture.loader.manifest_calls == 0
+    assert fixture.loader.blob_calls == 0
+    assert fixture.approval_reader.get_calls == 0
+    assert fixture.approval_reader.create_calls == 0
+    assert fixture.store.current("hello_plugin") is None
+
+
+@pytest.mark.asyncio
+async def test_run_url_with_foreign_repository_is_quarantined_before_loader() -> None:
+    # publication.py:967-969 — path repository обязан равняться source.full_name.
+    fixture = _fixture()
+    command = replace(
+        fixture.command,
+        run_url="https://github.com/ne-tort/other/actions/runs/123/attempts/2",
+    )
+    result = await fixture.service.publish(command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.RUN_URL_MISMATCH.value
+    assert fixture.oidc.calls == 1
+    _assert_no_publication_downstream(fixture)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "run_url",
+    [
+        "http://github.com/ne-tort/example/actions/runs/123/attempts/2",
+        "https://user:pass@github.com/ne-tort/example/actions/runs/123/attempts/2",
+        "https://github.com/ne-tort/example/actions/runs/123/attempts/2?token=x",
+        "https://github.com/ne-tort/example/actions/runs/123/attempts/2#fragment",
+        "https://github.com:443/ne-tort/example/actions/runs/123/attempts/2",
+    ],
+    ids=["http", "userinfo", "query", "fragment", "explicit-port"],
+)
+async def test_run_url_requires_exact_https_origin_without_extras(run_url: str) -> None:
+    # publication.py:957-966 — только https://github.com без userinfo/query/
+    # fragment/порта; даже явный :443 отклоняется.
+    fixture = _fixture()
+    command = replace(fixture.command, run_url=run_url)
+    result = await fixture.service.publish(command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.RUN_URL_MISMATCH.value
+    _assert_no_publication_downstream(fixture)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "run_url",
+    [
+        "https://github.com/ne-tort/example/actions/runs/999/attempts/2",
+        "https://github.com/ne-tort/example/actions/runs/123/attempts/3",
+    ],
+    ids=["run-id-mismatch", "run-attempt-mismatch"],
+)
+async def test_run_url_run_id_and_attempt_must_match_oidc_claims(run_url: str) -> None:
+    # publication.py:973-980 — при наличии claims run_id/run_attempt сверка точная.
+    fixture = _fixture()
+    command = replace(fixture.command, run_url=run_url)
+    result = await fixture.service.publish(command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.RUN_URL_MISMATCH.value
+    _assert_no_publication_downstream(fixture)
+
+
+@pytest.mark.asyncio
+async def test_run_url_without_attempts_suffix_is_accepted() -> None:
+    # publication.py:977-981 — обычный HTML run URL без /attempts/... валиден.
+    fixture = _fixture()
+    command = replace(
+        fixture.command,
+        run_url="https://github.com/ne-tort/example/actions/runs/123",
+    )
+    result = await fixture.service.publish(command, oidc_token="fake-oidc-token")
+    assert result.status == "PUBLISHED"
+    assert fixture.store.current("hello_plugin") is not None
+
+
+@pytest.mark.asyncio
+async def test_run_url_run_binding_is_skipped_when_claims_run_id_is_empty() -> None:
+    # publication.py:971-976 — пустой run_id (старые claim-наборы) отключает
+    # только run_id-сверку; run_attempt продолжает сверяться.
+    fixture = _fixture()
+    fixture.oidc.claims = replace(_claims(), run_id="")
+    command = replace(
+        fixture.command,
+        run_url="https://github.com/ne-tort/example/actions/runs/999/attempts/2",
+    )
+    result = await fixture.service.publish(command, oidc_token="fake-oidc-token")
+    assert result.status == "PUBLISHED"
+    assert fixture.store.current("hello_plugin") is not None
+
+
+@pytest.mark.asyncio
+async def test_run_url_attempt_binding_is_skipped_when_claims_run_attempt_is_empty() -> None:
+    # publication.py:979-981 — пустой run_attempt отключает только attempt-сверку.
+    fixture = _fixture()
+    fixture.oidc.claims = replace(_claims(), run_attempt="")
+    command = replace(
+        fixture.command,
+        run_url="https://github.com/ne-tort/example/actions/runs/123/attempts/999",
+    )
+    result = await fixture.service.publish(command, oidc_token="fake-oidc-token")
+    assert result.status == "PUBLISHED"
+    assert fixture.store.current("hello_plugin") is not None
+
+
+@pytest.mark.asyncio
+async def test_oidc_validation_error_code_is_propagated_without_downstream_effects() -> None:
+    # publication.py:710-711 — typed OIDC-отказ сохраняет свой OIDC_<code>.
+    fixture = _fixture()
+    fixture.oidc.error = OidcValidationError(OidcErrorCode.SOURCE_BINDING_MISMATCH, claim="sha")
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == OidcErrorCode.SOURCE_BINDING_MISMATCH.value
+    assert fixture.oidc.calls == 1
+    _assert_no_publication_downstream(fixture)
+
+
+@pytest.mark.asyncio
+async def test_oidc_unexpected_exception_is_typed_unavailable_without_downstream_effects() -> None:
+    # publication.py:712-716 — любая не-OIDC ошибка валидатора = fail-closed
+    # OIDC_VALIDATION_UNAVAILABLE, а не traceback и не публикация.
+    fixture = _fixture()
+    fixture.oidc.error = RuntimeError("validator exploded")
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.OIDC_VALIDATION_UNAVAILABLE.value
+    _assert_no_publication_downstream(fixture)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [ModuleSourceStatus.PROVISIONING, ModuleSourceStatus.DISABLED])
+async def test_source_not_ready_is_denied_before_oidc(status: ModuleSourceStatus) -> None:
+    # publication.py:905-906 — только READY source доходит до OIDC.
+    fixture = _fixture()
+    fixture.source_repository.source = replace(fixture.source, status=status)
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.SOURCE_NOT_READY.value
+    assert fixture.oidc.calls == 0
+    _assert_no_publication_downstream(fixture)
+
+
+@pytest.mark.asyncio
+async def test_source_repository_failure_is_unavailable_before_oidc() -> None:
+    # publication.py:897-900 — ошибка чтения source не обходится и не маскируется.
+    fixture = _fixture()
+    fixture.source_repository.error = RuntimeError("database is down")
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.SOURCE_REPOSITORY_UNAVAILABLE.value
+    assert fixture.oidc.calls == 0
+    _assert_no_publication_downstream(fixture)
+
+
+@pytest.mark.asyncio
+async def test_malformed_bundle_ref_is_quarantined_before_loader() -> None:
+    # publication.py:721-725 — непарсящийся OCI ref отклоняется до загрузки.
+    fixture = _fixture()
+    command = replace(fixture.command, bundle_ref="not-an-oci-ref")
+    result = await fixture.service.publish(command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.OCI_REF_INVALID.value
+    _assert_no_publication_downstream(fixture)
+
+
+@pytest.mark.asyncio
+async def test_bundle_ref_digest_mismatch_is_quarantined_before_loader() -> None:
+    # publication.py:726-727 — digest внутри ref обязан равняться bundle_digest.
+    fixture = _fixture()
+    command = replace(fixture.command, bundle_digest="sha256:" + "0" * 64)
+    result = await fixture.service.publish(command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.OCI_REF_INVALID.value
+    _assert_no_publication_downstream(fixture)
+
+
+@pytest.mark.asyncio
+async def test_same_image_ref_with_different_digest_is_collision() -> None:
+    # publication.py:728-732 — bundle и backend не могут делить один image_ref,
+    # даже когда digest'ы различны (отдельно от same-digest кейса выше).
+    fixture = _fixture()
+    other_digest = "sha256:" + "f" * 64
+    command = replace(
+        fixture.command,
+        bundle_ref="ghcr.io/ne-tort/plugins/hello/backend@" + other_digest,
+        bundle_digest=other_digest,
+        backend_ref="ghcr.io/ne-tort/plugins/hello/backend@" + other_digest,
+        backend_digest=other_digest,
+    )
+    result = await fixture.service.publish(command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.BACKEND_BUNDLE_COLLISION.value
+    _assert_no_publication_downstream(fixture)
+
+
+@pytest.mark.asyncio
+async def test_canonical_version_mismatch_is_quarantined_before_approval() -> None:
+    # publication.py:786-787 — version canonical blob обязана равняться запросу.
+    fixture = _fixture()
+    changed = copy.deepcopy(fixture.canonical)
+    changed["version"] = "1.2.1"
+    fixture.loader.canonical = _canonical_bytes(changed)
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.CANONICAL_MANIFEST_INVALID.value
+    assert fixture.approval_reader.get_calls == 0
+    assert fixture.store.current("hello_plugin") is None
+
+
+@pytest.mark.asyncio
+async def test_canonical_capabilities_mismatch_is_quarantined_before_approval() -> None:
+    # publication.py:788-789 — capabilities canonical blob = OCI-аннотации bundle.
+    fixture = _fixture()
+    changed = copy.deepcopy(fixture.canonical)
+    changed["capabilities"] = ["objects"]
+    fixture.loader.canonical = _canonical_bytes(changed)
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.CANONICAL_MANIFEST_INVALID.value
+    assert fixture.approval_reader.get_calls == 0
+    assert fixture.store.current("hello_plugin") is None
+
+
+@pytest.mark.asyncio
+async def test_canonical_min_platform_mismatch_is_quarantined_before_approval() -> None:
+    # publication.py:790-791 — min_platform_version canonical blob = OCI-аннотации.
+    fixture = _fixture()
+    changed = copy.deepcopy(fixture.canonical)
+    changed["min_platform_version"] = "5.0.0"
+    fixture.loader.canonical = _canonical_bytes(changed)
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.CANONICAL_MANIFEST_INVALID.value
+    assert fixture.approval_reader.get_calls == 0
+    assert fixture.store.current("hello_plugin") is None
+
+
+@pytest.mark.asyncio
+async def test_non_canonical_blob_bytes_are_quarantined_before_approval() -> None:
+    # publication.py:781-783 — blob обязан быть канонической сериализацией:
+    # тот же JSON с другим форматированием не является подписанным canonical.
+    fixture = _fixture()
+    fixture.loader.canonical = json.dumps(
+        fixture.canonical, ensure_ascii=False, sort_keys=True, indent=2
+    ).encode("utf-8")
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.CANONICAL_MANIFEST_INVALID.value
+    assert fixture.approval_reader.get_calls == 0
+    assert fixture.store.current("hello_plugin") is None
+
+
+def _verifier_with_identity(fixture: Fixture, *, identity: str, issuer: str) -> ArtifactVerifier:
+    return ArtifactVerifier(
+        fixture.cosign,
+        validator=lambda data: None,
+        identity=identity,
+        issuer=issuer,
+        compatibility=CompatibilityGate(platform_version="4.0.0"),
+        clock=lambda: FIXED_TIME,
+    )
+
+
+@pytest.mark.asyncio
+async def test_signer_identity_mismatch_quarantines_before_registry_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # publication.py:855-857 — даже APPLIED outcome чужого signer identity
+    # не даёт права на запись в registry.
+    fixture = _fixture()
+    foreign = _verifier_with_identity(
+        fixture,
+        identity="https://github.com/" + WORKFLOW[:-40] + "b" * 40,
+        issuer="https://token.actions.githubusercontent.com",
+    )
+    monkeypatch.setattr(fixture.service, "_verifier", foreign)
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.SIGNER_IDENTITY_MISMATCH.value
+    assert fixture.store.current("hello_plugin") is None
+
+
+@pytest.mark.asyncio
+async def test_signer_issuer_mismatch_quarantines_before_registry_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # publication.py:856 — issuer обязан оставаться GitHub Actions OIDC issuer.
+    fixture = _fixture()
+    foreign = _verifier_with_identity(
+        fixture,
+        identity=fixture.source.expected_signer_identity,
+        issuer="https://issuer.example.test",
+    )
+    monkeypatch.setattr(fixture.service, "_verifier", foreign)
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.SIGNER_IDENTITY_MISMATCH.value
+    assert fixture.store.current("hello_plugin") is None
+
+
+@pytest.mark.asyncio
+async def test_verifier_non_applied_outcome_is_quarantined_without_registry_write() -> None:
+    # publication.py:853-854 — не-APPLIED outcome никогда не публикуется.
+    fixture = _fixture()
+    fixture.cosign.verified = False
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.VERIFICATION_FAILED.value
+    assert fixture.store.current("hello_plugin") is None
+
+
+@pytest.mark.asyncio
+async def test_verifier_exception_is_quarantined_without_registry_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # publication.py:848-852 — исключение verifier = typed VERIFICATION_FAILED.
+    fixture = _fixture()
+
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("verifier exploded")
+
+    monkeypatch.setattr(fixture.verifier, "verify", boom)
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.VERIFICATION_FAILED.value
+    assert fixture.store.current("hello_plugin") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["manifest", "blob"])
+async def test_loader_unexpected_exception_is_typed_unavailable(stage: str) -> None:
+    # publication.py:766-770 — не-_LoaderError исключение loader = typed
+    # ARTIFACT_LOADER_UNAVAILABLE на обоих этапах загрузки.
+    fixture = _fixture()
+    if stage == "manifest":
+        fixture.loader.manifest_error = RuntimeError("network exploded")
+    else:
+        fixture.loader.blob_error = RuntimeError("network exploded")
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.ARTIFACT_LOADER_UNAVAILABLE.value
+    assert fixture.approval_reader.get_calls == 0
+    assert fixture.store.current("hello_plugin") is None
+
+
+@pytest.mark.asyncio
+async def test_approval_reader_exception_is_typed_unavailable() -> None:
+    # publication.py:925-926 — ошибка чтения approval не превращается в публикацию.
+    fixture = _fixture()
+    fixture.approval_reader.error = RuntimeError("approval store is down")
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.APPROVAL_UNAVAILABLE.value
+    assert fixture.store.current("hello_plugin") is None
+
+
+@pytest.mark.asyncio
+async def test_registry_exception_is_typed_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # publication.py:877-881 — исключение registry = typed REGISTRY_UNAVAILABLE.
+    fixture = _fixture()
+
+    async def boom(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("registry exploded")
+
+    monkeypatch.setattr(fixture.registry, "publish_async", boom)
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.REGISTRY_UNAVAILABLE.value
+
+
+@pytest.mark.asyncio
+async def test_registry_quarantine_artifact_error_code_is_propagated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # publication.py:885-891 — artifact_error_code из quarantine metadata имеет
+    # приоритет над generic reason и REGISTRY_CONFLICT.
+    fixture = _fixture()
+
+    async def fake_publish(*args: Any, **kwargs: Any) -> Any:
+        return SimpleNamespace(
+            outcome=RegistryOutcome.QUARANTINED,
+            quarantine=SimpleNamespace(
+                metadata={"artifact_error_code": "CUSTOM_QUARANTINE_CODE"},
+                reason=SimpleNamespace(value="FALLBACK_REASON"),
+            ),
+        )
+
+    monkeypatch.setattr(fixture.registry, "publish_async", fake_publish)
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == "CUSTOM_QUARANTINE_CODE"
+
+
+@pytest.mark.asyncio
+async def test_registry_quarantine_reason_is_fallback_when_metadata_lacks_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # publication.py:886-890 — без artifact_error_code используется reason.value.
+    fixture = _fixture()
+
+    async def fake_publish(*args: Any, **kwargs: Any) -> Any:
+        return SimpleNamespace(
+            outcome=RegistryOutcome.QUARANTINED,
+            quarantine=SimpleNamespace(
+                metadata={},
+                reason=SimpleNamespace(value="FALLBACK_REASON"),
+            ),
+        )
+
+    monkeypatch.setattr(fixture.registry, "publish_async", fake_publish)
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == "FALLBACK_REASON"
+
+
+@pytest.mark.asyncio
+async def test_registry_result_without_quarantine_is_registry_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # publication.py:882-892 — не-APPLIED без quarantine = generic REGISTRY_CONFLICT.
+    fixture = _fixture()
+
+    async def fake_publish(*args: Any, **kwargs: Any) -> Any:
+        return SimpleNamespace(outcome=RegistryOutcome.QUARANTINED, quarantine=None)
+
+    monkeypatch.setattr(fixture.registry, "publish_async", fake_publish)
+    result = await fixture.service.publish(fixture.command, oidc_token="fake-oidc-token")
+    assert result.status == "QUARANTINED"
+    assert result.code == PublicationErrorCode.REGISTRY_CONFLICT.value

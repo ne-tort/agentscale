@@ -5,12 +5,13 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
-from pathlib import Path
 import re
 import sys
 import tempfile
 import types
 import unittest
+from pathlib import Path
+from unittest import mock
 from urllib import parse
 
 
@@ -248,6 +249,13 @@ class FakeTransport:
         return response
 
 
+def _symlink_or_skip(test: unittest.TestCase, target: Path, link: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (NotImplementedError, OSError) as exc:
+        test.skipTest(f"symlinks are unavailable on this host: {exc}")
+
+
 class PublicationFixture:
     def __init__(self, root: str) -> None:
         self.root = Path(root)
@@ -274,7 +282,15 @@ class PublicationFixture:
             test.assertIn(SCANNER_IMAGE, command)
             test.assertIn("--pull=always", command)
             test.assertNotIn("plugins-quarantine", " ".join(command))
-            self.scan.write_text(json.dumps(report or _scan_report()), encoding="utf-8")
+            # run_pinned_scan mounts a disposable isolated staging dir at /out,
+            # never the trusted report parent (RUNNER_TEMP siblings).
+            mounts = [value[:-5] for value in command if value.endswith(":/out")]
+            test.assertEqual(len(mounts), 1)
+            test.assertNotEqual(Path(mounts[0]).absolute(), self.root.absolute())
+            test.assertNotIn(f"{self.root}:/out", command)
+            (Path(mounts[0]) / self.scan.name).write_text(
+                json.dumps(report or _scan_report()), encoding="utf-8"
+            )
 
         return run
 
@@ -659,6 +675,23 @@ class EvidenceTests(unittest.TestCase):
             )
         self.assertEqual(denied.exception.code, "SCAN_RELEASE_BINDING_MISMATCH")
 
+    def test_scan_artifact_name_and_schema_version_must_match(self) -> None:
+        cases = (
+            ("ArtifactName", BACKEND_REF.replace("/plugins/", "/plugins-quarantine/")),
+            ("SchemaVersion", 1),
+        )
+        for field, value in cases:
+            with self.subTest(field=field):
+                report = _scan_report()
+                report[field] = value
+                with self.assertRaises(publication.PublicationBlocked) as denied:
+                    publication.validate_scan_report(
+                        report,
+                        backend_ref=BACKEND_REF,
+                        scanner_image=SCANNER_IMAGE,
+                    )
+                self.assertEqual(denied.exception.code, "SCAN_EVIDENCE_INVALID")
+
     def test_scan_findings_are_quarantine_not_publication(self) -> None:
         report = _scan_report()
         report["Results"][0]["Vulnerabilities"] = [
@@ -1003,6 +1036,581 @@ class WorkflowStaticTests(unittest.TestCase):
         self.assertNotIn("\n      source_id:", triggers)
         self.assertNotIn("\n      capabilities:", triggers)
         self.assertIn("PLUGIN_GRANTED_CAPABILITIES: ${{ vars.PLUGIN_GRANTED_CAPABILITIES", workflow)
+
+
+class RerunApprovalWindowTests(unittest.TestCase):
+    """B2 operational guard: a same-commit rerun needs its exact digest approved.
+
+    The release decision, the pinned scan, the CSP probe and the platform
+    payload are all bound to the exact bundle/backend digests of the current
+    run. Evidence from a previous run can never be reused for a new digest.
+    The expected digest is shared with the operator through the job summary
+    even when the gate fails, so the durable approval can be issued for that
+    exact digest before the rerun publish. These tests change no digest,
+    approval, OIDC or evidence semantics.
+    """
+
+    def test_previous_run_decision_digest_is_rejected_before_any_io(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = PublicationFixture(tmp)
+            stale = _decision()
+            stale_digest = "sha256:" + "0" * 64
+            stale["backend_digest"] = stale_digest
+            stale["manifest_summary"]["backend_digest"] = stale_digest
+            fixture.decision.write_text(json.dumps(stale), encoding="utf-8")
+            transport = FakeTransport([])
+            with self.assertRaises(publication.PublicationBlocked) as denied:
+                publication.publish(
+                    **fixture.kwargs(
+                        fixture.environment(),
+                        transport,
+                        lambda command: self.fail("scanner must not run for a stale digest"),
+                    )
+                )
+            self.assertEqual(denied.exception.code, "RELEASE_VERIFICATION_REQUIRED")
+            self.assertEqual(transport.calls, [])
+            self.assertFalse(fixture.scan.exists())
+
+    def test_rerun_posts_only_exact_current_digests_after_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = PublicationFixture(tmp)
+            transport = FakeTransport([
+                csp_response(),
+                _json_response(200, {"value": "h.p.s"}),
+                _json_response(201, _payload_response()),
+            ])
+            outcome = publication.publish(
+                **fixture.kwargs(
+                    fixture.environment(), transport, fixture.scan_runner(self)
+                )
+            )
+            self.assertEqual(outcome.status, "PUBLISHED")
+            self.assertEqual(
+                [call["method"] for call in transport.calls], ["HEAD", "GET", "POST"]
+            )
+            self.assertIn(BUNDLE_DIGEST, transport.calls[0]["url"])
+            payload = json.loads(transport.calls[-1]["body"])
+            self.assertEqual(payload["bundle_digest"], BUNDLE_DIGEST)
+            self.assertEqual(payload["backend_digest"], BACKEND_DIGEST)
+            self.assertEqual(payload["bundle_ref"], BUNDLE_REF)
+            self.assertEqual(payload["backend_ref"], BACKEND_REF)
+            self.assertEqual(payload["commit_sha"], COMMIT)
+            # Same commit, new run attempt: provenance points at this rerun.
+            self.assertEqual(
+                payload["run_url"],
+                "https://github.com/ne-tort/example/actions/runs/123/attempts/2",
+            )
+
+    def test_failed_gate_summary_shares_exact_digest_for_operator_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = Path(tmp) / "summary.md"
+            publication._append_summary(
+                str(summary),
+                outcome=publication.PublicationOutcome(
+                    status="QUARANTINED", code="APPROVAL_REQUIRED"
+                ),
+                plugin_id="hello_plugin",
+                version="1.2.0",
+                bundle_ref=BUNDLE_REF,
+                backend_ref=BACKEND_REF,
+            )
+            text = summary.read_text(encoding="utf-8")
+            # The operator can pre-approve exactly this digest for the rerun;
+            # a failed gate still claims no PUBLISHED result.
+            self.assertIn(BUNDLE_REF, text)
+            self.assertIn(BACKEND_REF, text)
+            self.assertIn(BUNDLE_DIGEST, text)
+            self.assertIn(BACKEND_DIGEST, text)
+            self.assertIn("APPROVAL_REQUIRED", text)
+            self.assertNotIn("Platform publication returned PUBLISHED", text)
+
+    def test_workflow_rerun_window_binds_exact_digests_and_operator_summary(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        publish = workflow[
+            workflow.index(
+                "- name: Verify independent release evidence and publish through platform OIDC"
+            ) :
+        ]
+        for argument in (
+            '--bundle-ref "$RELEASE_ARTIFACT_REF"',
+            '--bundle-digest "$ARTIFACT_DIGEST"',
+            '--backend-ref "$RELEASE_BACKEND_REF"',
+            '--backend-digest "$BACKEND_DIGEST"',
+            '--release-decision "$RUNNER_TEMP/release-decision.json"',
+            '--summary "$GITHUB_STEP_SUMMARY"',
+        ):
+            with self.subTest(argument=argument):
+                self.assertIn(argument, publish)
+        # No caller-controlled approval/source input may replace pre-approval.
+        self.assertNotIn("--approval", publish)
+        self.assertNotIn("--source-id", publish)
+
+
+class IndependentEvidenceBeforeReleaseWriteTests(unittest.TestCase):
+    """B4 guard: independent scan/CSP evidence precedes any release GHCR write.
+
+    Parent decision 2026-11-12: the pinned release scan and the static-origin
+    CSP/digest probe are release prerequisites, not post-promotion checks.
+    The dedicated evidence step now runs before promotion in the workflow;
+    the ordering test holds that position, and the no-write test is bounded
+    to the evidence step itself (promote writes afterwards are allowed).
+    Backend fail-closed semantics (scan findings or CSP mismatch => quarantine,
+    no platform POST) are asserted elsewhere and are not weakened here.
+    """
+
+    def test_release_scan_and_csp_evidence_precede_release_promotion(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        promote = workflow.index("id: promote")
+        evidence = workflow.index("Verify independent release evidence")
+        self.assertLess(
+            evidence,
+            promote,
+            "independent release scan/CSP evidence must complete before the "
+            "release GHCR write/promote step (B4)",
+        )
+
+    def test_evidence_step_performs_no_registry_write(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        # Bound the slice to the NEW pre-promotion evidence step itself: any
+        # oras/cosign/buildx write inside it fails the test, while the promote
+        # step (id: promote) that follows is allowed to write.
+        start = workflow.index("- name: Verify independent release evidence before promotion")
+        end = workflow.index("id: promote", start)
+        evidence_step = workflow[start:end]
+        self.assertNotIn("oras copy", evidence_step)
+        self.assertNotIn("oras push", evidence_step)
+        self.assertNotIn("cosign copy", evidence_step)
+        self.assertNotIn("docker buildx build --push", evidence_step)
+
+
+class ScanRunnerContractTests(unittest.TestCase):
+    """P0-C: pinned scanner invocation and the pre-seeded-report guard."""
+
+    def test_scanner_command_is_read_only_and_policy_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            docker_config = Path(tmp) / "docker-config.json"
+            docker_config.write_text("{}", encoding="utf-8")
+            report_path = Path(tmp) / "scan-report.json"
+            captured: list[list[str]] = []
+            staging_seen: list[Path] = []
+
+            def runner(command: list[str]) -> None:
+                captured.append(command)
+                mounts = [value[:-5] for value in command if value.endswith(":/out")]
+                if len(mounts) != 1:
+                    raise AssertionError(f"expected one /out mount, got {mounts}")
+                staging = Path(mounts[0]).absolute()
+                staging_seen.append(staging)
+                # Isolated staging only: the trusted report parent must not be
+                # mounted writable into the scanner container.
+                self.assertNotEqual(staging, report_path.parent.absolute())
+                self.assertNotIn(f"{report_path.parent}:/out", command)
+                (staging / report_path.name).write_text(
+                    json.dumps(_scan_report()), encoding="utf-8"
+                )
+
+            config = publication.PublicationConfig.from_environment(_environment())
+            publication.run_pinned_scan(
+                config,
+                backend_ref=BACKEND_REF,
+                report_path=str(report_path),
+                docker_config_path=str(docker_config),
+                runner=runner,
+            )
+            self.assertEqual(len(captured), 1)
+            command = captured[0]
+            # Registry credentials are mounted read-only, never writable.
+            self.assertIn(f"{docker_config}:/root/.docker/config.json:ro", command)
+            self.assertNotIn(f"{docker_config}:/root/.docker/config.json", command)
+            self.assertEqual(command[command.index("--scanners") + 1], "vuln")
+            self.assertEqual(command[command.index("--severity") + 1], "HIGH,CRITICAL")
+            self.assertIn("--ignore-unfixed=false", command)
+            # exit-code 0 only produces the report; findings still quarantine
+            # through validate_scan_report and never silently publish.
+            self.assertEqual(command[command.index("--exit-code") + 1], "0")
+            self.assertIn(SCANNER_IMAGE, command)
+            self.assertEqual(command[-1], BACKEND_REF)
+            self.assertIn(f"/out/{report_path.name}", command)
+            self.assertEqual(len(staging_seen), 1)
+            # Staging is removed after the run; the validated report is moved
+            # to the destination only after the staged file is checked.
+            self.assertFalse(staging_seen[0].exists())
+            self.assertTrue(report_path.is_file())
+
+    def test_pre_seeded_scan_report_is_rejected_before_scanner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = PublicationFixture(tmp)
+            # A report planted before the run is not evidence of this scan.
+            fixture.scan.write_text(json.dumps(_scan_report()), encoding="utf-8")
+            transport = FakeTransport([])
+            with self.assertRaises(publication.PublicationBlocked) as denied:
+                publication.publish(
+                    **fixture.kwargs(
+                        fixture.environment(),
+                        transport,
+                        lambda command: self.fail("scanner must not run for a pre-seeded report"),
+                    )
+                )
+            self.assertEqual(denied.exception.code, "SCAN_EVIDENCE_INVALID")
+            self.assertEqual(transport.calls, [])
+
+    def test_symlinked_docker_config_is_rejected_before_scanner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = PublicationFixture(tmp)
+            real_config = fixture.root / "real-docker-config.json"
+            real_config.write_text("{}", encoding="utf-8")
+            fixture.docker_config.unlink()
+            _symlink_or_skip(self, real_config, fixture.docker_config)
+            transport = FakeTransport([])
+            with self.assertRaises(publication.PublicationBlocked) as denied:
+                publication.publish(
+                    **fixture.kwargs(
+                        fixture.environment(),
+                        transport,
+                        lambda command: self.fail("scanner must not run for a symlinked config"),
+                    )
+                )
+            self.assertEqual(denied.exception.code, "SCAN_EVIDENCE_INVALID")
+            self.assertEqual(transport.calls, [])
+
+    def test_symlinked_pre_seeded_report_is_rejected_before_scanner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = PublicationFixture(tmp)
+            planted = fixture.root / "pre-seeded-scan.json"
+            planted.write_text(json.dumps(_scan_report()), encoding="utf-8")
+            _symlink_or_skip(self, planted, fixture.scan)
+            transport = FakeTransport([])
+            with self.assertRaises(publication.PublicationBlocked) as denied:
+                publication.publish(
+                    **fixture.kwargs(
+                        fixture.environment(),
+                        transport,
+                        lambda command: self.fail("scanner must not run for a symlinked report"),
+                    )
+                )
+            self.assertEqual(denied.exception.code, "SCAN_EVIDENCE_INVALID")
+            self.assertEqual(transport.calls, [])
+
+    def test_scanner_timeout_is_a_typed_unavailable_failure(self) -> None:
+        timeout = publication.subprocess.TimeoutExpired(
+            cmd=["docker", "run"],
+            timeout=publication.SCAN_TIMEOUT_SECONDS,
+        )
+        with mock.patch.object(publication.subprocess, "run", side_effect=timeout) as run:
+            with self.assertRaises(publication.PublicationBlocked) as denied:
+                publication._default_scan_runner(["docker", "run"])
+        self.assertEqual(denied.exception.code, "SCANNER_UNAVAILABLE")
+        self.assertEqual(denied.exception.status, "BLOCKED")
+        run.assert_called_once()
+        self.assertEqual(
+            run.call_args.kwargs["timeout"],
+            publication.SCAN_TIMEOUT_SECONDS,
+        )
+
+
+class OidcRequestHardeningTests(unittest.TestCase):
+    def test_preexisting_audience_parameter_is_rejected_without_request(self) -> None:
+        env = _environment()
+        env["ACTIONS_ID_TOKEN_REQUEST_URL"] += "&audience=evil-audience"
+        transport = FakeTransport([])
+        with self.assertRaises(publication.PublicationBlocked) as denied:
+            publication.fetch_github_oidc(transport, env)
+        self.assertEqual(denied.exception.code, "OIDC_REQUEST_INVALID")
+        self.assertEqual(transport.calls, [])
+
+    def test_non_github_and_suffix_lookalike_hosts_are_rejected(self) -> None:
+        for url in (
+            "https://evil.example.test/jobs/oidctoken?api-version=2.0",
+            "https://actions.githubusercontent.com.evil.example.test/jobs/oidctoken",
+            "http://actions.githubusercontent.com/jobs/oidctoken",
+        ):
+            with self.subTest(url=url):
+                env = _environment()
+                env["ACTIONS_ID_TOKEN_REQUEST_URL"] = url
+                transport = FakeTransport([])
+                with self.assertRaises(publication.PublicationBlocked) as denied:
+                    publication.fetch_github_oidc(transport, env)
+                self.assertEqual(denied.exception.code, "OIDC_REQUEST_INVALID")
+                self.assertEqual(transport.calls, [])
+
+    def test_malformed_oidc_token_shapes_are_rejected(self) -> None:
+        for envelope in (
+            {"value": "only.two"},
+            {"value": "a.b.c.d"},
+            {"value": ""},
+            {"value": "h.p.s tail"},
+            {"value": 12345},
+            {},
+        ):
+            with self.subTest(envelope=envelope):
+                transport = FakeTransport([_json_response(200, envelope)])
+                with self.assertRaises(publication.PublicationBlocked) as denied:
+                    publication.fetch_github_oidc(transport, _environment())
+                self.assertEqual(denied.exception.code, "OIDC_RESPONSE_INVALID")
+
+    def test_oidc_http_and_oversized_token_block_before_platform_post(self) -> None:
+        oversized_token = "h." + "a" * 16385 + ".s"
+        cases = (
+            ("oversized-token", 200, oversized_token, "OIDC_RESPONSE_INVALID"),
+            ("oidc-http-503", 503, "h.p.s", "OIDC_HTTP_ERROR"),
+        )
+        for name, status, token, code in cases:
+            with self.subTest(case=name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    fixture = PublicationFixture(tmp)
+                    transport = FakeTransport([
+                        csp_response(),
+                        _json_response(status, {"value": token}),
+                    ])
+                    with self.assertRaises(publication.PublicationBlocked) as denied:
+                        publication.publish(
+                            **fixture.kwargs(
+                                fixture.environment(),
+                                transport,
+                                fixture.scan_runner(self),
+                            )
+                        )
+                    self.assertEqual(denied.exception.code, code)
+                    self.assertEqual(
+                        [call["method"] for call in transport.calls],
+                        ["HEAD", "GET"],
+                    )
+
+
+class PublicationResponseStrictTests(unittest.TestCase):
+    def _payload(self) -> dict:
+        return {
+            "plugin_id": "hello_plugin",
+            "version": "1.2.0",
+            "bundle_digest": BUNDLE_DIGEST,
+            "backend_digest": BACKEND_DIGEST,
+            "source_id": "psrc_0123456789abcdef",
+        }
+
+    def test_201_with_quarantined_status_is_not_a_publication(self) -> None:
+        response = _json_response(
+            201, _payload_response(status="QUARANTINED", code="APPROVAL_REQUIRED")
+        )
+        with self.assertRaises(publication.PublicationBlocked) as denied:
+            publication.parse_publication_response(response, self._payload())
+        self.assertEqual(denied.exception.code, "APPROVAL_REQUIRED")
+        self.assertEqual(denied.exception.status, "QUARANTINED")
+
+    def test_201_with_extra_response_key_is_rejected(self) -> None:
+        document = _payload_response()
+        document["unexpected"] = "extra"
+        with self.assertRaises(publication.PublicationBlocked) as denied:
+            publication.parse_publication_response(
+                _json_response(201, document), self._payload()
+            )
+        self.assertEqual(denied.exception.code, "PUBLICATION_RESPONSE_INVALID")
+
+    def test_201_with_digest_mismatch_is_rejected(self) -> None:
+        for key in ("bundle_digest", "backend_digest"):
+            with self.subTest(key=key):
+                document = _payload_response()
+                document[key] = "sha256:" + "0" * 64
+                with self.assertRaises(publication.PublicationBlocked) as denied:
+                    publication.parse_publication_response(
+                        _json_response(201, document), self._payload()
+                    )
+                self.assertEqual(denied.exception.code, "PUBLICATION_RESPONSE_MISMATCH")
+
+
+class ReleaseTrustRepositoryIdTests(unittest.TestCase):
+    def test_empty_or_zero_expected_repository_id_is_fail_closed(self) -> None:
+        for value in ("", "0"):
+            with self.subTest(value=value):
+                env = _release_environment(event_name="push", direct=True)
+                env["EXPECTED_REPOSITORY_ID"] = value
+                with self.assertRaises(publication.PublicationBlocked) as denied:
+                    publication.ReleaseTrust.from_environment(env)
+                self.assertEqual(denied.exception.code, "GITHUB_SOURCE_CONTEXT_INVALID")
+
+
+class CspBindingHardeningTests(unittest.TestCase):
+    def _source_binding(self) -> publication.SourceBinding:
+        config = publication.PublicationConfig.from_environment(_environment())
+        return config.sources[0]
+
+    def test_csp_non_200_response_is_fail_closed(self) -> None:
+        response = publication.HttpResponse(
+            status=503, headers=csp_response().headers, body=b""
+        )
+        with self.assertRaises(publication.PublicationBlocked) as denied:
+            publication.validate_csp_response(
+                response, source=self._source_binding(), bundle_digest=BUNDLE_DIGEST
+            )
+        self.assertEqual(denied.exception.code, "CSP_ORIGIN_HTTP_ERROR")
+
+    def test_csp_missing_bundle_digest_header_is_fail_closed(self) -> None:
+        headers = {key.lower(): value for key, value in STATIC_HEADERS.items()}
+        response = publication.HttpResponse(status=200, headers=headers, body=b"")
+        with self.assertRaises(publication.PublicationBlocked) as denied:
+            publication.validate_csp_response(
+                response, source=self._source_binding(), bundle_digest=BUNDLE_DIGEST
+            )
+        self.assertEqual(denied.exception.code, "CSP_ARTIFACT_BINDING_MISMATCH")
+
+    def test_csp_template_without_bundle_digest_field_is_rejected(self) -> None:
+        document = _source()["static_origin"]
+        document["url_template"] = (
+            "https://plugins.example.test/{plugin_id}/{version}/index.html"
+        )
+        with self.assertRaises(publication.PublicationBlocked) as denied:
+            publication.StaticOriginConfig.parse(document)
+        self.assertEqual(denied.exception.code, "CSP_CONFIG_INVALID")
+
+    def test_csp_url_for_requires_digest_inside_url_path(self) -> None:
+        origin = publication.StaticOriginConfig(
+            url_template="https://plugins.example.test/{plugin_id}/{version}/index.html",
+            plugin_shell_origin="https://agentscale.example.test",
+            security_headers={},
+        )
+        with self.assertRaises(publication.PublicationBlocked) as denied:
+            origin.url_for(
+                plugin_id="hello_plugin", version="1.2.0", bundle_digest=BUNDLE_DIGEST
+            )
+        self.assertEqual(denied.exception.code, "CSP_ORIGIN_INVALID")
+
+class StaticOriginDevHttpAllowlistTests(unittest.TestCase):
+    """Cluster-internal http static origin only behind an exact allowlist.
+
+    R1 contract: HTTPS static origins keep working without an allowlist;
+    plain http is accepted only when the exact http://host[:port] origin is
+    allowlisted; the gate re-runs on the formatted url_for result, so format
+    fields cannot move a probe onto another origin.
+    """
+
+    DEV_ORIGIN = "http://plugin-static.agentscale-dev.svc.cluster.local:8081"
+    DEV_TEMPLATE = (
+        DEV_ORIGIN
+        + "/internal/plugin-static/v1/bundles"
+        + "/{plugin_id}/{version}/{bundle_digest}/ready"
+    )
+
+    def _http_static_origin(self, template: str | None = None) -> dict:
+        document = _source()["static_origin"]
+        document["url_template"] = template if template is not None else self.DEV_TEMPLATE
+        return document
+
+    def test_exact_cluster_internal_origin_and_port_is_accepted(self) -> None:
+        origin = publication.StaticOriginConfig.parse(
+            self._http_static_origin(), dev_allowlist=frozenset({self.DEV_ORIGIN})
+        )
+        url = origin.url_for(
+            plugin_id="hello_plugin", version="1.2.0", bundle_digest=BUNDLE_DIGEST
+        )
+        parsed = parse.urlsplit(url)
+        self.assertEqual(parsed.scheme, "http")
+        self.assertEqual(
+            parsed.hostname, "plugin-static.agentscale-dev.svc.cluster.local"
+        )
+        self.assertEqual(parsed.port, 8081)
+        self.assertIn(BUNDLE_DIGEST, parsed.path)
+        self.assertEqual(origin.plugin_shell_origin, "https://agentscale.example.test")
+
+    def test_other_host_or_port_is_rejected_even_with_allowlist(self) -> None:
+        for template in (
+            self.DEV_TEMPLATE.replace(
+                "plugin-static.agentscale-dev", "other-static.agentscale-dev"
+            ),
+            self.DEV_TEMPLATE.replace(":8081", ":9090"),
+        ):
+            with self.subTest(template=template):
+                with self.assertRaises(publication.PublicationBlocked) as denied:
+                    publication.StaticOriginConfig.parse(
+                        self._http_static_origin(template),
+                        dev_allowlist=frozenset({self.DEV_ORIGIN}),
+                    )
+                self.assertEqual(denied.exception.code, "CSP_CONFIG_INVALID")
+
+    def test_http_static_origin_without_allowlist_is_rejected(self) -> None:
+        with self.assertRaises(publication.PublicationBlocked) as denied:
+            publication.StaticOriginConfig.parse(self._http_static_origin())
+        self.assertEqual(denied.exception.code, "CSP_CONFIG_INVALID")
+        document = _config()
+        document["sources"][0]["static_origin"] = self._http_static_origin()
+        with self.assertRaises(publication.PublicationBlocked) as denied:
+            publication.PublicationConfig.from_environment(_environment(document))
+        self.assertEqual(denied.exception.code, "CSP_CONFIG_INVALID")
+
+    def test_https_static_origin_without_allowlist_still_accepted(self) -> None:
+        origin = publication.StaticOriginConfig.parse(_source()["static_origin"])
+        self.assertEqual(origin.dev_allowlist, frozenset())
+        self.assertEqual(
+            origin.url_for(
+                plugin_id="hello_plugin", version="1.2.0", bundle_digest=BUNDLE_DIGEST
+            ),
+            "https://plugins.example.test/hello_plugin/1.2.0/" + BUNDLE_DIGEST + "/index.html",
+        )
+
+    def test_environment_allowlist_enables_http_static_origin_end_to_end(self) -> None:
+        document = _config()
+        document["sources"][0]["static_origin"] = self._http_static_origin()
+        env = _environment(document)
+        env[publication.DEV_HTTP_ALLOWLIST_ENV] = json.dumps([self.DEV_ORIGIN])
+        config = publication.PublicationConfig.from_environment(env)
+        static = config.sources[0].static_origin
+        self.assertIsNotNone(static)
+        assert static is not None
+        url = static.url_for(
+            plugin_id="hello_plugin", version="1.2.0", bundle_digest=BUNDLE_DIGEST
+        )
+        self.assertTrue(
+            url.startswith(self.DEV_ORIGIN + "/internal/plugin-static/v1/bundles/")
+        )
+
+    def test_formatted_url_cannot_escape_the_allowlisted_origin(self) -> None:
+        origin = publication.StaticOriginConfig(
+            url_template=self.DEV_TEMPLATE,
+            plugin_shell_origin="https://agentscale.example.test",
+            security_headers=dict(STATIC_HEADERS),
+        )
+        with self.assertRaises(publication.PublicationBlocked) as denied:
+            origin.url_for(
+                plugin_id="hello_plugin", version="1.2.0", bundle_digest=BUNDLE_DIGEST
+            )
+        self.assertEqual(denied.exception.code, "CSP_ORIGIN_INVALID")
+        allowed = publication.StaticOriginConfig(
+            url_template=self.DEV_TEMPLATE,
+            plugin_shell_origin="https://agentscale.example.test",
+            security_headers=dict(STATIC_HEADERS),
+            dev_allowlist=frozenset({self.DEV_ORIGIN}),
+        )
+        url = allowed.url_for(
+            plugin_id="hello_plugin", version="1.2.0", bundle_digest=BUNDLE_DIGEST
+        )
+        parsed = parse.urlsplit(url)
+        self.assertEqual(f"http://{parsed.hostname}:{parsed.port}", self.DEV_ORIGIN)
+
+    def test_userinfo_query_fragment_and_other_schemes_are_denied(self) -> None:
+        for template in (
+            self.DEV_TEMPLATE.replace(
+                "http://", "http://user:pass@"
+            ),
+            self.DEV_TEMPLATE + "?token=x",
+            self.DEV_TEMPLATE + "#frag",
+            self.DEV_TEMPLATE.replace("http://", "ftp://"),
+        ):
+            with self.subTest(template=template):
+                with self.assertRaises(publication.PublicationBlocked) as denied:
+                    publication.StaticOriginConfig.parse(
+                        self._http_static_origin(template),
+                        dev_allowlist=frozenset({self.DEV_ORIGIN}),
+                    )
+                self.assertEqual(denied.exception.code, "CSP_CONFIG_INVALID")
+
+    def test_wildcard_allowlist_entries_are_rejected(self) -> None:
+        for entry in (
+            "http://*.svc.cluster.local",
+            "http://*",
+            "http://plugin-static.*:8081",
+        ):
+            with self.subTest(entry=entry):
+                with self.assertRaises(publication.PublicationBlocked) as denied:
+                    publication._parse_dev_allowlist(json.dumps([entry]))
+                self.assertEqual(denied.exception.code, "DEV_ALLOWLIST_INVALID")
 
 
 if __name__ == "__main__":

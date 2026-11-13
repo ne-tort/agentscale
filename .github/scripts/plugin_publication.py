@@ -18,13 +18,16 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
+import shutil
 import string
 import subprocess
 import sys
+import tempfile
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Sequence
+from pathlib import Path
+from typing import Any
 from urllib import error, parse, request
 
 OIDC_AUDIENCE = "agentscale-plugin-ci"
@@ -106,6 +109,8 @@ REQUIRED_CSP_DIRECTIVES = frozenset(
     {"default-src", "base-uri", "object-src", "frame-ancestors"}
 )
 UNTRUSTED_EVIDENCE_KEYS = frozenset({"scan_verified", "csp_verified"})
+RELEASE_EVIDENCE_SCHEMA_VERSION = 1
+RELEASE_EVIDENCE_MAX_BYTES = 1024 * 1024
 
 
 class PublicationBlocked(Exception):
@@ -274,6 +279,207 @@ def _file_digest(path: str) -> str:
     ).hexdigest()
 
 
+def _validate_quarantine_refs(
+    *, bundle_ref: str, bundle_digest: str, backend_ref: str, backend_digest: str
+) -> None:
+    """Digest-pinned quarantine pair; namespace mirror of _validate_release_refs."""
+    if (
+        OCI_REF_RE.fullmatch(bundle_ref) is None
+        or OCI_REF_RE.fullmatch(backend_ref) is None
+        or DIGEST_RE.fullmatch(bundle_digest) is None
+        or DIGEST_RE.fullmatch(backend_digest) is None
+        or not bundle_ref.endswith("@" + bundle_digest)
+        or not backend_ref.endswith("@" + backend_digest)
+        or bundle_ref == backend_ref
+        or bundle_digest == backend_digest
+        or "/plugins/" in bundle_ref
+        or "/plugins/" in backend_ref
+        or "/plugins-quarantine/" not in bundle_ref
+        or "/plugins-quarantine/" not in backend_ref
+    ):
+        raise PublicationBlocked("RELEASE_REFS_INVALID")
+    backend_repository = backend_ref.rsplit("@", 1)[0]
+    bundle_repository = bundle_ref.rsplit("@", 1)[0]
+    if not backend_repository.endswith("/backend") or bundle_repository != (
+        backend_repository[:-8] + "/bundle"
+    ):
+        raise PublicationBlocked("RELEASE_REFS_INVALID")
+
+
+def build_release_evidence_document(
+    *,
+    source: SourceBinding,
+    context: GitHubContext,
+    plugin_id: str,
+    version: str,
+    quarantine_bundle_ref: str,
+    quarantine_bundle_digest: str,
+    quarantine_backend_ref: str,
+    quarantine_backend_digest: str,
+    release_bundle_ref: str,
+    release_bundle_digest: str,
+    release_backend_ref: str,
+    release_backend_digest: str,
+    scanner_image: str,
+    scan_report_path: str,
+    scan_report_sha256: str,
+    csp_url: str,
+    csp_status: int,
+    csp_headers: Mapping[str, str],
+) -> dict[str, Any]:
+    """Canonical bounded evidence snapshot; single source of truth for keys."""
+    origin = source.static_origin
+    if origin is None:
+        raise PublicationBlocked("CSP_EVIDENCE_REQUIRED")
+    headers: dict[str, str] = {}
+    for name in list(origin.security_headers) + ["x-agentscale-bundle-digest"]:
+        value = csp_headers.get(name)
+        if not isinstance(value, str) or not value:
+            raise PublicationBlocked("CSP_SECURITY_HEADERS_FAILED")
+        headers[name] = value
+    return {
+        "schema_version": RELEASE_EVIDENCE_SCHEMA_VERSION,
+        "plugin_id": plugin_id,
+        "version": version,
+        "repository": context.repository,
+        "commit_sha": context.commit_sha,
+        "builder_identity": context.builder_identity,
+        "source_id": source.source_id,
+        "company_id": source.company_id,
+        "scanner_image": scanner_image,
+        "quarantine": {
+            "bundle_ref": quarantine_bundle_ref,
+            "bundle_digest": quarantine_bundle_digest,
+            "backend_ref": quarantine_backend_ref,
+            "backend_digest": quarantine_backend_digest,
+        },
+        "release": {
+            "bundle_ref": release_bundle_ref,
+            "bundle_digest": release_bundle_digest,
+            "backend_ref": release_backend_ref,
+            "backend_digest": release_backend_digest,
+        },
+        "scan_report": {"path": scan_report_path, "sha256": scan_report_sha256},
+        "csp": {
+            "url": csp_url,
+            "status": csp_status,
+            "bundle_digest": quarantine_bundle_digest,
+            "headers": headers,
+        },
+    }
+
+
+def _validate_release_evidence(
+    document: Any,
+    *,
+    config: PublicationConfig,
+    source: SourceBinding,
+    context: GitHubContext,
+    plugin_id: str,
+    version: str,
+    bundle_ref: str,
+    bundle_digest: str,
+    backend_ref: str,
+    backend_digest: str,
+    scan_report_sha256: str,
+) -> None:
+    """Strict revalidation of pre-promotion evidence against current inputs."""
+    _reject_self_asserted_evidence(document, code="RELEASE_EVIDENCE_UNTRUSTED")
+    expected_keys = {
+        "schema_version",
+        "plugin_id",
+        "version",
+        "repository",
+        "commit_sha",
+        "builder_identity",
+        "source_id",
+        "company_id",
+        "scanner_image",
+        "quarantine",
+        "release",
+        "scan_report",
+        "csp",
+    }
+    if not isinstance(document, dict) or set(document) != expected_keys:
+        raise PublicationBlocked("RELEASE_EVIDENCE_INVALID")
+    if (
+        document["schema_version"] != RELEASE_EVIDENCE_SCHEMA_VERSION
+        or isinstance(document["schema_version"], bool)
+        or document["plugin_id"] != plugin_id
+        or document["version"] != version
+        or document["repository"] != context.repository
+        or document["commit_sha"] != context.commit_sha
+        or document["builder_identity"] != context.builder_identity
+        or document["source_id"] != source.source_id
+        or document["company_id"] != source.company_id
+        or document["scanner_image"] != config.scanner_image
+    ):
+        raise PublicationBlocked("RELEASE_EVIDENCE_INVALID")
+    pair_keys = {"bundle_ref", "bundle_digest", "backend_ref", "backend_digest"}
+    quarantine = document["quarantine"]
+    release = document["release"]
+    for pair in (quarantine, release):
+        if not isinstance(pair, dict) or set(pair) != pair_keys:
+            raise PublicationBlocked("RELEASE_EVIDENCE_INVALID")
+    try:
+        _validate_quarantine_refs(
+            bundle_ref=quarantine["bundle_ref"],
+            bundle_digest=quarantine["bundle_digest"],
+            backend_ref=quarantine["backend_ref"],
+            backend_digest=quarantine["backend_digest"],
+        )
+        _validate_release_refs(
+            bundle_ref=release["bundle_ref"],
+            bundle_digest=release["bundle_digest"],
+            backend_ref=release["backend_ref"],
+            backend_digest=release["backend_digest"],
+        )
+    except PublicationBlocked as exc:
+        raise PublicationBlocked("RELEASE_EVIDENCE_INVALID") from exc
+    if (
+        release["bundle_ref"] != bundle_ref
+        or release["bundle_digest"] != bundle_digest
+        or release["backend_ref"] != backend_ref
+        or release["backend_digest"] != backend_digest
+        # Promotion is a repository copy: immutable digests are identical.
+        or quarantine["bundle_digest"] != release["bundle_digest"]
+        or quarantine["backend_digest"] != release["backend_digest"]
+    ):
+        raise PublicationBlocked("RELEASE_EVIDENCE_INVALID")
+    scan_report = document["scan_report"]
+    if (
+        not isinstance(scan_report, dict)
+        or set(scan_report) != {"path", "sha256"}
+        or not isinstance(scan_report["path"], str)
+        or not scan_report["path"]
+        or scan_report["sha256"] != scan_report_sha256
+    ):
+        raise PublicationBlocked("RELEASE_EVIDENCE_INVALID")
+    origin = source.static_origin
+    if origin is None:
+        raise PublicationBlocked("CSP_EVIDENCE_REQUIRED")
+    csp = document["csp"]
+    if not isinstance(csp, dict) or set(csp) != {"url", "status", "bundle_digest", "headers"}:
+        raise PublicationBlocked("RELEASE_EVIDENCE_INVALID")
+    expected_header_names = set(origin.security_headers) | {"x-agentscale-bundle-digest"}
+    if (
+        csp["bundle_digest"] != bundle_digest
+        or csp["url"]
+        != origin.url_for(plugin_id=plugin_id, version=version, bundle_digest=bundle_digest)
+        or csp["status"] != 200
+        or isinstance(csp["status"], bool)
+        or not isinstance(csp["headers"], dict)
+        or set(csp["headers"]) != expected_header_names
+        or any(
+            not isinstance(value, str) or not value
+            for value in csp["headers"].values()
+        )
+    ):
+        raise PublicationBlocked("RELEASE_EVIDENCE_INVALID")
+    response = HttpResponse(status=200, headers=dict(csp["headers"]), body=b"")
+    validate_csp_response(response, source=source, bundle_digest=bundle_digest)
+
+
 def _exact_keys(value: Any, expected: set[str], *, code: str) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != expected:
         raise PublicationBlocked(code)
@@ -355,11 +561,44 @@ def _parse_dev_allowlist(raw: str) -> frozenset[str]:
             or parsed.password is not None
             or "?" in item
             or "#" in item
+            or "*" in item
             or item in result
         ):
             raise PublicationBlocked("DEV_ALLOWLIST_INVALID")
         result.add(item)
     return frozenset(result)
+
+
+def _static_origin_url_allowed(
+    raw: str, *, dev_allowlist: frozenset[str], code: str
+) -> parse.SplitResult:
+    """Static-origin URL gate: HTTPS is unchanged; HTTP needs an exact origin.
+
+    Plain HTTP is accepted only when the canonical http://host[:port] origin
+    is present in the dev allowlist. Userinfo, query, fragment, wildcards and
+    any other scheme stay fail-closed for both schemes. Callers validate the
+    template probe and the formatted URL, so format fields cannot move a
+    probe onto another origin.
+    """
+    parsed = _split_url(raw, code=code)
+    if (
+        not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or "#" in raw
+        or "?" in raw
+        or any(ord(char) < 32 for char in raw)
+    ):
+        raise PublicationBlocked(code)
+    if parsed.scheme == "https":
+        return parsed
+    if parsed.scheme != "http":
+        raise PublicationBlocked(code)
+    host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+    origin = f"http://{host}" + (f":{parsed.port}" if parsed.port is not None else "")
+    if not dev_allowlist or origin not in dev_allowlist:
+        raise PublicationBlocked(code)
+    return parsed
 
 
 def _exact_https_origin(raw: Any, *, code: str) -> str:
@@ -403,9 +642,10 @@ class StaticOriginConfig:
     url_template: str
     plugin_shell_origin: str
     security_headers: Mapping[str, str]
+    dev_allowlist: frozenset[str] = frozenset()
 
     @classmethod
-    def parse(cls, value: Any) -> StaticOriginConfig:
+    def parse(cls, value: Any, *, dev_allowlist: frozenset[str] = frozenset()) -> StaticOriginConfig:
         document = _exact_keys(
             value,
             {"url_template", "plugin_shell_origin", "security_headers"},
@@ -432,7 +672,9 @@ class StaticOriginConfig:
             )
         except (KeyError, ValueError) as exc:
             raise PublicationBlocked("CSP_CONFIG_INVALID") from exc
-        static = _validate_https_url(probe, code="CSP_CONFIG_INVALID")
+        static = _static_origin_url_allowed(
+            probe, dev_allowlist=dev_allowlist, code="CSP_CONFIG_INVALID"
+        )
         shell = _split_url(shell_origin, code="CSP_CONFIG_INVALID")
         if (
             static.hostname == shell.hostname
@@ -456,6 +698,7 @@ class StaticOriginConfig:
             url_template=template,
             plugin_shell_origin=shell_origin,
             security_headers=headers,
+            dev_allowlist=dev_allowlist,
         )
 
     def url_for(self, *, plugin_id: str, version: str, bundle_digest: str) -> str:
@@ -465,7 +708,9 @@ class StaticOriginConfig:
             )
         except (KeyError, ValueError) as exc:
             raise PublicationBlocked("CSP_CONFIG_INVALID") from exc
-        parsed = _validate_https_url(url, code="CSP_ORIGIN_INVALID")
+        parsed = _static_origin_url_allowed(
+            url, dev_allowlist=self.dev_allowlist, code="CSP_ORIGIN_INVALID"
+        )
         if bundle_digest not in parsed.path:
             raise PublicationBlocked("CSP_ORIGIN_INVALID")
         return url
@@ -501,7 +746,7 @@ class SourceBinding:
     static_origin: StaticOriginConfig | None
 
     @classmethod
-    def parse(cls, value: Any) -> SourceBinding:
+    def parse(cls, value: Any, *, dev_allowlist: frozenset[str] = frozenset()) -> SourceBinding:
         document = _exact_keys(
             value,
             {
@@ -542,7 +787,11 @@ class SourceBinding:
         ):
             raise PublicationBlocked("SOURCE_CONFIG_INVALID")
         raw_origin = document["static_origin"]
-        origin = None if raw_origin is None else StaticOriginConfig.parse(raw_origin)
+        origin = (
+            None
+            if raw_origin is None
+            else StaticOriginConfig.parse(raw_origin, dev_allowlist=dev_allowlist)
+        )
         return cls(
             source_id=source_id,
             company_id=company_id,
@@ -581,7 +830,9 @@ class PublicationConfig:
         raw_sources = document["sources"]
         if not isinstance(raw_sources, list) or len(raw_sources) > 256:
             raise PublicationBlocked("SOURCE_CONFIG_INVALID")
-        sources = tuple(SourceBinding.parse(item) for item in raw_sources)
+        sources = tuple(
+            SourceBinding.parse(item, dev_allowlist=allowlist) for item in raw_sources
+        )
         identities = [(item.source_id, item.company_id, item.plugin_id, item.repository) for item in sources]
         if len(set(identities)) != len(identities) or len({item.source_id for item in sources}) != len(
             sources
@@ -885,7 +1136,8 @@ def run_pinned_scan(
     docker_config_path: str,
     runner: Callable[[list[str]], None] = _default_scan_runner,
 ) -> None:
-    destination = Path(report_path)
+    """Run the pinned scanner with an isolated, disposable output mount."""
+    destination = Path(os.path.abspath(report_path))
     docker_config = Path(docker_config_path)
     if (
         not docker_config_path
@@ -895,38 +1147,66 @@ def run_pinned_scan(
         or destination.is_symlink()
     ):
         raise PublicationBlocked("SCAN_EVIDENCE_INVALID")
+    staging: Path | None = None
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
+        staging = Path(
+            tempfile.mkdtemp(
+                prefix=f".{destination.name}.scan-", dir=str(destination.parent)
+            )
+        )
+        command = [
+            "docker",
+            "run",
+            "--rm",
+            "--pull=always",
+            "--volume",
+            f"{docker_config_path}:/root/.docker/config.json:ro",
+            "--volume",
+            f"{staging}:/out",
+            config.scanner_image,
+            "image",
+            "--scanners",
+            "vuln",
+            "--severity",
+            "HIGH,CRITICAL",
+            "--ignore-unfixed=false",
+            "--no-progress",
+            "--exit-code",
+            "0",
+            "--format",
+            "json",
+            "--output",
+            f"/out/{destination.name}",
+            backend_ref,
+        ]
+        runner(command)
+        if staging.is_symlink() or not staging.is_dir():
+            raise PublicationBlocked("SCAN_EVIDENCE_REQUIRED")
+        staged_report = staging / destination.name
+        if staged_report.is_symlink() or not staged_report.is_file():
+            raise PublicationBlocked("SCAN_EVIDENCE_REQUIRED")
+        if destination.exists() or destination.is_symlink():
+            raise PublicationBlocked("SCAN_EVIDENCE_INVALID")
+        os.replace(staged_report, destination)
+    except PublicationBlocked:
+        raise
     except OSError as exc:
         raise PublicationBlocked("SCAN_EVIDENCE_INVALID") from exc
-    command = [
-        "docker",
-        "run",
-        "--rm",
-        "--pull=always",
-        "--volume",
-        f"{docker_config_path}:/root/.docker/config.json:ro",
-        "--volume",
-        f"{destination.parent}:/out",
-        config.scanner_image,
-        "image",
-        "--scanners",
-        "vuln",
-        "--severity",
-        "HIGH,CRITICAL",
-        "--ignore-unfixed=false",
-        "--no-progress",
-        "--exit-code",
-        "0",
-        "--format",
-        "json",
-        "--output",
-        f"/out/{destination.name}",
-        backend_ref,
-    ]
-    runner(command)
-    if not destination.is_file() or destination.is_symlink():
-        raise PublicationBlocked("SCAN_EVIDENCE_REQUIRED")
+    except Exception as exc:
+        raise PublicationBlocked("SCANNER_FAILED") from exc
+    finally:
+        cleanup_error: OSError | None = None
+        if staging is not None:
+            try:
+                if staging.is_symlink():
+                    staging.unlink()
+                elif staging.exists():
+                    shutil.rmtree(staging)
+            except OSError as exc:
+                cleanup_error = exc
+        if cleanup_error is not None:
+            raise PublicationBlocked("SCAN_EVIDENCE_INVALID") from cleanup_error
 
 
 def validate_scan_report(
@@ -1131,6 +1411,7 @@ def publish(
     scan_report_path: str,
     bundle_sbom_path: str,
     bundle_provenance_path: str,
+    release_evidence_path: str | None = None,
     scan_runner: Callable[[list[str]], None] = _default_scan_runner,
 ) -> PublicationOutcome:
     config = PublicationConfig.from_environment(environ)
@@ -1166,34 +1447,68 @@ def publish(
         backend_ref=backend_ref,
         backend_digest=backend_digest,
     )
-    run_pinned_scan(
-        config,
-        backend_ref=backend_ref,
-        report_path=scan_report_path,
-        docker_config_path=environ.get("DOCKER_CONFIG_PATH", ""),
-        runner=scan_runner,
-    )
-    scan_report = _read_json(
-        scan_report_path,
-        maximum=MAX_SCAN_REPORT_BYTES,
-        code="SCAN_EVIDENCE_REQUIRED",
-    )
-    validate_scan_report(
-        scan_report, backend_ref=backend_ref, scanner_image=config.scanner_image
-    )
-    if source.static_origin is None:
-        raise PublicationBlocked("CSP_EVIDENCE_REQUIRED")
-    csp_url = source.static_origin.url_for(
-        plugin_id=plugin_id, version=version, bundle_digest=bundle_digest
-    )
-    csp_response = _send(
-        transport,
-        "HEAD",
-        csp_url,
-        headers={"Accept": "text/html", "Cache-Control": "no-cache"},
-        unavailable_code="CSP_ORIGIN_UNAVAILABLE",
-    )
-    validate_csp_response(csp_response, source=source, bundle_digest=bundle_digest)
+    if release_evidence_path is not None:
+        # Pre-promotion evidence: the pinned scan and the CSP probe already ran
+        # against the QUARANTINE backend/bundle BEFORE any release GHCR write.
+        # Revalidate the recorded facts against current inputs; never re-run
+        # the scanner, never re-probe, never trust caller evidence booleans.
+        release_evidence = _read_json(
+            release_evidence_path,
+            maximum=RELEASE_EVIDENCE_MAX_BYTES,
+            code="RELEASE_EVIDENCE_REQUIRED",
+        )
+        scan_report_bytes = _read_bounded(
+            scan_report_path,
+            maximum=MAX_SCAN_REPORT_BYTES,
+            code="SCAN_EVIDENCE_REQUIRED",
+        )
+        _validate_release_evidence(
+            release_evidence,
+            config=config,
+            source=source,
+            context=context,
+            plugin_id=plugin_id,
+            version=version,
+            bundle_ref=bundle_ref,
+            bundle_digest=bundle_digest,
+            backend_ref=backend_ref,
+            backend_digest=backend_digest,
+            scan_report_sha256="sha256:" + hashlib.sha256(scan_report_bytes).hexdigest(),
+        )
+        validate_scan_report(
+            _json_loads(scan_report_bytes, code="SCAN_EVIDENCE_REQUIRED"),
+            backend_ref=release_evidence["quarantine"]["backend_ref"],
+            scanner_image=config.scanner_image,
+        )
+    else:
+        run_pinned_scan(
+            config,
+            backend_ref=backend_ref,
+            report_path=scan_report_path,
+            docker_config_path=environ.get("DOCKER_CONFIG_PATH", ""),
+            runner=scan_runner,
+        )
+        scan_report = _read_json(
+            scan_report_path,
+            maximum=MAX_SCAN_REPORT_BYTES,
+            code="SCAN_EVIDENCE_REQUIRED",
+        )
+        validate_scan_report(
+            scan_report, backend_ref=backend_ref, scanner_image=config.scanner_image
+        )
+        if source.static_origin is None:
+            raise PublicationBlocked("CSP_EVIDENCE_REQUIRED")
+        csp_url = source.static_origin.url_for(
+            plugin_id=plugin_id, version=version, bundle_digest=bundle_digest
+        )
+        csp_response = _send(
+            transport,
+            "HEAD",
+            csp_url,
+            headers={"Accept": "text/html", "Cache-Control": "no-cache"},
+            unavailable_code="CSP_ORIGIN_UNAVAILABLE",
+        )
+        validate_csp_response(csp_response, source=source, bundle_digest=bundle_digest)
 
     # Only now have independent scan and CSP facts both been established.
     payload = build_publication_payload(
@@ -1273,6 +1588,12 @@ def _parser() -> argparse.ArgumentParser:
     publication.add_argument("--scan-report", required=True)
     publication.add_argument("--bundle-sbom", required=True)
     publication.add_argument("--bundle-provenance", required=True)
+    publication.add_argument(
+        "--release-evidence",
+        default="",
+        help="Pre-promotion release evidence JSON; when set, the recorded scan/CSP "
+        "facts are revalidated instead of running a new scan/probe",
+    )
     publication.add_argument("--summary", default="")
     return parser
 
@@ -1313,6 +1634,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             scan_report_path=args.scan_report,
             bundle_sbom_path=args.bundle_sbom,
             bundle_provenance_path=args.bundle_provenance,
+            release_evidence_path=args.release_evidence or None,
         )
     except PublicationBlocked as exc:
         outcome = PublicationOutcome(status=exc.status, code=exc.code)

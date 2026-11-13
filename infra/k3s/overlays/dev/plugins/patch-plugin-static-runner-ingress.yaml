@@ -1,0 +1,25 @@
+# Dev-only JSON6902 patch к NetworkPolicy plugin-static-egress (Scope B1).
+#
+# ЗАЧЕМ: CI evidence HEAD на /internal/plugin-static/v1/bundles/.../ready
+# приходит с self-hosted GitHub Actions runner'а на VM 172.31.156.203
+# (docs/07-infrastructure/runbook.md), а НЕ из подов agentscale-dev. Base NP
+# разрешает ingress только подам agentscale-api/plugin-gateway — runner был бы
+# заблокирован. Service остаётся ClusterIP, публичного Ingress НЕТ.
+#
+# ПОЧЕМУ JSON6902 add, а не strategic merge: у NetworkPolicy spec.ingress нет
+# merge-ключа, strategic merge ЗАМЕНИЛ бы весь список и потерял base-правила
+# внутренних потребителей. 'add /spec/ingress/-' ДОБАВЛЯЕТ правило в конец,
+# base-список остаётся нетронутым.
+#
+# СКОУП: ровно один peer ipBlock 172.31.156.203/32 (сама VM, /32 = один хост),
+# только TCP 8081. НИКАКОГО world-CIDR, внешнего Service-типа или широких
+# pod-меток на весь namespace. Prod-оверлей этот patch не подключает (dev only).
+- op: add
+  path: /spec/ingress/-
+  value:
+    from:
+      - ipBlock:
+          cidr: 172.31.156.203/32 # self-hosted CI runner VM (единственный хост)
+    ports:
+      - protocol: TCP
+        port: 8081

@@ -17,6 +17,16 @@ namespace: agentscale-dev
 patches:
   - path: patch-plugin-gateway-config.yaml
   - path: patch-plugin-event-signing.yaml
+  # Dev-only (Scope B1): CI evidence HEAD приходит с self-hosted runner VM
+  # 172.31.156.203/32, а не из подов. JSON6902 add /spec/ingress/- ДОБАВЛЯЕТ
+  # peer к base NP plugin-static-egress, не заменяя base-правила. Service
+  # остаётся ClusterIP без публичного Ingress.
+  - path: patch-plugin-static-runner-ingress.yaml
+    target:
+      group: networking.k8s.io
+      version: v1
+      kind: NetworkPolicy
+      name: plugin-static-egress
 
 # Динамические Deployment'ы плагинов создаёт admin API при grant, а НЕ Git.
 # Они живут под ignoreDifferences /spec/replicas в plugin-platform.yaml.

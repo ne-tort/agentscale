@@ -16,6 +16,13 @@ RUN set -eu; \
     if ! printf '%s\n' "${PYTHON_BASE_IMAGE:-}" | grep -Eq '^(python|ghcr.io/ne-tort/python):3\.13-slim@sha256:[0-9a-f]{64}$'; then \
         printf '%s\n' 'FATAL: PYTHON_BASE_IMAGE must be python or ghcr.io/ne-tort/python:3.13-slim@sha256:<64 lowercase hex>.' >&2; \
         exit 1; \
+    fi; \
+    # The CI VM answers AAAA but has no usable IPv6 egress. BuildKit RUN steps
+    # read THIS image's /etc/gai.conf, not the host's, so set the same IPv4
+    # preference here, before the first networked RUN. getaddrinfo(3) ordering
+    # only; IPv6 stays enabled. Guarded append: an existing rule is kept as-is.
+    if ! grep -Eq '^[[:space:]]*precedence[[:space:]]+::ffff:0:0/96[[:space:]]+100' /etc/gai.conf 2>/dev/null; then \
+        printf '%s\n' 'precedence ::ffff:0:0/96 100' >> /etc/gai.conf; \
     fi
 
 # ---- Python dependencies: только полный воспроизводимый lock -----------------

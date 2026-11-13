@@ -249,6 +249,18 @@ class GitHubActionsOidcValidator:
                 )
         if ref != source.expected_ref:
             raise OidcValidationError(OidcErrorCode.SOURCE_BINDING_MISMATCH, claim="ref")
+        # Direct push/dispatch uses the protected source branch; reusable calls
+        # must be pinned to the immutable workflow commit.
+        workflow_ref = source.trusted_workflow_ref.rsplit("@", 1)[1]
+        if claims.event_name == "workflow_call":
+            valid_workflow_mode = re.fullmatch(r"[0-9a-f]{40}", workflow_ref) is not None
+        else:
+            valid_workflow_mode = workflow_ref == source.expected_ref
+        if not valid_workflow_mode:
+            raise OidcValidationError(
+                OidcErrorCode.INVALID_CLAIM,
+                claim="job_workflow_ref",
+            )
         return claims
 
     def _validate_time_and_audience(self, claims: Mapping[str, Any]) -> None:
@@ -260,7 +272,10 @@ class GitHubActionsOidcValidator:
             value = claims.get(name)
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise OidcValidationError(OidcErrorCode.INVALID_CLAIM, claim=name)
-            numeric[name] = float(value)
+            try:
+                numeric[name] = float(value)
+            except OverflowError as exc:
+                raise OidcValidationError(OidcErrorCode.INVALID_CLAIM, claim=name) from exc
             if not math.isfinite(numeric[name]):
                 raise OidcValidationError(OidcErrorCode.INVALID_CLAIM, claim=name)
         now = float(self._clock())

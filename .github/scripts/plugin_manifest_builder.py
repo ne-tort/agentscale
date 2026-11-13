@@ -15,17 +15,18 @@ from __future__ import annotations
 
 import argparse
 import copy
-from datetime import datetime, timezone
 import gzip
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import sys
 import tarfile
-from typing import Any, Sequence
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 SCHEMA_VERSION = 2
 OCI_MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json"
@@ -82,9 +83,10 @@ _SEMVER_RE = re.compile(
     r"(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?"
     r"(?:\+(?P<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
 )
-#: Fully digest-pinned OCI reference. Docker requires a tag before the digest in
-#: a Dockerfile, so both ``repo@sha256:...`` and ``repo:tag@sha256:...`` are
-#: valid pins; the digest alone decides identity and ``:latest`` stays banned by
+#: Docker base-image reference. Docker requires a tag before the digest in a
+#: Dockerfile, so both ``repo@sha256:...`` and ``repo:tag@sha256:...`` are
+#: valid pins; Docker Hub single-component bases such as python:3.13-slim remain
+#: supported. The digest alone decides identity and ``:latest`` stays banned by
 #: _assert_no_forbidden_keys. Repository names keep docker's [._-] alphabet.
 #: One path component of a docker repository name.
 _REPO_COMPONENT = r"[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*"
@@ -96,6 +98,16 @@ _REF_RE = re.compile(
     r")"
     r"(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9._-]{0,127}))?"
     r"@(?P<digest>sha256:[0-9a-f]{64})$"
+)
+
+#: Signed OCI artifact/backend references deliberately use the stricter grammar
+#: of plugin_verify.py: an explicit registry host/path and @sha256 digest, with
+#: no tag@digest or single-component repository. Keep this separate from the
+#: Docker base grammar above so valid Docker Hub base images do not regress.
+_ARTIFACT_REF_RE = re.compile(
+    r"^[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[0-9]+)?"
+    r"/[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*"
+    r"@sha256:[0-9a-f]{64}$"
 )
 _PATH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 _ABSOLUTE_PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]*$")
@@ -141,7 +153,7 @@ def _object_without_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _read_json(path: str | os.PathLike[str]) -> Any:
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             return json.load(handle, object_pairs_hook=_object_without_duplicates)
     except ManifestError:
         raise
@@ -192,7 +204,7 @@ def _require_digest(value: Any, field: str) -> str:
 
 
 def _require_backend_ref(value: Any) -> tuple[str, str]:
-    if not isinstance(value, str) or _REF_RE.fullmatch(value) is None or ":latest" in value:
+    if not isinstance(value, str) or _ARTIFACT_REF_RE.fullmatch(value) is None or ":latest" in value:
         _fail(ManifestErrorCode.INVALID_DIGEST, "backend_image_ref must be a digest-pinned OCI ref")
     return value, value.rsplit("@", 1)[1]
 
@@ -426,7 +438,10 @@ def _validate_dockerfile_bases(
     if re.search(r"\b(?:curl|wget)\b", text) and "sha256sum -c" not in text:
         _fail(ManifestErrorCode.INVALID_LAYOUT, "Dockerfile downloads require an explicit sha256sum -c check")
     if "pip install" in text and "--require-hashes" not in text:
-        _fail(ManifestErrorCode.INVALID_LAYOUT, "pip installs must use --require-hashes with a locked requirements file")
+        _fail(
+            ManifestErrorCode.INVALID_LAYOUT,
+            "pip installs must use --require-hashes with a locked requirements file",
+        )
     for raw_line in lines:
         stripped = raw_line.strip()
         if stripped.lower().startswith("# syntax="):
@@ -474,6 +489,11 @@ def _copy_plain_tree(source: Path, destination: Path) -> None:
                 _fail(ManifestErrorCode.INVALID_LAYOUT, f"symlink is forbidden in plugin payload: {name}")
         for name in files:
             source_file = root_path / name
+            if not source_file.is_file():
+                _fail(
+                    ManifestErrorCode.INVALID_LAYOUT,
+                    f"non-regular file is forbidden in plugin payload: {name}",
+                )
             relative = source_file.relative_to(source)
             target = destination / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -481,7 +501,20 @@ def _copy_plain_tree(source: Path, destination: Path) -> None:
 
 
 def _make_deterministic_archive(source: Path, destination: Path) -> None:
-    files = sorted(path for path in source.rglob("*") if path.is_file())
+    # Fail closed on anything that is not a plain directory or regular file.
+    # The old is_file() filter was unsafe: rglob follows symlinked directories
+    # on Python <= 3.12 (smuggling external files into the signed layer), and
+    # on >= 3.13 it silently drops them instead of rejecting the payload.
+    files: list[Path] = []
+    for path in source.rglob("*"):
+        if path.is_symlink():
+            _fail(ManifestErrorCode.INVALID_LAYOUT, "archive input contains a symlink")
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            _fail(ManifestErrorCode.INVALID_LAYOUT, "archive input contains a non-regular file")
+        files.append(path)
+    files.sort()
     if not files:
         _fail(ManifestErrorCode.INVALID_LAYERS, f"empty payload directory {source}")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -549,10 +582,18 @@ def prepare_package(
     if not migration_file.is_file():
         _fail(ManifestErrorCode.INVALID_LAYOUT, "manifest migrations.path does not exist")
 
+    # Migrations get the same fail-closed plain-tree staging as the frontend:
+    # archiving the source tree directly let symlinked directories smuggle
+    # files from outside the package root into the signed bundle.
+    staged_migrations = output / "migrations"
+    if staged_migrations.exists():
+        shutil.rmtree(staged_migrations)
+    _copy_plain_tree(migrations, staged_migrations)
+
     frontend_archive = output / "frontend-dist.tar.gz"
     migrations_archive = output / "migrations.tar.gz"
     _make_deterministic_archive(staged_frontend, frontend_archive)
-    _make_deterministic_archive(migrations, migrations_archive)
+    _make_deterministic_archive(staged_migrations, migrations_archive)
 
     dockerfile = package / "Dockerfile"
     if not dockerfile.is_file():
@@ -581,17 +622,26 @@ def prepare_package(
     }
 
 
-def _layer_descriptor(path: Path, media_type: str, role: str, title: str) -> dict[str, Any]:
+def _layer_descriptor(
+    path: Path,
+    media_type: str,
+    role: str,
+    title: str,
+    *,
+    extra_annotations: dict[str, str] | None = None,
+) -> dict[str, Any]:
     if not path.is_file() or path.is_symlink():
         _fail(ManifestErrorCode.MISSING_FILE, f"layer payload not found: {path}")
+    annotations = {
+        A_LAYER_ROLE: role,
+        "org.opencontainers.image.title": title,
+        **(extra_annotations or {}),
+    }
     return {
         "mediaType": media_type,
         "digest": _sha256_file(path),
         "size": path.stat().st_size,
-        "annotations": {
-            A_LAYER_ROLE: role,
-            "org.opencontainers.image.title": title,
-        },
+        "annotations": annotations,
     }
 
 
@@ -619,13 +669,21 @@ def build_bundle_manifest(
 
     layers = [
         _layer_descriptor(canonical_path, PLUGIN_MANIFEST_MEDIA_TYPE, ROLE_MANIFEST, "canonical-manifest.json"),
-        _layer_descriptor(Path(frontend_archive), FRONTEND_MEDIA_TYPE, ROLE_FRONTEND, "frontend-dist.tar.gz"),
+        _layer_descriptor(
+            Path(frontend_archive),
+            FRONTEND_MEDIA_TYPE,
+            ROLE_FRONTEND,
+            "frontend-dist.tar.gz",
+            extra_annotations={
+                "agentscale.plugin.frontend.entry": source_manifest["frontend"]["entry"],
+            },
+        ),
         _layer_descriptor(Path(migrations_archive), MIGRATIONS_MEDIA_TYPE, ROLE_MIGRATIONS, "migrations.tar.gz"),
     ]
     # ORAS adds org.opencontainers.image.created to manifest.annotations when
     # absent. Set it here so expected and pushed bytes are identical before signing.
     annotations = {
-        "org.opencontainers.image.created": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "org.opencontainers.image.created": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         A_PLUGIN_ID: source_manifest["plugin_id"],
         A_MANIFEST_VERSION: source_manifest["version"],
         A_PROTOCOL: PLUGIN_PROTOCOL,
@@ -735,6 +793,10 @@ def validate_signed_manifest(
             canonical_layer = layer
             if layer.get("mediaType") != PLUGIN_MANIFEST_MEDIA_TYPE:
                 _fail(ManifestErrorCode.INVALID_LAYERS, "wrong canonical manifest layer mediaType")
+        elif role == ROLE_FRONTEND and layer.get("mediaType") != FRONTEND_MEDIA_TYPE:
+            _fail(ManifestErrorCode.INVALID_LAYERS, "wrong frontend layer mediaType")
+        elif role == ROLE_MIGRATIONS and layer.get("mediaType") != MIGRATIONS_MEDIA_TYPE:
+            _fail(ManifestErrorCode.INVALID_LAYERS, "wrong migrations layer mediaType")
     if canonical_layer is None or canonical_layer["digest"] != config_digest or canonical_layer["size"] != config_size:
         _fail(ManifestErrorCode.INVALID_LAYERS, "canonical manifest must be both config and an identical blob")
 
@@ -752,7 +814,10 @@ def validate_signed_manifest(
             _fail(ManifestErrorCode.INVALID_MIN_PLATFORM, "minimum platform differs from source manifest")
         if not {ROLE_FRONTEND, ROLE_MIGRATIONS} <= set(role_counts):
             _fail(ManifestErrorCode.INVALID_LAYERS, "source contract requires frontend and migrations blobs")
-        if annotations.get(A_SOURCE_REPOSITORY) != source_repository or _REPOSITORY_RE.fullmatch(str(source_repository)) is None:
+        if (
+            annotations.get(A_SOURCE_REPOSITORY) != source_repository
+            or _REPOSITORY_RE.fullmatch(str(source_repository)) is None
+        ):
             _fail(ManifestErrorCode.INVALID_MANIFEST, "source repository annotation mismatch")
         if annotations.get(A_SOURCE_SHA) != source_sha or _SHA_RE.fullmatch(str(source_sha)) is None:
             _fail(ManifestErrorCode.INVALID_MANIFEST, "source SHA annotation mismatch")
@@ -787,7 +852,9 @@ def _source_provenance(builder_id: str, build_type: str, repository: str, sha: s
                 "digest": {"sha1": sha},
             }
         },
-        "metadata": {"buildInvocationId": run_id},
+        # SLSA v0.2 canonical key is buildInvocationID; plugin_verify.py
+        # accepts both casings, so old attestations remain verifiable.
+        "metadata": {"buildInvocationID": run_id},
     }
 
 
@@ -909,7 +976,7 @@ def build_bundle_evidence(
         "documentNamespace": f"https://agentscale.dev/spdx/{source_repository}/{source_sha}/{bundle_digest}",
         "comment": f"source_repository={source_repository};source_sha={source_sha};artifact=bundle",
         "creationInfo": {
-            "created": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "created": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
             "creators": ["Tool: agentscale-canonical-bundle-sbom/v1"],
         },
         "packages": package_entries,
