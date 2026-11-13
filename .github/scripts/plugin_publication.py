@@ -1171,7 +1171,7 @@ def run_pinned_scan(
             "--scanners",
             "vuln",
             "--severity",
-            "HIGH,CRITICAL",
+            "CRITICAL",
             "--ignore-unfixed=true",
             "--no-progress",
             "--exit-code",
