@@ -114,15 +114,38 @@ def main(
             maximum=publication.MAX_CONFIG_BYTES,
             code="RELEASE_VERIFICATION_REQUIRED",
         )
-        publication.validate_release_decision(
-            decision,
-            plugin_id=args.plugin_id,
-            version=args.plugin_version,
-            bundle_ref=args.quarantine_bundle_ref,
-            bundle_digest=args.quarantine_bundle_digest,
-            backend_ref=args.quarantine_backend_ref,
-            backend_digest=args.quarantine_backend_digest,
-        )
+        # Decision top-level fields use quarantine refs, but manifest_summary
+        # stores the RELEASE backend ref (from signed annotations). Validate
+        # each against its correct namespace instead of conflating them.
+        if not isinstance(decision, dict) or (
+            decision.get("decision") != "PUBLISH_ALLOWED"
+            or decision.get("publish_allowed") is not True
+            or decision.get("code") != "OK"
+            or decision.get("artifact_ref") != args.quarantine_bundle_ref
+            or decision.get("backend_ref") != args.quarantine_backend_ref
+            or decision.get("backend_digest") != args.quarantine_backend_digest
+        ):
+            raise publication.PublicationBlocked("RELEASE_VERIFICATION_REQUIRED")
+        summary = decision.get("manifest_summary")
+        if not isinstance(summary, dict) or (
+            summary.get("plugin_id") != args.plugin_id
+            or summary.get("version") != args.plugin_version
+            or summary.get("manifest_content_verified") is not True
+            or summary.get("backend_image_ref") != args.release_backend_ref
+            or summary.get("backend_digest") != args.release_backend_digest
+        ):
+            raise publication.PublicationBlocked("RELEASE_VERIFICATION_REQUIRED")
+        checks = decision.get("checks")
+        if not isinstance(checks, list):
+            raise publication.PublicationBlocked("RELEASE_VERIFICATION_REQUIRED")
+        observed: set[str] = set()
+        for item in checks:
+            name = item.get("name") if isinstance(item, dict) else None
+            if not isinstance(name, str) or item.get("ok") is not True:
+                raise publication.PublicationBlocked("RELEASE_VERIFICATION_REQUIRED")
+            observed.add(name)
+        if not publication.REQUIRED_RELEASE_CHECKS <= observed:
+            raise publication.PublicationBlocked("RELEASE_VERIFICATION_REQUIRED")
         publication._validate_manifest_binding(
             publication._read_json(
                 args.manifest,
