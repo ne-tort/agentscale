@@ -681,7 +681,9 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Extract backend buildx SBOM and provenance from actual image descriptors
-        if: steps.resume_preflight.outputs.resume != 'true'
+        # Unconditional: resume must re-run evidence extraction so a rerun can
+        # restore missing SBOM/provenance for the SAME immutable backend digest.
+        if: always()
         run: |
           set -euo pipefail
           EVIDENCE="$RUNNER_TEMP/backend-evidence"
@@ -738,12 +740,32 @@ jobs:
           python3 "$CI_DIR/plugin_manifest_builder.py" backend-evidence             --evidence-dir "$EVIDENCE"             --backend-image-manifest-digest "$BACKEND_IMAGE_MANIFEST_DIGEST"             --source-repository "$GITHUB_REPOSITORY" --source-sha "$GITHUB_SHA"             --builder-id "$TRUSTED_BUILDER_ID" --run-id "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"             --output-sbom "$RUNNER_TEMP/backend-sbom.json"             --output-provenance "$RUNNER_TEMP/backend-provenance.json"
 
       - name: Sign and attest quarantined backend by digest
-        if: steps.resume_preflight.outputs.resume != 'true'
+        # Unconditional: a rerun must restore signatures/attestations for the SAME
+        # immutable backend digest without rebuilding the backend image.
+        if: always()
         run: |
           set -euo pipefail
-          cosign sign --yes "$BACKEND_REF"
-          cosign attest --yes --predicate "$RUNNER_TEMP/backend-sbom.json"             --type spdxjson "$BACKEND_REF"
-          cosign attest --yes --predicate "$RUNNER_TEMP/backend-provenance.json"             --type slsaprovenance "$BACKEND_REF"
+          # Bounded retry only for cosign sign/attest commands (Fulcio i/o
+          # timeouts on attest are transient): max 3 attempts per command,
+          # backoff 5/10 seconds, set -e safe, fail after the final attempt.
+          # Registry copy/verify paths intentionally keep no retries.
+          cosign_retry() {
+            local attempt=1
+            local rc=0
+            until "$@"; rc=$?; [[ $rc -eq 0 || $attempt -ge 3 ]]; do
+              local delay=$((attempt * 5))
+              echo "::warning::cosign attempt $attempt failed ($*); retrying in ${delay}s" >&2
+              sleep "$delay"
+              attempt=$((attempt + 1))
+            done
+            if [[ $rc -ne 0 ]]; then
+              echo "::error::cosign failed after 3 attempts: $*" >&2
+              return "$rc"
+            fi
+          }
+          cosign_retry cosign sign --yes "$BACKEND_REF"
+          cosign_retry cosign attest --yes --predicate "$RUNNER_TEMP/backend-sbom.json"             --type spdxjson "$BACKEND_REF"
+          cosign_retry cosign attest --yes --predicate "$RUNNER_TEMP/backend-provenance.json"             --type slsaprovenance "$BACKEND_REF"
 
       - name: Build and push canonical OCI bundle only to quarantine
         if: steps.resume_preflight.outputs.resume != 'true'
@@ -768,13 +790,32 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Generate independent bundle evidence, sign and attest by digest
-        if: steps.resume_preflight.outputs.resume != 'true'
+        # Unconditional: a rerun must restore missing signatures/attestations and
+        # re-emit evidence for the SAME immutable bundle digest. Only the bundle
+        # build/push stays conditional so the digest contract is unchanged.
+        if: always()
         run: |
           set -euo pipefail
+          # Bounded retry helper (shared contract with the backend sign step):
+          # max 3 attempts per cosign sign/attest command, backoff 5/10 seconds.
+          cosign_retry() {
+            local attempt=1
+            local rc=0
+            until "$@"; rc=$?; [[ $rc -eq 0 || $attempt -ge 3 ]]; do
+              local delay=$((attempt * 5))
+              echo "::warning::cosign attempt $attempt failed ($*); retrying in ${delay}s" >&2
+              sleep "$delay"
+              attempt=$((attempt + 1))
+            done
+            if [[ $rc -ne 0 ]]; then
+              echo "::error::cosign failed after 3 attempts: $*" >&2
+              return "$rc"
+            fi
+          }
           python3 "$CI_DIR/plugin_manifest_builder.py" bundle-evidence             --source-manifest "$SOURCE_MANIFEST"             --oci-manifest "$RUNNER_TEMP/oci-manifest.json"             --bundle-digest "$ARTIFACT_DIGEST"             --source-repository "$GITHUB_REPOSITORY" --source-sha "$GITHUB_SHA"             --builder-id "$TRUSTED_BUILDER_ID" --run-id "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"             --output-sbom "$RUNNER_TEMP/bundle-sbom.json"             --output-provenance "$RUNNER_TEMP/bundle-provenance.json"
-          cosign sign --yes "$ARTIFACT_REF"
-          cosign attest --yes --predicate "$RUNNER_TEMP/bundle-sbom.json"             --type spdxjson "$ARTIFACT_REF"
-          cosign attest --yes --predicate "$RUNNER_TEMP/bundle-provenance.json"             --type slsaprovenance "$ARTIFACT_REF"
+          cosign_retry cosign sign --yes "$ARTIFACT_REF"
+          cosign_retry cosign attest --yes --predicate "$RUNNER_TEMP/bundle-sbom.json"             --type spdxjson "$ARTIFACT_REF"
+          cosign_retry cosign attest --yes --predicate "$RUNNER_TEMP/bundle-provenance.json"             --type slsaprovenance "$ARTIFACT_REF"
 
       - name: Verify signatures and all evidence before any release write
         id: quarantine_verify

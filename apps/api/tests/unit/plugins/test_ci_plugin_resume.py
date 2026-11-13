@@ -179,17 +179,19 @@ class ResumeFetchAndHelperContractTests(unittest.TestCase):
 
 
 class ResumeSkipConditionTests(unittest.TestCase):
-    def test_only_build_evidence_and_sign_steps_are_conditional(self) -> None:
+    def test_only_build_steps_are_conditional(self) -> None:
         workflow = _workflow()
-        for name in (
-            BACKEND_BUILD,
-            BACKEND_EVIDENCE,
-            BACKEND_SIGN,
-            BUNDLE_BUILD,
-            BUNDLE_SIGN,
-        ):
+        for name in (BACKEND_BUILD, BUNDLE_BUILD):
             with self.subTest(step=name):
                 self.assertIn(RESUME_CONDITION, _step_block(workflow, name))
+
+    def test_evidence_and_sign_steps_are_unconditional(self) -> None:
+        workflow = _workflow()
+        for name in (BACKEND_EVIDENCE, BACKEND_SIGN, BUNDLE_SIGN):
+            with self.subTest(step=name):
+                block = _step_block(workflow, name)
+                self.assertNotIn("resume_preflight", block)
+                self.assertIn("if: always()", block)
 
     def test_quarantine_verify_is_never_skipped(self) -> None:
         block = _step_block(_workflow(), QUARANTINE_VERIFY)
@@ -218,8 +220,57 @@ class ResumeSkipConditionTests(unittest.TestCase):
         self.assertIn("oras push", bundle)
         self.assertIn('"$QUAR_BUNDLE:sha-$GITHUB_SHA"', bundle)
         self.assertIn("--export-manifest", bundle)
-        self.assertIn('cosign sign --yes "$BACKEND_REF"', _step_block(workflow, BACKEND_SIGN))
-        self.assertIn('cosign sign --yes "$ARTIFACT_REF"', _step_block(workflow, BUNDLE_SIGN))
+        self.assertIn(
+            'cosign_retry cosign sign --yes "$BACKEND_REF"',
+            _step_block(workflow, BACKEND_SIGN),
+        )
+        self.assertIn(
+            'cosign_retry cosign sign --yes "$ARTIFACT_REF"',
+            _step_block(workflow, BUNDLE_SIGN),
+        )
+
+
+class ResumeCosignRetryTests(unittest.TestCase):
+    """Bounded retries exist only on cosign sign/attest, never on copy/verify."""
+
+    def test_retry_helper_is_bounded_and_set_e_safe(self) -> None:
+        for name in (BACKEND_SIGN, BUNDLE_SIGN):
+            with self.subTest(step=name):
+                block = _step_block(_workflow(), name)
+                self.assertEqual(block.count("cosign_retry() {"), 1)
+                self.assertIn('until "$@"; rc=$?; [[ $rc -eq 0 || $attempt -ge 3 ]]; do', block)
+                self.assertIn("local delay=$((attempt * 5))", block)
+                self.assertIn('sleep "$delay"', block)
+                self.assertIn('return "$rc"', block)
+
+    def test_each_sign_and_attest_uses_retry_helper(self) -> None:
+        backend = _step_block(_workflow(), BACKEND_SIGN)
+        for expected in (
+            'cosign_retry cosign sign --yes "$BACKEND_REF"',
+            'cosign_retry cosign attest --yes --predicate "$RUNNER_TEMP/backend-sbom.json"',
+            'cosign_retry cosign attest --yes --predicate "$RUNNER_TEMP/backend-provenance.json"',
+        ):
+            with self.subTest(step=BACKEND_SIGN, command=expected):
+                self.assertIn(expected, backend)
+        bundle = _step_block(_workflow(), BUNDLE_SIGN)
+        for expected in (
+            'cosign_retry cosign sign --yes "$ARTIFACT_REF"',
+            'cosign_retry cosign attest --yes --predicate "$RUNNER_TEMP/bundle-sbom.json"',
+            'cosign_retry cosign attest --yes --predicate "$RUNNER_TEMP/bundle-provenance.json"',
+        ):
+            with self.subTest(step=BUNDLE_SIGN, command=expected):
+                self.assertIn(expected, bundle)
+
+    def test_registry_copy_verify_and_evidence_have_no_cosign_retries(self) -> None:
+        workflow = _workflow()
+        for name in (BACKEND_EVIDENCE, QUARANTINE_VERIFY, PROMOTE, RELEASE_VERIFY):
+            with self.subTest(step=name):
+                block = _step_block(workflow, name)
+                self.assertNotIn("cosign_retry", block)
+                self.assertNotIn("sleep", block)
+        promote = _step_block(workflow, PROMOTE)
+        self.assertIn("cosign copy --only=sig,att", promote)
+        self.assertNotIn("cosign_retry cosign copy", promote)
 
 
 class ResumeDiscoveryTests(unittest.TestCase):
