@@ -71,6 +71,9 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: agentscale-mongodb
+  annotations:
+    argocd.argoproj.io/sync-wave: null
+    argocd.argoproj.io/skip-health-check: "true"
 spec:
   template:
     metadata:
