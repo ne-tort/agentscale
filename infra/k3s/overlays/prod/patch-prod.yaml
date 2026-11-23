@@ -73,6 +73,9 @@ metadata:
   name: agentscale-mongodb
 spec:
   template:
+    metadata:
+      annotations:
+        container.apparmor.security.beta.kubernetes.io/mongodb: unconfined
     spec:
       securityContext:
         runAsUser: 999

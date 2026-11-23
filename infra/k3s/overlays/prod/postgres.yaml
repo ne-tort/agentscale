@@ -33,6 +33,10 @@ spec:
       app: agentscale-postgres
   template:
     metadata:
+      annotations:
+        # This k3s/containerd profile incorrectly stacks unconfined exec
+        # children, which blocks postgres signals and breaks crash recovery.
+        container.apparmor.security.beta.kubernetes.io/postgres: unconfined
       labels:
         app: agentscale-postgres
         app.kubernetes.io/name: agentscale-postgres
