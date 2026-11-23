@@ -65,6 +65,57 @@ spec:
         - name: beat
           imagePullPolicy: IfNotPresent
 ---
+# MongoDB: avoid the same gosu hang as PostgreSQL. The official entrypoint
+# skips its root-only chown/gosu path when started as the image's mongodb user.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: agentscale-mongodb
+spec:
+  template:
+    spec:
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
+---
+# Redis broker: 19k expiring Celery result keys filled the 192mb maxmemory
+# during the database outage; workers then crashed on restore_visible with
+# OutOfMemoryError. Keep noeviction and the former 75% memory-limit ratio.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: agentscale-redis
+spec:
+  template:
+    spec:
+      containers:
+        - name: redis
+          args:
+            - redis-server
+            - --appendonly
+            - "yes"
+            - --appendfsync
+            - everysec
+            - --save
+            - "60"
+            - "1"
+            - --dir
+            - /data
+            - --maxmemory
+            - 384mb
+            - --maxmemory-policy
+            - noeviction
+            - --tcp-keepalive
+            - "60"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 512Mi
+---
 # Keycloak: prod owns hostPort 8099 (dev keycloak holds 8089 on the same node).
 apiVersion: apps/v1
 kind: StatefulSet
