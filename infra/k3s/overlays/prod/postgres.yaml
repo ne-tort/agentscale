@@ -23,7 +23,10 @@ metadata:
     app.kubernetes.io/part-of: agentscale
     app.kubernetes.io/component: postgres
   annotations:
-    argocd.argoproj.io/sync-wave: "0"
+    # Do not gate this Deployment's own recovery patch on its old pod's health:
+    # a failed database would otherwise make an Argo sync wait before applying
+    # the manifest which fixes that database.
+    argocd.argoproj.io/skip-health-check: "true"
 spec:
   replicas: 1
   strategy:
