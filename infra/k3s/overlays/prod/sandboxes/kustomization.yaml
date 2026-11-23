@@ -19,5 +19,16 @@ patches:
       - op: add
         path: /subjects/0/namespace
         value: agentscale
+  # get_status() extends the claim TTL with PATCH. Without this verb the
+  # periodic reconcile reports 403 even though the sandbox pod itself is Ready.
+  - target:
+      group: rbac.authorization.k8s.io
+      version: v1
+      kind: Role
+      name: agentscale-sandbox-claims
+    patch: |-
+      - op: add
+        path: /rules/0/verbs/-
+        value: patch
 transformers:
   - namespace-transformer.yaml
