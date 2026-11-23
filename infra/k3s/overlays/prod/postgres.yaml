@@ -38,7 +38,13 @@ spec:
         app.kubernetes.io/name: agentscale-postgres
     spec:
       terminationGracePeriodSeconds: 60
+      # The root entrypoint re-execs through gosu, which spins at 100% CPU on
+      # this host after the 2026-11-21 reboot and never starts postgres.
+      # Run as the image's postgres user so the entrypoint takes its non-root
+      # path and execs the server directly. Existing PVC files use UID/GID 999.
       securityContext:
+        runAsUser: 999
+        runAsGroup: 999
         fsGroup: 999
       containers:
         - name: postgres
